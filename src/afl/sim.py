@@ -43,7 +43,7 @@ class ClientEnv:
 
     def new_round(self, t: int) -> None:
         """Draw every random number this round will ever need, up front."""
-        rng = np.random.default_rng(hash((self.cfg.seed, t)) % (2 ** 32))
+        rng = np.random.default_rng([self.cfg.seed, t])
         self._round_rng = rng
         self._draw = {
             "available": rng.random(self.N) < self.cfg.system.availability_p,

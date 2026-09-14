@@ -24,7 +24,7 @@ class RandomPolicy(Policy):
 
     def act(self, state, t):
         K = min(self.cfg.fl.clients_per_round, self.cfg.data.num_clients)
-        sel = list(self.rng.choice(self.cfg.data.num_clients, size=K, replace=False))
+        sel = [int(i) for i in self.rng.choice(self.cfg.data.num_clients, size=K, replace=False)]
         return sel, {int(i): _default_mode(self.cfg) for i in sel}
 
 
@@ -39,7 +39,7 @@ class FedCSPolicy(Policy):
     def act(self, state, t):
         K = min(self.cfg.fl.clients_per_round, self.cfg.data.num_clients)
         p = np.array([state["p_succ"][i]["light"] for i in range(self.cfg.data.num_clients)])
-        sel = list(np.argsort(-p)[:K])
+        sel = [int(i) for i in np.argsort(-p)[:K]]
         return sel, {int(i): "light" for i in sel}
 
 

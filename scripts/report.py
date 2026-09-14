@@ -67,7 +67,7 @@ def main() -> int:
             vals = [st.mean([row[k] for row in r]) for r in runs]
             rec[f"mean_{k}"] = (st.mean(vals), st.stdev(vals) if len(vals) > 1 else 0.0)
         vals = [rounds_to_target(r, args.target) for r in runs]
-        good = [v for v in vals if v == v]
+        good = [v for v in vals if not math.isnan(v)]
         rec[f"rounds_to_{args.target:g}"] = (
             (st.mean(good), st.stdev(good) if len(good) > 1 else 0.0) if good else (float("nan"), 0.0))
         out_rows.append(rec)
