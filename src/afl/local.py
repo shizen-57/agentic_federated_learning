@@ -33,7 +33,7 @@ def local_train(cfg, global_flat: torch.Tensor, x: np.ndarray, y: np.ndarray,
             idx = perm[s:s + bs]
             opt.zero_grad()
             loss = F.cross_entropy(model(xb_all[idx]), yb_all[idx])
-            if cfg.fl.aggregator == "fedprox" and cfg.fl.mu > 0:
+            if cfg.fl.aggregator in ("fedprox", "fedprox_fednova") and cfg.fl.mu > 0:
                 prox = 0.0
                 off = 0
                 for p in model.parameters():

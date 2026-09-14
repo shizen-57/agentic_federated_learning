@@ -42,7 +42,7 @@ class FLCfg:
     lr: float = 0.05
     batch_size: int = 32
     mu: float = 0.01                    # FedProx proximal weight (Sec. 3.17)
-    aggregator: str = "fedprox"         # fedavg | fedprox | fednova
+    aggregator: str = "fedprox"         # fedavg | fedprox | fednova | fedprox_fednova
     model: str = "mlp"                  # mlp | cnn
     impute_missing: bool = False        # MIFA/MimiC-style post-hoc substitution
                                         # of a failed client's update with its

@@ -30,6 +30,12 @@ RUNS = [
     ("c2_rl_fedprox",       "rl",            "fedprox"),
     ("c3_rl_fednova",       "rl",            "fednova"),
     ("c4_heuristic_fedprox", "roundrobin",   "fedprox"),
+    # Added beyond Table 3.4's original 4 conditions: FedProx's local proximal
+    # term (drift control) and FedNova's server-side step-normalisation
+    # (objective-inconsistency correction) address different parts of the
+    # pipeline and are not mutually exclusive -- this tests whether combining
+    # them beats either alone.
+    ("c5_rl_fedprox_fednova", "rl",          "fedprox_fednova"),
     ("b_random",            "random",        "fedprox"),
     ("b_fedcs",             "fedcs",         "fedprox"),
     ("b_powerofchoice",     "powerofchoice", "fedprox"),

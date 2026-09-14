@@ -1,9 +1,18 @@
-"""Aggregation rules (Sec. 3.17): FedAvg, FedProx, FedNova.
+"""Aggregation rules (Sec. 3.17): FedAvg, FedProx, FedNova, and FedProx+FedNova.
 
 FedAvg and FedProx share the same server-side rule -- they differ only in the
 client objective -- so both land in `_weighted`. FedNova additionally normalises
 each update by the number of local steps it took, which is what removes the
 objective-inconsistency bias when clients are assigned different modes.
+
+FedProx and FedNova are not mutually exclusive: FedProx changes what happens
+during LOCAL training (the proximal term added in local.py, gated on
+cfg.fl.aggregator including "fedprox_fednova"); FedNova changes what happens
+at SERVER-SIDE aggregation (this file). Nothing stops running both -- drift
+control during local training, then step-normalised averaging on the result --
+so "fedprox_fednova" reuses the fednova branch below for the aggregation math
+and relies on local.py's gate for the proximal term. This is a fifth condition
+added beyond the four in Table 3.4, not a replacement for any of them.
 """
 from __future__ import annotations
 
@@ -33,7 +42,7 @@ def aggregate(rule: str, updates, n_i, steps, success_probs=None):
     if rule in ("fedavg", "fedprox"):
         return _weighted(updates, weights)
 
-    if rule == "fednova":
+    if rule in ("fednova", "fedprox_fednova"):
         w = torch.tensor(weights, dtype=torch.float32)
         w = w / w.sum()
         tau_eff = float(sum(wi * s for wi, s in zip(w, steps)))
