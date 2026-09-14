@@ -28,8 +28,8 @@ from .sim import ClientEnv
 LOG_FIELDS = [
     "round", "accuracy", "test_loss", "reward", "cost", "latency",
     "n_selected", "n_success", "fail_ratio", "arl_online", "arl_oracle",
-    "cv", "jain", "ece", "mode_light", "mode_standard", "mode_priority",
-    "wall_s",
+    "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
+    "mode_priority", "wall_s",
 ]
 
 
@@ -54,8 +54,9 @@ class Experiment:
         self.issued_round = np.zeros(self.N, dtype=int)
         self.local_loss = np.ones(self.N)     # refreshed lazily, see _refresh_losses
         self.gen = torch.Generator().manual_seed(cfg.seed + 3)
+        self.last_update: dict[int, torch.Tensor] = {}  # MIFA/MimiC substitution store
 
-        self.norm = {k: M.Normalizer() for k in ("acc", "cost", "lat", "arl")}
+        self.norm = {k: M.Normalizer() for k in ("acc", "cost", "lat", "arl", "faildmg")}
         self.cal_probs: list[float] = []
         self.cal_out: list[int] = []
         self.rows: list[dict] = []
@@ -190,8 +191,20 @@ class Experiment:
             if ok:
                 self.x_succ[i] += 1
                 self.since_success[i] = 0
+                self.last_update[i] = updates[-1].detach().clone()
             else:
                 self.since_success[i] += 1
+                # MIFA/MimiC-style post-hoc correction (Table 3.5): the client's
+                # own outcome is still recorded as a failure above -- this does
+                # not prevent anything or change fairness/ARL bookkeeping, it
+                # only patches the aggregation afterward with the client's last
+                # known-good update, so Table 3.5's prevention-vs-imputation
+                # question can be asked as a clean ablation against the same
+                # selection policy with imputation switched off.
+                if self.cfg.fl.impute_missing and i in self.last_update:
+                    updates.append(self.last_update[i])
+                    weights.append(self.d["n_i"][i])
+                    steps.append(1)
 
             # The predictor learns from every issued invitation, success or not.
             self.predictor.update(state["obs"][i], state["hist"][i], mode, int(ok))
@@ -212,20 +225,33 @@ class Experiment:
         latency = max(latencies) if latencies else 0.0
         arl_on = M.arl_online(values, state["eligible"], success)
         arl_or = M.arl_oracle(values, self.env, success)
-        cv = M.cv_fairness(self.x_succ)
+        cv = M.cv_fairness(self.x_succ)          # successful-contribution CV (core metric, Eq. 3.32)
+        cv_sel = M.cv_fairness(self.x_sel)        # raw-selection-count CV (Task 2 ablation comparator)
         n_succ = int(sum(success.values()))
+        fail_ratio = 1.0 - n_succ / max(len(selected), 1)
 
         # Now safe to apply this round's real energy spend -- after the oracle
         # diagnostic above has queried every client's pre-spend state.
         for i, mode in pending_spends:
             self.env.spend(i, mode)
 
+        # Task 1/2 ablations: swap the value-weighted counterfactual damage term
+        # for a naive raw failure count, and/or the capability-conditioned
+        # successful-contribution fairness for plain selection-count fairness,
+        # to test whether either of the thesis's two specific claims actually
+        # changes the learned policy's behaviour versus the naive alternative.
         r = self.cfg.reward
+        if r.damage_metric == "raw_fail":
+            damage_term = self.norm["faildmg"](fail_ratio)
+        else:
+            damage_term = self.norm["arl"](arl_on)
+        fairness_term = cv_sel if r.fairness_metric == "cv_selection" else cv
+
         reward = (r.alpha * self.norm["acc"](d_acc)
                   - r.beta * self.norm["cost"](round_cost)
                   - r.delta * self.norm["lat"](latency)
-                  - r.lambda_arl * self.norm["arl"](arl_on)
-                  - r.lambda_fair * cv)
+                  - r.lambda_arl * damage_term
+                  - r.lambda_fair * fairness_term)
         self.policy.observe_outcome(state, (selected, assign), reward,
                                     {"success": success})
 
@@ -233,9 +259,9 @@ class Experiment:
             "round": t, "accuracy": acc, "test_loss": test_loss, "reward": reward,
             "cost": round_cost, "latency": latency,
             "n_selected": len(selected), "n_success": n_succ,
-            "fail_ratio": 1.0 - n_succ / max(len(selected), 1),
+            "fail_ratio": fail_ratio,
             "arl_online": arl_on, "arl_oracle": arl_or,
-            "cv": cv, "jain": M.jain(self.x_succ),
+            "cv": cv, "cv_selection": cv_sel, "jain": M.jain(self.x_succ),
             "ece": M.calibration_error(self.cal_probs[-200:], self.cal_out[-200:]),
             "mode_light": mode_counts["light"],
             "mode_standard": mode_counts["standard"],

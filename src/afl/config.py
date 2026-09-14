@@ -44,6 +44,10 @@ class FLCfg:
     mu: float = 0.01                    # FedProx proximal weight (Sec. 3.17)
     aggregator: str = "fedprox"         # fedavg | fedprox | fednova
     model: str = "mlp"                  # mlp | cnn
+    impute_missing: bool = False        # MIFA/MimiC-style post-hoc substitution
+                                        # of a failed client's update with its
+                                        # last known successful delta (Table 3.5);
+                                        # tests prevention vs. imputation (Sec. 3.11)
 
 
 @dataclass
@@ -55,6 +59,11 @@ class RewardCfg:
     lambda_arl: float = 0.5
     lambda_fair: float = 0.3
     gamma: float = 0.95
+    # Ablation toggles, added to test whether the thesis's two specific claims
+    # (value-weighted counterfactual damage; capability-conditioned fairness)
+    # actually change behaviour versus the naive alternative each replaces.
+    damage_metric: str = "arl"          # "arl" | "raw_fail" -- Task 1 ablation
+    fairness_metric: str = "cv_success"  # "cv_success" | "cv_selection" -- Task 2 ablation
 
 
 @dataclass
