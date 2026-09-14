@@ -55,6 +55,11 @@ class ClientEnv:
         # Energy recharges a little each round; a client drained last round may
         # be back but weaker, which is what makes availability non-stationary.
         self.energy = np.minimum(self.energy_cap, self.energy + 0.25 * self.energy_cap)
+        # Snapshot for outcome()'s feasibility check (see there): every query
+        # this round, real or counterfactual, must see the same pre-spend
+        # energy regardless of how many spend() calls happen in between, or
+        # the ARL* oracle (Eq. 3.29) silently depends on call order.
+        self._energy_at_round_start = self.energy.copy()
 
     # ------------------------------------------------------------- mechanics
 
@@ -98,7 +103,7 @@ class ClientEnv:
         t_train, t_comm, energy = self.workload(i, mode)
         total = t_train + t_comm
 
-        if energy > self.energy[i]:
+        if energy > self._energy_at_round_start[i]:
             return dict(success=0, latency=total, reason="energy",
                         t_train=t_train, t_comm=t_comm)
         if d["drop"][i] > self.reliability[i]:

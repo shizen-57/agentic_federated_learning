@@ -12,6 +12,7 @@ import os
 import sys
 
 import numpy as np
+import pytest
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
@@ -38,6 +39,20 @@ def test_dirichlet_partition_is_disjoint_and_non_iid():
     parts = dirichlet_partition(y, 12, 0.2, seed=0, min_samples=40, max_samples=200)
     flat = np.concatenate(parts)
     assert len(flat) == len(set(flat.tolist())), "a sample was given to two clients"
+
+
+def test_partition_indices_are_shuffled_not_class_grouped():
+    """Regression: a client's index array must not be class-grouped, or a
+    prefix-based subsample (e.g. engine.py's local-loss probe) sees only the
+    client's first class instead of a representative mix.
+    """
+    y = np.tile(np.arange(10), 200)
+    parts = dirichlet_partition(y, 8, 0.3, seed=0, min_samples=100, max_samples=200)
+    multi_class = [p for p in parts if len(set(y[p].tolist())) > 3]
+    assert multi_class, "test setup should produce at least one multi-class client"
+    for p in multi_class:
+        prefix_classes = len(set(y[p[:20]].tolist()))
+        assert prefix_classes > 1, "the first 20 samples came from a single class"
     sk = class_sketch(y, parts, 10)
     # With alpha=0.2 clients should be far from the uniform 0.1-per-class mix.
     assert sk.max(axis=1).mean() > 0.4
@@ -105,6 +120,22 @@ def test_oracle_eligibility_implies_some_mode_succeeds():
             assert any(env.outcome(i, m)["success"] for m in cfg.system.modes)
 
 
+def test_spend_does_not_corrupt_the_oracle_for_the_same_round():
+    """Regression for the ARL* bug: querying oracle_eligible after a client's
+    own spend() must give the same answer as querying it before, since the
+    oracle asks what *could* have happened under the round's original state,
+    not the state left over after the client's real attempt already spent it.
+    """
+    cfg = _cfg()
+    env = ClientEnv(cfg, np.full(12, 300.0), seed=4)
+    env.new_round(1)
+    before = [env.oracle_eligible(i) for i in range(12)]
+    for i in range(12):
+        env.spend(i, "priority")  # the most energy-hungry mode
+    after = [env.oracle_eligible(i) for i in range(12)]
+    assert before == after, "a client's own spend must not change its own oracle answer this round"
+
+
 # ------------------------------------------------------------------- ARL
 
 def test_arl_only_counts_avoidable_failures():
@@ -114,6 +145,29 @@ def test_arl_only_counts_avoidable_failures():
     # 0 was eligible and failed (avoidable); 1 was not eligible (unavoidable);
     # 2 succeeded. Only 0 counts.
     assert M.arl_online(values, eligible, success) == 1.0
+
+
+def test_arl_counts_an_eligible_client_who_was_never_selected():
+    """Eq. (3.27) sums over the full client population C, not S_t: an eligible,
+    high-value client who was never invited has Y^succ = 0 by construction
+    (Eq. 3.16 requires i in S_t) and must still contribute to ARL'_t.
+    """
+    values = {0: 3.0, 1: 0.5}   # 1 was never selected this round
+    eligible = {0: 1, 1: 1}     # but the predictor says 1 could have succeeded
+    success = {0: 1}            # only 0 was selected and it succeeded; 1 absent
+    assert M.arl_online(values, eligible, success) == 0.5
+
+
+def test_per_client_representation_value_matches_eq_3_26():
+    sketch = np.eye(4)
+    selected = [0, 1]
+    vals = M.per_client_representation_value(sketch, selected)
+    # Client 2 holds an uncovered class: adding it to S_t would gain coverage.
+    assert vals[2] == pytest.approx(1.0)
+    # Client 0 is in S_t and uniquely covers its class: removing it loses
+    # exactly that coverage, so its value must match client 2's (symmetry of
+    # the marginal formula), not be zero just because it is already selected.
+    assert vals[0] == pytest.approx(vals[2])
 
 
 # ----------------------------------------------------------- aggregation

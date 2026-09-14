@@ -135,16 +135,16 @@ class Experiment:
         selected, assign = self.policy.act(state, t)
         self._refresh_losses(selected)
 
-        # Marginal representation value is computed in selection order, so the
-        # second holder of a rare class is correctly worth less than the first.
-        values: dict[int, float] = {}
-        acc_set: list[int] = []
-        for i in selected:
-            values[i] = M.representation_value(self.d["sketch"], acc_set, i)
-            acc_set.append(i)
+        # V^repr_{i,t}(S_t) for every client (Eq. 3.26), not only the selected
+        # ones: Eq. (3.27) sums ARL' over the full population C, so an
+        # eligible, high-value client who was never invited must still show up
+        # here with Y^succ = 0 via the success dict's default below.
+        rep_vals = M.per_client_representation_value(self.d["sketch"], selected)
+        values: dict[int, float] = {i: float(rep_vals[i]) for i in range(self.N)}
 
         updates, weights, steps, succ_p = [], [], [], []
         success: dict[int, int] = {}
+        pending_spends: list[tuple[int, str]] = []
         round_cost = 0.0
         latencies = []
         mode_counts = {m: 0 for m in self.cfg.system.modes}
@@ -160,7 +160,13 @@ class Experiment:
             round_cost += self.env.cost(i, mode)
             out = self.env.outcome(i, mode)
             latencies.append(out["latency"])
-            self.env.spend(i, mode)
+            # Energy spend is deferred until after the oracle diagnostic below
+            # is computed (Sec. 3.11, Eq. 3.29): applying it immediately would
+            # make a client's own real energy draw down before its own
+            # counterfactual is evaluated, so a client that genuinely could
+            # have succeeded under the pre-decision energy state gets
+            # incorrectly reported as oracle-ineligible.
+            pending_spends.append((i, mode))
 
             ok = out["success"] == 1
             if ok:
@@ -208,6 +214,11 @@ class Experiment:
         arl_or = M.arl_oracle(values, self.env, success)
         cv = M.cv_fairness(self.x_succ)
         n_succ = int(sum(success.values()))
+
+        # Now safe to apply this round's real energy spend -- after the oracle
+        # diagnostic above has queried every client's pre-spend state.
+        for i, mode in pending_spends:
+            self.env.spend(i, mode)
 
         r = self.cfg.reward
         reward = (r.alpha * self.norm["acc"](d_acc)

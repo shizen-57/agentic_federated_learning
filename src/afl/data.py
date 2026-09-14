@@ -109,7 +109,14 @@ def dirichlet_partition(y: np.ndarray, num_clients: int, alpha: float, seed: int
             c = int(rng.choice(classes))
             if pool[c]:
                 taken.append(pool[c].pop())
-        parts.append(np.array(taken, dtype=np.int64))
+        arr = np.array(taken, dtype=np.int64)
+        # `taken` is built by iterating classes in order, so it is class-grouped
+        # (all of class 0's samples, then class 1's, ...). Shuffle it here so
+        # any later code that takes a prefix of a client's partition (e.g. the
+        # local-loss probe in engine.py) sees a sample representative of the
+        # client's actual class mix rather than just its first class.
+        rng.shuffle(arr)
+        parts.append(arr)
     return parts
 
 

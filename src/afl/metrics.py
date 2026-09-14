@@ -23,14 +23,42 @@ def coverage(sketch_subset: np.ndarray) -> float:
 
 
 def representation_value(sketch: np.ndarray, selected: list[int], i: int) -> float:
-    """V^repr_{i,t}: client i's marginal coverage gain over the selected set.
+    """Marginal coverage gain of adding client i to a set that doesn't yet hold it.
 
     Computed against the set selected *so far*, so a rare-class holder scores
-    high while a redundant client scores near zero.
+    high while a redundant client scores near zero. This is the greedy-build
+    utility used when constructing a set incrementally; it is not the quantity
+    Eq. (3.26) needs for ARL -- see `per_client_representation_value` for that.
     """
     base = coverage(sketch[selected]) if selected else 0.0
     with_i = coverage(sketch[selected + [i]])
     return max(0.0, with_i - base)
+
+
+def per_client_representation_value(sketch: np.ndarray, selected: list[int]) -> np.ndarray:
+    """V^repr_{i,t}(S_t) for every client i in the population (Eq. 3.26).
+
+    S_t -- the round's actual selected set -- is held fixed here. For i in
+    S_t this is the coverage S_t would lose if i were removed; for i not in
+    S_t it is the coverage S_t would gain by adding i. Both cases are the
+    same formula, Cov(S_t u {i}) - Cov(S_t \\ {i}), computed uniformly below
+    via `rest = S_t \\ {i}`.
+
+    This must be evaluated for the *full* population, not only for i in S_t:
+    Eq. (3.27) explicitly sums ARL' over i in C, and the thesis text is
+    explicit about the consequence -- "an eligible, high-representation-value
+    client who was never selected also contributes to ARL'_t" (Sec. 3.11).
+    Restricting this to selected clients silently narrows what the metric
+    measures.
+    """
+    N = sketch.shape[0]
+    vals = np.zeros(N)
+    for i in range(N):
+        rest = [j for j in selected if j != i]
+        with_i = coverage(sketch[rest + [i]])
+        without_i = coverage(sketch[rest]) if rest else 0.0
+        vals[i] = max(0.0, with_i - without_i)
+    return vals
 
 
 def standalone_value(sketch: np.ndarray) -> np.ndarray:
