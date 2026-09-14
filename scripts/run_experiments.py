@@ -44,6 +44,11 @@ def main() -> int:
     ap.add_argument("--out", default="results")
     ap.add_argument("--only", nargs="*", help="restrict to these run tags")
     ap.add_argument("--force", action="store_true", help="re-run even if the CSV exists")
+    ap.add_argument("--tag-prefix", default="",
+                    help="prefix every run tag with this, e.g. 'n100_' for a "
+                         "different client population -- RUNS tags are shared "
+                         "across configs, so two sweeps at different scales "
+                         "collide and silently skip each other without one")
     args = ap.parse_args()
 
     base = _load(args.config)
@@ -51,7 +56,7 @@ def main() -> int:
 
     for seed in args.seeds:
         for tag, policy, agg in todo:
-            full = f"{tag}_s{seed}"
+            full = f"{args.tag_prefix}{tag}_s{seed}"
             path = os.path.join(args.out, f"{full}.csv")
             if os.path.exists(path) and not args.force:
                 print(f"skip {full} (exists)")
