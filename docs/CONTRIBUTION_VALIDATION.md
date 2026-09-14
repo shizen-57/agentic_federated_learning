@@ -122,17 +122,52 @@ Two more targeted searches, specifically on the two narrow claims:
   selection/outcome)**: found a close, very recent match --
   [Cumulative Utility Parity for Fair Federated Learning under Intermittent
   Client Participation](https://consensus.app/papers/details/a3d2c74ea53f577cb23d94681662a3a9/?utm_source=claude_desktop)
-  (Behfar et al., 2026, ArXiv preprint, 0 citations). Its stated goal --
-  "disentangles unavoidable physical constraints from avoidable algorithmic
-  bias arising from scheduling and aggregation" -- is close in spirit to the
-  thesis's opportunity-conditioned fairness. It is a 2026 preprint (likely
-  genuinely concurrent with this thesis), 0 citations, and its actual
-  mechanism has not been read in depth here. **Action needed**: read this
-  paper properly before submission and either (a) cite it as contemporaneous
-  related work and state the precise difference, or (b) if the mechanism
-  turns out to be materially the same, narrow the claim further or find a
-  different angle of difference (e.g., the combination with the oracle-CRN
-  damage metric, which this paper does not appear to have).
+  (Behfar & Mortier, arXiv:2602.13651, 14 Feb 2026, Cambridge).
+
+  **RESOLVED -- paper has now been read in full.** Correcting an earlier note
+  in this document: it is dated February 2026, i.e. roughly seven months
+  before this thesis is being finalised, so it is **prior art, not
+  concurrent work**, and must be cited.
+
+  What it actually does:
+  - Utility is the benefit the client *receives* -- operationally "the change
+    in per-client accuracy between consecutive rounds" -- not the contribution
+    the client makes. Opposite direction to this thesis's X^succ ledger.
+  - Its mechanism is *normalisation*: divide cumulative utility by the
+    client's empirical availability rate (u_k / pi_k), plus inverse-
+    availability sampling that provably equalises long-run selection
+    frequency. Not a feasibility gate, and no data-rarity weighting.
+  - Availability is **exogenous and stationary** by assumption (A_k(t) i.i.d.
+    Bernoulli with fixed mean pi_k). The server samples among whoever is
+    online; it cannot affect whether a client succeeds.
+  - Its Lemma 3 / Theorem 3 handle missing clients by **stale-surrogate
+    imputation** (substituting the last available update, with a staleness
+    bound) -- i.e. exactly the MIFA/MimiC family this thesis argues against.
+  - No RL, no per-client configuration assignment, no per-configuration
+    success prediction. Baselines: q-FFL and PHP-FL; 100 clients, 50 rounds.
+
+  **Consequences for the thesis:**
+  1. The general principle "do not charge a client for unavoidable absence,
+     and per-round fairness masks long-term under-representation" is now
+     established prior art and can no longer be claimed as novel. PHP-FL
+     (Wu et al., 2025), cited in their introduction as reweighting client
+     contributions by estimated participation likelihood, is a second
+     prior-art hit this thesis currently does not cite either. **Cite both.**
+  2. The surviving, sharper distinction: prior availability-aware fairness
+     treats availability as **exogenous** and corrects for it statistically
+     after the fact. This thesis treats feasibility as partly **endogenous to
+     the server's own configuration decision** -- a client that would have
+     succeeded under Light but was assigned Priority was not "unavailable,"
+     the scheduler broke it. That concept has no counterpart in their model.
+     Claim 2 should be reframed around this, not around the generic
+     avoidable/unavoidable split.
+  3. Their Lemma 3 is the imputation approach this thesis opposes, and Task 3
+     above provides the empirical contrast directly (imputation: faster early
+     convergence, worse and far more variable final accuracy). Their own
+     mechanism can be cited as a tested-and-beaten baseline.
+  4. Claim 1 (value-weighted, oracle-relative counterfactual damage) is
+     untouched by this paper -- it neither weights by data rarity nor
+     constructs a counterfactual. It remains the cleaner of the two claims.
 
 ## Task 5: the honest overall verdict
 
