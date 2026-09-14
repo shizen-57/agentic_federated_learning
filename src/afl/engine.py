@@ -124,6 +124,7 @@ class Experiment:
             "t_expected": t_expected, "n_i": self.d["n_i"],
             "local_loss": self.local_loss,
             "repr_value": M.standalone_value(self.d["sketch"]),
+            "sketch": self.d["sketch"],
         }
 
     # --------------------------------------------------------------- round

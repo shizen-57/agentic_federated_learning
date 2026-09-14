@@ -1,5 +1,5 @@
 from .baselines import (RandomPolicy, FedCSPolicy, PowerOfChoicePolicy, OortPolicy,
-                        RoundRobinPolicy)
+                        RoundRobinPolicy, FedCERPolicy)
 from .rl import RLPolicy
 
 REGISTRY = {
@@ -8,6 +8,7 @@ REGISTRY = {
     "powerofchoice": PowerOfChoicePolicy,
     "oort": OortPolicy,
     "roundrobin": RoundRobinPolicy,
+    "fedcer": FedCERPolicy,
     "rl": RLPolicy,
 }
 

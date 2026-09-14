@@ -8,11 +8,63 @@ from __future__ import annotations
 
 import numpy as np
 
+from .. import metrics as M
 from .base import Policy
 
 
 def _default_mode(cfg) -> str:
     return "standard"
+
+
+class FedCERPolicy(Policy):
+    """Submodular-diverse selection + greedy per-client epoch configuration.
+
+    A simplified but faithful stand-in for FedCER [6]/FedCG [27] -- the
+    closest published joint selection-and-configuration competitor named in
+    Table 3.5. It has no learning and no fairness or success-prediction
+    mechanism, so any advantage the proposed RL system shows over it is
+    attributable to those two things specifically, not to "does joint
+    selection+configuration help at all" (which this baseline already does).
+
+    Selection: greedy submodular maximization over the same class-coverage
+    function as Sec. 3.11 (Eq. 3.25) -- iteratively add whichever remaining
+    client gives the largest marginal coverage gain, the standard DivFL/FedCER
+    construction, in place of the linear-programming relaxation those papers
+    use for the same greedy-submodular selection problem.
+    Configuration: assign each selected client the richest mode (Priority >
+    Standard > Light) whose predicted time fits its deadline given observed
+    speed/bandwidth -- a greedy proxy for FedCER's per-client epoch LP that
+    needs no gradient information, matching what a real deployed heuristic
+    could compute from the same descriptors the proposed system observes.
+    """
+
+    def act(self, state, t):
+        N = self.cfg.data.num_clients
+        K = min(self.cfg.fl.clients_per_round, N)
+        sketch = state["sketch"]
+
+        remaining = list(range(N))
+        selected: list[int] = []
+        for _ in range(K):
+            vals = M.per_client_representation_value(sketch, selected)
+            best = max(remaining, key=lambda i: vals[i])
+            selected.append(best)
+            remaining.remove(best)
+
+        assign = {}
+        for i in selected:
+            obs = state["obs"][i]
+            for mode in ("priority", "standard", "light"):
+                epochs = self.cfg.system.local_epochs[mode]
+                frac = self.cfg.system.upload_frac[mode]
+                t_est = (epochs / max(obs["speed_hat"], 1e-3)
+                        + 0.25 * frac / max(obs["bw_hat"], 1e-3))
+                if t_est <= self.cfg.system.deadline:
+                    assign[i] = mode
+                    break
+            else:
+                assign[i] = "light"
+        return selected, assign
 
 
 class RoundRobinPolicy(Policy):
