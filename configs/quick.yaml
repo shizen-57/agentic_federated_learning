@@ -1,0 +1,17 @@
+# Smoke test: synthetic data, runs in well under a minute on a laptop CPU.
+# Use this to check that a code change did not break the round loop before
+# spending real compute on MNIST.
+tag: quick
+seed: 0
+out: results
+data:
+  dataset: synthetic
+  num_clients: 20
+  dirichlet_alpha: 0.3
+fl:
+  rounds: 15
+  clients_per_round: 5
+  aggregator: fedprox
+  model: mlp
+policy:
+  name: rl

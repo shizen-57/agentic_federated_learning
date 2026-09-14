@@ -1,0 +1,7 @@
+# Deliberately minimal. Everything here is preinstalled on Colab and Kaggle, so
+# a notebook can clone this repo and run without a pip install step.
+torch>=2.0
+numpy>=1.24
+pyyaml>=6.0
+matplotlib>=3.7
+pytest>=7.0

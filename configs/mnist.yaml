@@ -1,0 +1,29 @@
+# The configuration the thesis numbers should come from.
+# 30 clients x 100 rounds x 5 selected: roughly 10-20 min on a free-tier CPU,
+# a few minutes on a Colab T4. Run all seeds before reporting anything.
+tag: mnist_rl_fedprox
+seed: 0
+out: results
+data:
+  dataset: mnist
+  num_clients: 30
+  dirichlet_alpha: 0.3
+  min_samples: 100
+  max_samples: 900
+fl:
+  rounds: 100
+  clients_per_round: 5
+  lr: 0.05
+  batch_size: 32
+  mu: 0.01
+  aggregator: fedprox
+  model: cnn
+reward:
+  alpha: 1.0
+  beta: 0.1
+  delta: 0.1
+  lambda_arl: 0.5
+  lambda_fair: 0.3
+policy:
+  name: rl
+  elig_threshold: 0.5
