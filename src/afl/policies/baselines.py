@@ -15,6 +15,30 @@ def _default_mode(cfg) -> str:
     return "standard"
 
 
+class RoundRobinPolicy(Policy):
+    """Deterministic rotation, fixed Standard mode: Condition 4 of Table 3.4.
+
+    No utility signal, no learning, no adaptivity in either selection or
+    configuration -- as close to "no intelligence at all" as a working
+    scheduler can be. This is deliberately kept distinct from every Table 3.5
+    external baseline (all of which use some utility or system signal), so
+    that Condition 4 isolates the benefit of RL-based orchestration itself
+    (Table 3.4's stated purpose) rather than duplicating one of the Table 3.5
+    comparisons under a different name.
+    """
+
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self._cursor = 0
+
+    def act(self, state, t):
+        N = self.cfg.data.num_clients
+        K = min(self.cfg.fl.clients_per_round, N)
+        sel = [(self._cursor + j) % N for j in range(K)]
+        self._cursor = (self._cursor + K) % N
+        return sel, {i: _default_mode(self.cfg) for i in sel}
+
+
 class RandomPolicy(Policy):
     """Uniform random sampling: the lower-bound reference."""
 

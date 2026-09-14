@@ -29,7 +29,7 @@ RUNS = [
     ("c1_rl_fedavg",        "rl",            "fedavg"),
     ("c2_rl_fedprox",       "rl",            "fedprox"),
     ("c3_rl_fednova",       "rl",            "fednova"),
-    ("c4_heuristic_fedprox", "oort",         "fedprox"),
+    ("c4_heuristic_fedprox", "roundrobin",   "fedprox"),
     ("b_random",            "random",        "fedprox"),
     ("b_fedcs",             "fedcs",         "fedprox"),
     ("b_powerofchoice",     "powerofchoice", "fedprox"),
