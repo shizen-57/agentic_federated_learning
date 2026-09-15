@@ -30,7 +30,14 @@ class SystemCfg:
     deadline: float = 1.0               # tau_{i,t}, normalised round deadline
     cost_max: float = 1e9               # C_max  (Eq. 3.64); effectively off by default
     latency_max: float = 1e9            # L_max  (Eq. 3.65)
-    availability_p: float = 0.85        # P(A_{i,t} = 1)
+    availability_p: float = 0.85        # mean of P(A_{i,t}=1) over a full diurnal cycle
+    diurnal_amplitude: float = 0.35     # swing of availability around the mean across
+                                        # the day (Hard et al. 2018, arXiv:1812.02903:
+                                        # real device availability is concentrated
+                                        # overnight while charging/idle/on WiFi, and
+                                        # "round completion around noon is nearly flat")
+    rounds_per_day: int = 96            # modeling assumption: ~15 min/round -> 96
+                                        # rounds/day, so a 100-round run spans ~1 day
     staleness_max: int = 1              # acceptance rule (Eq. 3.18)
     norm_clip: float = 10.0             # acceptance rule (Eq. 3.18)
 

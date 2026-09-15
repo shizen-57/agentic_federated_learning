@@ -69,6 +69,20 @@ def test_coverage_is_submodular():
     assert rare > 0, "a client holding an uncovered class must add value"
 
 
+def test_availability_follows_a_diurnal_cycle():
+    """Regression for the real-world calibration: availability must actually
+    swing with time of day (peaking overnight, dipping around midday per
+    Hard et al. 2018), not stay flat like the old per-round coin flip did.
+    """
+    cfg = _cfg(data={"num_clients": 30})
+    env = ClientEnv(cfg, np.full(30, 200.0), seed=0)
+    night_p = env.availability_prob(t=4).mean()   # ~1am, clustered peak-hour window
+    noon_p = env.availability_prob(t=48).mean()   # ~12pm, the reported midday dip
+    assert night_p > noon_p + 0.15, "availability must be clearly higher overnight than at noon"
+    # Per-client phase must actually differ (not every client sharing one clock).
+    assert len(set(np.round(env.peak_hour, 1))) > 1
+
+
 def test_cv_sign_convention():
     even = M.cv_fairness(np.array([4.0, 4.0, 4.0]))
     skewed = M.cv_fairness(np.array([12.0, 0.0, 0.0]))

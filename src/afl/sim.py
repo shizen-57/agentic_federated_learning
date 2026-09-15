@@ -13,6 +13,26 @@ action is chosen. That is the common-random-numbers construction the thesis
 requires for ARL* (Eq. 3.29): asking "what would client i have done under
 Priority instead of Light?" re-uses the same jitter and channel draw, so the
 counterfactual differs only by the decision, never by luck.
+
+Calibration against real FL deployments. This remains a simulation -- it is
+not a replay of a published trace file and not a deployment on physical
+devices -- but two of its mechanisms are shaped to match specific, cited
+measurements from real FL systems rather than picked arbitrarily:
+
+- Availability follows a diurnal (day/night) cycle, not a flat per-round coin
+  flip. Real device eligibility (charging + idle + unmetered network) is
+  concentrated overnight; Hard et al. 2018 (Google's applied Gboard FL system,
+  arXiv:1812.02903) report that round completion is "nearly flat" around noon
+  and that the cycle's phase, shape, and amplitude vary per device (by
+  timezone/demographics/usage pattern) -- both properties are implemented
+  below via a per-client phase offset and amplitude scale on top of a shared
+  cosine cycle.
+- Device speed/bandwidth/reliability are drawn from a small number of
+  heavy-tailed tiers rather than a single homogeneous value. This mirrors the
+  qualitative shape of the trace-driven simulation approach used by FedScale
+  and Oort (Lai et al., NSDI 2021 / ICML 2022), which calibrate device
+  heterogeneity from real measured smartphone benchmarks (AI Benchmark)
+  rather than assuming identical clients.
 """
 from __future__ import annotations
 
@@ -35,9 +55,37 @@ class ClientEnv:
         self.energy_cap = np.array([0.4, 1.0, 2.5])[tier] * rng.uniform(0.8, 1.2, self.N)
         self.tier = tier
 
+        # Diurnal availability profile: each client gets its own peak hour and
+        # amplitude scale, matching Hard et al. 2018's finding that the cycle's
+        # phase/shape/amplitude differ per device (timezone, demographics,
+        # usage pattern) rather than every client sharing one global clock.
+        # Peak hours cluster around a shared overnight-charging window (~3am)
+        # rather than spreading uniformly across the day: real clients in one
+        # deployment mostly charge overnight in their own local time, with
+        # modest per-client spread (timezone, habits) rather than a totally
+        # random phase -- a uniform spread would average out to a flat
+        # population-level curve and lose the very midday dip Hard et al.
+        # report.
+        self.peak_hour = np.mod(rng.normal(3.0, 3.0, self.N), 24.0)
+        self.amplitude_scale = np.clip(rng.normal(1.0, 0.25, self.N), 0.3, 1.6)
+
         self._round_rng: np.random.Generator | None = None
         self._draw: dict | None = None
         self.energy = self.energy_cap.copy()
+
+    def availability_prob(self, t: int) -> np.ndarray:
+        """P(A_{i,t}=1) for every client: a per-client diurnal cosine cycle.
+
+        Round t maps to an hour-of-day via rounds_per_day; each client's
+        probability oscillates around the configured mean with its own peak
+        hour and amplitude, clipped to a sane range so the mean stays
+        controllable via system.availability_p.
+        """
+        sysc = self.cfg.system
+        hour = 24.0 * (t % sysc.rounds_per_day) / sysc.rounds_per_day
+        phase = 2 * np.pi * (hour - self.peak_hour) / 24.0
+        wave = sysc.diurnal_amplitude * self.amplitude_scale * np.cos(phase)
+        return np.clip(sysc.availability_p + wave, 0.03, 0.99)
 
     # ------------------------------------------------------------------ round
 
@@ -46,7 +94,7 @@ class ClientEnv:
         rng = np.random.default_rng([self.cfg.seed, t])
         self._round_rng = rng
         self._draw = {
-            "available": rng.random(self.N) < self.cfg.system.availability_p,
+            "available": rng.random(self.N) < self.availability_prob(t),
             "compute_jitter": rng.lognormal(0.0, 0.35, self.N),
             "channel": rng.lognormal(0.0, 0.45, self.N),
             "drop": rng.random(self.N),          # upload / link failure roll
