@@ -153,7 +153,8 @@ def main() -> int:
               f"{r['diff']:+.4f} | [{r['ci_lo']:+.4f}, {r['ci_hi']:+.4f}] | "
               f"{r['p']:.4f} | {r['p_holm']:.4f} | {r['verdict']} |")
 
-    path = os.path.join(args.dir, f"stats_{args.ref}.csv")
+    suffix = ("_onesided" if args.one_sided else "") + ("_vs_" + "_".join(args.vs) if args.vs else "")
+    path = os.path.join(args.dir, f"stats_{args.ref}{suffix}.csv")
     with open(path, "w", newline="") as fh:
         cols = ["metric", "other", "n", "ref_mean", "other_mean", "diff", "ci_lo", "ci_hi",
                 "p", "p_holm", "verdict"]
