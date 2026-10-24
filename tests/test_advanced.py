@@ -225,3 +225,37 @@ def test_sign_flip_p_is_exact_and_holm_is_monotone():
     assert sign_flip_p(np.array([1.0, -1.0, 1.0, -1.0])) == pytest.approx(1.0)
     adj = holm([0.01, 0.04, 0.03])
     assert adj == pytest.approx([0.03, 0.06, 0.06])
+
+
+# ------------------------------------------------------- CIFAR local copy
+
+def _write_fake_cifar(d, n=8, seed=0):
+    rng = np.random.default_rng(seed)
+    os.makedirs(d, exist_ok=True)
+    for name in [f"data_batch_{i}" for i in range(1, 6)] + ["test_batch"]:
+        with open(os.path.join(d, name), "wb") as fh:
+            pickle.dump({b"data": rng.integers(0, 256, (n, 3072), dtype=np.uint8),
+                         b"labels": [int(v) for v in rng.integers(0, 10, n)]}, fh, protocol=2)
+
+
+def test_cifar_is_built_from_a_local_batch_directory(tmp_path):
+    from afl.data import _cifar_cache, _find_cifar_dir, load_cifar10
+    root = str(tmp_path)
+    _write_fake_cifar(os.path.join(root, "cifar-10-batches-py"))
+    assert _find_cifar_dir(root) == os.path.join(root, "cifar-10-batches-py")
+    z = np.load(_cifar_cache(root))
+    assert z["xtr"].shape == (40, 3072) and z["ytr"].shape == (40,)
+    assert z["xte"].shape == (8, 3072) and z["xtr"].dtype == np.uint8
+    xtr, ytr, xte, yte = load_cifar10(root)
+    assert xtr.shape == (40, 3072) and xtr.dtype == np.float32 and yte.shape == (8,)
+
+
+def test_cifar_local_search_ignores_incomplete_directories(tmp_path):
+    from afl.data import _find_cifar_dir
+    os.makedirs(tmp_path / "cifar-10-batches-py")
+    (tmp_path / "cifar-10-batches-py" / "data_batch_1").write_bytes(b"x")
+    assert _find_cifar_dir(str(tmp_path)) is not None   # presence of batch 1 in root is accepted...
+    # ...but loading it must fail loudly rather than silently using bad data
+    from afl.data import _cifar_from_dir
+    with pytest.raises(Exception):
+        _cifar_from_dir(str(tmp_path / "cifar-10-batches-py"))

@@ -149,6 +149,13 @@ background with *Save & Run All*, stops starting new runs before Kaggle's
 machine, and continues an unfinished group in the next session from the
 previous version's output. Its first cell lists a suggested 8-session plan.
 `notebooks/run_sweep.ipynb` is the simpler Colab version.
+
+**CIFAR-10 on Kaggle: attach a dataset.** The official download server
+(Toronto) can take 20+ minutes for 170 MB. In the notebook's right panel use
+*Add Input -> Datasets*, search "cifar10 python" and add one containing
+`data_batch_1`...`data_batch_5` and `test_batch`; `afl.data` finds it under
+`/kaggle/input` and builds the same arrays as the official download (checked:
+bit-identical), so results are comparable whichever source is used.
 GPU speed-ups were not measured (no GPU was available while building this);
 expect most of the gain on CIFAR-10, since the simulator, predictor and policy
 run on the CPU either way.

@@ -18,6 +18,7 @@ its non-IID-ness comes from real people, not from an artificial Dirichlet draw.
 """
 from __future__ import annotations
 
+import glob
 import gzip
 import io
 import os
@@ -47,6 +48,19 @@ CIFAR_STD = np.array([0.2470, 0.2435, 0.2616], dtype=np.float32)
 FEMNIST_FILES = ("femnist_x.npy", "femnist_y.npy", "femnist_writer.npy")
 
 
+def _progress_hook(name: str):
+    state = {"next": 0}
+
+    def hook(blocks: int, block_size: int, total: int) -> None:
+        if total <= 0:
+            return
+        pct = min(100, int(100 * blocks * block_size / total))
+        if pct >= state["next"]:
+            print(f"  downloading {name}: {pct}% of {total / 1e6:.0f} MB", flush=True)
+            state["next"] = pct + 10
+    return hook
+
+
 def _download(name: str, root: str, bases: list[str] = MNIST_URLS) -> str:
     os.makedirs(root, exist_ok=True)
     path = os.path.join(root, name)
@@ -56,7 +70,7 @@ def _download(name: str, root: str, bases: list[str] = MNIST_URLS) -> str:
     tmp = path + ".part"
     for base in bases:
         try:
-            urllib.request.urlretrieve(base + name, tmp)
+            urllib.request.urlretrieve(base + name, tmp, _progress_hook(name))
             os.replace(tmp, path)
             return path
         except Exception as exc:  # pragma: no cover - network dependent
@@ -101,25 +115,72 @@ class _ArrayOnlyUnpickler(pickle.Unpickler):
         return super().find_class(module, name)
 
 
+def _unpickle_batch(raw: bytes):
+    d = _ArrayOnlyUnpickler(io.BytesIO(raw), encoding="bytes").load()
+    return (np.asarray(d[b"data"], dtype=np.uint8), np.asarray(d[b"labels"], dtype=np.int64))
+
+
+def _assemble_cifar(batches: dict) -> dict:
+    return {
+        "xtr": np.concatenate([batches[f"data_batch_{i}"][0] for i in range(1, 6)]),
+        "ytr": np.concatenate([batches[f"data_batch_{i}"][1] for i in range(1, 6)]),
+        "xte": batches["test_batch"][0], "yte": batches["test_batch"][1],
+    }
+
+
+def _cifar_from_dir(d: str) -> dict:
+    """Read the six official python batch files from a directory."""
+    names = [f"data_batch_{i}" for i in range(1, 6)] + ["test_batch"]
+    out = {}
+    for n in names:
+        with open(os.path.join(d, n), "rb") as fh:
+            out[n] = _unpickle_batch(fh.read())
+    return _assemble_cifar(out)
+
+
+def _find_cifar_dir(root: str) -> str | None:
+    """A directory holding the official python batches, if one is already here.
+
+    Looks in ``root`` (an unpacked ``cifar-10-batches-py``) and, on Kaggle, in
+    any attached dataset under /kaggle/input -- much faster than downloading
+    from Toronto, whose server can take 20+ minutes.
+    """
+    here = os.path.join(root, "cifar-10-batches-py")
+    if os.path.exists(os.path.join(here, "data_batch_1")):
+        return here
+    if os.path.isdir("/kaggle/input"):
+        for hit in sorted(glob.glob("/kaggle/input/**/data_batch_1", recursive=True)):
+            d = os.path.dirname(hit)
+            if all(os.path.exists(os.path.join(d, n))
+                   for n in [f"data_batch_{i}" for i in range(2, 6)] + ["test_batch"]):
+                return d
+    return None
+
+
 def _cifar_cache(root: str) -> str:
-    """Extract the official tarball once into an uncompressed uint8 .npz."""
+    """Build the uncompressed uint8 .npz once, from a local copy or the official tarball."""
     cache = os.path.join(root, "cifar10_uint8.npz")
     if os.path.exists(cache):
         return cache
-    tar_path = _download(CIFAR_FILE, root, CIFAR_URLS)
-    batches = {}
-    with tarfile.open(tar_path, "r:gz") as tf:
-        for m in tf.getmembers():
-            base = os.path.basename(m.name)
-            if base.startswith("data_batch_") or base == "test_batch":
-                raw = _ArrayOnlyUnpickler(io.BytesIO(tf.extractfile(m).read()),
-                                          encoding="bytes").load()
-                batches[base] = (np.asarray(raw[b"data"], dtype=np.uint8),
-                                 np.asarray(raw[b"labels"], dtype=np.int64))
-    xtr = np.concatenate([batches[f"data_batch_{i}"][0] for i in range(1, 6)])
-    ytr = np.concatenate([batches[f"data_batch_{i}"][1] for i in range(1, 6)])
+    os.makedirs(root, exist_ok=True)
+    local = _find_cifar_dir(root)
+    if local:
+        print(f"CIFAR-10: using the copy found at {local}", flush=True)
+        arrays = _cifar_from_dir(local)
+    else:
+        print("CIFAR-10: no local copy found, downloading from the official site "
+              "(can be slow; on Kaggle, add a 'cifar10-python' dataset as input instead)",
+              flush=True)
+        tar_path = _download(CIFAR_FILE, root, CIFAR_URLS)
+        batches = {}
+        with tarfile.open(tar_path, "r:gz") as tf:
+            for m in tf.getmembers():
+                base = os.path.basename(m.name)
+                if base.startswith("data_batch_") or base == "test_batch":
+                    batches[base] = _unpickle_batch(tf.extractfile(m).read())
+        arrays = _assemble_cifar(batches)
     tmp = cache + ".part.npz"
-    np.savez(tmp, xtr=xtr, ytr=ytr, xte=batches["test_batch"][0], yte=batches["test_batch"][1])
+    np.savez(tmp, **arrays)
     os.replace(tmp, cache)
     return cache
 
