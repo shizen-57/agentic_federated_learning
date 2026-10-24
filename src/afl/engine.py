@@ -350,7 +350,6 @@ class Experiment:
     def save(self) -> str:
         os.makedirs(self.cfg.out, exist_ok=True)
         path = os.path.join(self.cfg.out, f"{self.cfg.tag}.csv")
-        self.cfg.dump(os.path.join(self.cfg.out, f"{self.cfg.tag}.config.json"))
         # Write-then-rename: the sweep runners skip any run whose CSV exists,
         # so a session killed mid-write must not leave a truncated one behind.
         tmp = path + ".part"
@@ -359,4 +358,5 @@ class Experiment:
             wr.writeheader()
             wr.writerows(self.rows)
         os.replace(tmp, path)
+        self.cfg.dump(os.path.join(self.cfg.out, f"{self.cfg.tag}.config.json"))
         return path
