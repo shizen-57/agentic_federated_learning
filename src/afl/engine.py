@@ -26,11 +26,17 @@ from .predictor import SuccessPredictor
 from .sim import ClientEnv
 
 LOG_FIELDS = [
-    "round", "accuracy", "test_loss", "reward", "cost", "latency",
+    "round", "accuracy", "acc_worst10", "test_loss", "reward", "cost", "latency",
     "n_selected", "n_success", "fail_ratio", "arl_online", "arl_oracle",
     "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
-    "mode_priority", "wall_s",
+    "mode_priority", "weak_selected", "weak_success", "wall_s",
 ]
+
+
+def _device(name: str) -> torch.device:
+    if name == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(name)
 
 
 class Experiment:
@@ -41,11 +47,26 @@ class Experiment:
 
         self.d = build_data(cfg)
         self.N = cfg.data.num_clients
-        self.env = ClientEnv(cfg, self.d["n_i"], cfg.seed)
+        self.env = ClientEnv(cfg, self.d["n_i"], cfg.seed, sketch=self.d["sketch"])
         self.predictor = SuccessPredictor(cfg)
         self.policy = build_policy(cfg)
 
-        self.model = build_model(cfg, self.d["dim"], self.d["num_classes"])
+        # Data lives on the training device once, so a GPU run does not copy a
+        # client's samples across the bus every time it is selected.
+        self.dev = _device(cfg.fl.device)
+        self.x_train = torch.from_numpy(self.d["x_train"]).to(self.dev)
+        self.y_train = torch.from_numpy(self.d["y_train"]).to(self.dev)
+        self.part_idx = [torch.from_numpy(p).to(self.dev) for p in self.d["parts"]]
+        self.x_test = torch.from_numpy(self.d["x_test"]).to(self.dev)
+        self.y_test = torch.from_numpy(self.d["y_test"]).to(self.dev)
+        n_test = len(self.d["y_test"])
+        self.eval_idx = None
+        if 0 < cfg.fl.eval_subset < n_test:
+            pick = np.random.default_rng(cfg.seed + 5).choice(n_test, cfg.fl.eval_subset,
+                                                             replace=False)
+            self.eval_idx = torch.from_numpy(np.sort(pick)).to(self.dev)
+
+        self.model = build_model(cfg, self.d["dim"], self.d["num_classes"]).to(self.dev)
         self.global_flat = get_flat(self.model)
 
         self.x_succ = np.zeros(self.N)
@@ -60,12 +81,13 @@ class Experiment:
         self.cal_probs: list[float] = []
         self.cal_out: list[int] = []
         self.rows: list[dict] = []
+        self._prev_acc_r: float | None = None
 
     # ------------------------------------------------------------ helpers
 
     def _client_xy(self, i: int):
-        idx = self.d["parts"][i]
-        return self.d["x_train"][idx], self.d["y_train"][idx]
+        idx = self.part_idx[i]
+        return self.x_train[idx], self.y_train[idx]
 
     def _refresh_losses(self, clients: list[int]) -> None:
         """Update the cached local loss for the clients we are about to touch.
@@ -82,19 +104,42 @@ class Experiment:
                 x, y = self._client_xy(i)
                 if len(y) == 0:
                     continue
-                out = self.model(torch.from_numpy(x[:128]))
-                self.local_loss[i] = float(F.cross_entropy(out, torch.from_numpy(y[:128])))
+                out = self.model(x[:128])
+                self.local_loss[i] = float(F.cross_entropy(out, y[:128]))
 
-    def _evaluate(self) -> tuple[float, float]:
+    def _evaluate(self, full: bool = True) -> tuple[float, float, float]:
+        """Accuracy, loss, and mean accuracy over the worst 10% of classes.
+
+        The worst-classes number is what representation loss should move: if a
+        policy keeps losing the clients that hold rare classes, overall accuracy
+        can stay high while those classes are never learned. For 10 classes it
+        is the single worst class.
+        """
         set_flat(self.model, self.global_flat)
         self.model.eval()
-        x = torch.from_numpy(self.d["x_test"])
-        y = torch.from_numpy(self.d["y_test"])
+        x, y = self.x_test, self.y_test
+        if not full and self.eval_idx is not None:
+            x, y = x[self.eval_idx], y[self.eval_idx]
+        C = self.d["num_classes"]
+        loss_sum, correct = 0.0, 0
+        per_class_ok = torch.zeros(C, device=self.dev)
+        per_class_n = torch.zeros(C, device=self.dev)
         with torch.no_grad():
-            out = self.model(x)
-            loss = float(F.cross_entropy(out, y))
-            acc = float((out.argmax(1) == y).float().mean())
-        return acc, loss
+            # Batched so a CIFAR-sized test set fits in memory on CPU.
+            for s in range(0, len(y), 2048):
+                out = self.model(x[s:s + 2048])
+                yb = y[s:s + 2048]
+                loss_sum += float(F.cross_entropy(out, yb, reduction="sum"))
+                ok = (out.argmax(1) == yb).float()
+                correct += int(ok.sum())
+                per_class_ok.index_add_(0, yb, ok)
+                per_class_n.index_add_(0, yb, torch.ones_like(ok))
+        n = max(len(y), 1)
+        seen = per_class_n > 0
+        cls_acc = (per_class_ok[seen] / per_class_n[seen]).cpu().numpy()
+        k = max(1, int(round(0.1 * len(cls_acc))))
+        worst = float(np.sort(cls_acc)[:k].mean()) if len(cls_acc) else 0.0
+        return correct / n, loss_sum / n, worst
 
     def _state(self, t: int) -> dict:
         obs = {i: self.env.observe(i) for i in range(self.N)}
@@ -216,9 +261,16 @@ class Experiment:
         if delta is not None:
             self.global_flat = self.global_flat + delta
 
-        acc, test_loss = self._evaluate()
-        prev_acc = self.rows[-1]["accuracy"] if self.rows else acc
-        d_acc = acc - prev_acc
+        # The reward always sees the same evaluation set from round to round
+        # (the subset, if one is configured) so dAcc never mixes two test sets;
+        # only the logged accuracy of the final round switches to the full set.
+        acc_r, loss_r, worst_r = self._evaluate(full=False)
+        if t == self.cfg.fl.rounds and self.eval_idx is not None:
+            acc, test_loss, acc_worst = self._evaluate(full=True)
+        else:
+            acc, test_loss, acc_worst = acc_r, loss_r, worst_r
+        d_acc = acc_r - (self._prev_acc_r if self._prev_acc_r is not None else acc_r)
+        self._prev_acc_r = acc_r
 
         # Latency is measured over the full selected set, not only the clients
         # that succeeded (Sec. 3.22 (v)): a straggler that blew the deadline
@@ -256,8 +308,10 @@ class Experiment:
         self.policy.observe_outcome(state, (selected, assign), reward,
                                     {"success": success})
 
+        weak = self.env.weak
         row = {
-            "round": t, "accuracy": acc, "test_loss": test_loss, "reward": reward,
+            "round": t, "accuracy": acc, "acc_worst10": acc_worst,
+            "test_loss": test_loss, "reward": reward,
             "cost": round_cost, "latency": latency,
             "n_selected": len(selected), "n_success": n_succ,
             "fail_ratio": fail_ratio,
@@ -267,6 +321,8 @@ class Experiment:
             "mode_light": mode_counts["light"],
             "mode_standard": mode_counts["standard"],
             "mode_priority": mode_counts["priority"],
+            "weak_selected": int(sum(weak[i] for i in selected)),
+            "weak_success": int(sum(weak[i] and success[i] for i in selected)),
             "wall_s": time.time() - t0,
         }
         self.rows.append(row)
@@ -287,9 +343,13 @@ class Experiment:
     def save(self) -> str:
         os.makedirs(self.cfg.out, exist_ok=True)
         path = os.path.join(self.cfg.out, f"{self.cfg.tag}.csv")
-        with open(path, "w", newline="") as fh:
+        self.cfg.dump(os.path.join(self.cfg.out, f"{self.cfg.tag}.config.json"))
+        # Write-then-rename: the sweep runners skip any run whose CSV exists,
+        # so a session killed mid-write must not leave a truncated one behind.
+        tmp = path + ".part"
+        with open(tmp, "w", newline="") as fh:
             wr = csv.DictWriter(fh, fieldnames=LOG_FIELDS)
             wr.writeheader()
             wr.writerows(self.rows)
-        self.cfg.dump(os.path.join(self.cfg.out, f"{self.cfg.tag}.config.json"))
+        os.replace(tmp, path)
         return path

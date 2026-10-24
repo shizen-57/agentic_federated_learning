@@ -39,21 +39,56 @@ from __future__ import annotations
 import numpy as np
 
 
+def rarity_score(sketch: np.ndarray) -> np.ndarray:
+    """How much of a client's data sits in classes that few clients hold.
+
+    score_i = sum_k c_{i,k} * log(1 / q_k), with q_k the mean share of class k
+    across clients. A client whose data is mostly in rare classes scores high.
+    """
+    q = np.clip(sketch.mean(axis=0), 1e-6, None)
+    return sketch @ np.log(1.0 / q)
+
+
 class ClientEnv:
-    def __init__(self, cfg, n_i: np.ndarray, seed: int):
+    def __init__(self, cfg, n_i: np.ndarray, seed: int, sketch: np.ndarray | None = None):
         self.cfg = cfg
         self.N = cfg.data.num_clients
         self.n_i = n_i
+        sysc = cfg.system
+        # Simulated workload is driven by n_work, not n_i, so the deadline
+        # separation between modes can be held fixed across datasets.
+        self.n_work = (n_i * (sysc.work_ref_samples / max(float(n_i.mean()), 1e-9))
+                       if sysc.work_ref_samples > 0 else n_i)
         rng = np.random.default_rng(seed + 1000)
+
+        # Persistently weak clients (off unless system.weak_frac > 0). Drawn from
+        # their own stream so the default device profile below is unchanged.
+        self.weak = np.zeros(self.N, dtype=bool)
+        n_weak = int(round(sysc.weak_frac * self.N))
+        rng_w = np.random.default_rng(seed + 2000)
+        if n_weak > 0:
+            if sysc.weak_select == "rarity" and sketch is not None:
+                weak_idx = np.argsort(-rarity_score(sketch), kind="stable")[:n_weak]
+            elif sysc.weak_select in ("rarity", "random"):
+                weak_idx = rng_w.choice(self.N, size=n_weak, replace=False)
+            else:
+                raise ValueError(f"unknown system.weak_select {sysc.weak_select}")
+            self.weak[weak_idx] = True
 
         # Static device profile. Three tiers, so a valuable-but-slow client is a
         # thing that actually exists in the population rather than an accident.
         tier = rng.choice([0, 1, 2], size=self.N, p=[0.35, 0.4, 0.25])
+        tier[self.weak] = 0                      # weak clients are always low-end
         self.speed = np.array([0.35, 1.0, 2.2])[tier] * rng.uniform(0.8, 1.2, self.N)
         self.bandwidth = np.array([0.3, 1.0, 2.0])[tier] * rng.uniform(0.7, 1.3, self.N)
         self.reliability = np.clip(0.55 + 0.15 * tier + rng.normal(0, 0.08, self.N), 0.3, 0.98)
         self.energy_cap = np.array([0.4, 1.0, 2.5])[tier] * rng.uniform(0.8, 1.2, self.N)
         self.tier = tier
+        if n_weak > 0:
+            self.reliability[self.weak] = np.clip(
+                sysc.weak_reliability + rng_w.normal(0, 0.05, n_weak), 0.1, 0.98)
+        self.avail_shift = np.where(self.weak, -sysc.weak_avail_drop, 0.0)
+        self._prev_available: np.ndarray | None = None
 
         # Diurnal availability profile: each client gets its own peak hour and
         # amplitude scale, matching Hard et al. 2018's finding that the cycle's
@@ -85,7 +120,7 @@ class ClientEnv:
         hour = 24.0 * (t % sysc.rounds_per_day) / sysc.rounds_per_day
         phase = 2 * np.pi * (hour - self.peak_hour) / 24.0
         wave = sysc.diurnal_amplitude * self.amplitude_scale * np.cos(phase)
-        return np.clip(sysc.availability_p + wave, 0.03, 0.99)
+        return np.clip(sysc.availability_p + wave + self.avail_shift, 0.03, 0.99)
 
     # ------------------------------------------------------------------ round
 
@@ -100,6 +135,18 @@ class ClientEnv:
             "drop": rng.random(self.N),          # upload / link failure roll
             "accept": rng.random(self.N),        # update-validation roll
         }
+        # Sticky availability: with probability rho a client keeps last round's
+        # on/off state instead of re-rolling, so an offline client tends to stay
+        # offline for a stretch. The extra draw comes after the others (and only
+        # when rho > 0) so runs without persistence are unchanged; it is still
+        # drawn before any action, so common random numbers hold.
+        rho = self.cfg.system.avail_persistence
+        if rho > 0:
+            keep = rng.random(self.N) < rho
+            if self._prev_available is not None:
+                self._draw["available"] = np.where(keep, self._prev_available,
+                                                   self._draw["available"])
+        self._prev_available = self._draw["available"].copy()
         # Energy recharges a little each round; a client drained last round may
         # be back but weaker, which is what makes availability non-stationary.
         self.energy = np.minimum(self.energy_cap, self.energy + 0.25 * self.energy_cap)
@@ -125,7 +172,7 @@ class ClientEnv:
         epochs = sysc.local_epochs[mode]
         frac = sysc.upload_frac[mode]
         d = self._draw
-        t_train = epochs * (self.n_i[i] / 1200.0) / self.speed[i] * d["compute_jitter"][i]
+        t_train = epochs * (self.n_work[i] / 1200.0) / self.speed[i] * d["compute_jitter"][i]
         t_comm = 0.25 * frac / self.bandwidth[i] * d["channel"][i]
         energy = 0.08 * epochs / self.speed[i] + 0.05 * frac
         return t_train, t_comm, energy
@@ -133,7 +180,7 @@ class ClientEnv:
     def cost(self, i: int, mode: str) -> float:
         """C^comp + C^comm of Sec. 3.6, in normalised units."""
         sysc = self.cfg.system
-        return (sysc.local_epochs[mode] * self.n_i[i] / 1000.0
+        return (sysc.local_epochs[mode] * self.n_work[i] / 1000.0
                 + sysc.upload_frac[mode] * 1.0)
 
     def outcome(self, i: int, mode: str) -> dict:

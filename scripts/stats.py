@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""Paired significance tests between conditions in one results directory.
+
+Runs with the same seed share the data split, device profiles and per-round
+random draws, so conditions are compared seed-by-seed (paired), not as two
+independent samples. For each metric and each condition vs. the reference:
+
+- mean paired difference (reference - other) and a 95% bootstrap CI;
+- an exact sign-flip permutation p-value (all 2^n sign patterns when n <= 16,
+  so no distributional assumption and no scipy needed);
+- Holm-corrected p-values across the comparisons made for that metric.
+
+    python scripts/stats.py --dir results/adv/weak_mnist --ref c2_rl_fedprox
+    python scripts/stats.py --dir results/adv/weak_mnist --ref c2_rl_fedprox --vs ablation_rawfail
+
+With 5 seeds the smallest possible p-value is 2/32 = 0.0625, so nothing can be
+significant at 0.05 -- one reason the advanced sweep uses 10 seeds (min 0.002).
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import glob
+import itertools
+import os
+import re
+import sys
+from collections import defaultdict
+
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from report import load  # noqa: E402
+
+# (column, how to reduce a run to one number, higher is better)
+METRICS = [
+    ("accuracy", "final", True),
+    ("acc_worst10", "final", True),
+    ("accuracy", "mean", True),          # area under the accuracy curve: speed
+    ("cv", "final", False),
+    ("fail_ratio", "mean", False),
+    ("arl_oracle", "mean", False),
+    ("cost", "mean", False),
+    ("latency", "mean", False),
+]
+
+
+def reduce(rows: list[dict], col: str, how: str) -> float:
+    if how == "final":
+        return rows[-1][col]
+    return float(np.mean([r[col] for r in rows]))
+
+
+def sign_flip_p(d: np.ndarray, n_random: int = 100_000, seed: int = 0) -> float:
+    """Two-sided p-value for H0: the paired differences are symmetric about 0."""
+    n = len(d)
+    obs = abs(d.mean())
+    if n == 0:
+        return float("nan")
+    if n <= 16:
+        signs = np.array(list(itertools.product([1.0, -1.0], repeat=n)))
+    else:
+        signs = np.random.default_rng(seed).choice([1.0, -1.0], size=(n_random, n))
+    null = np.abs((signs * d).mean(axis=1))
+    return float((null >= obs - 1e-12).mean())
+
+
+def bootstrap_ci(d: np.ndarray, n_boot: int = 10_000, seed: int = 0) -> tuple[float, float]:
+    if len(d) < 2:
+        return float("nan"), float("nan")
+    idx = np.random.default_rng(seed).integers(0, len(d), size=(n_boot, len(d)))
+    means = d[idx].mean(axis=1)
+    return float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
+
+
+def holm(ps: list[float]) -> list[float]:
+    order = np.argsort(ps)
+    m = len(ps)
+    adj = [0.0] * m
+    running = 0.0
+    for rank, k in enumerate(order):
+        running = max(running, min(1.0, (m - rank) * ps[k]))
+        adj[k] = running
+    return adj
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dir", required=True)
+    ap.add_argument("--ref", default="c2_rl_fedprox")
+    ap.add_argument("--vs", nargs="*", help="conditions to compare against (default: all)")
+    ap.add_argument("--alpha", type=float, default=0.05)
+    args = ap.parse_args()
+
+    runs: dict[str, dict[int, list[dict]]] = defaultdict(dict)
+    for path in sorted(glob.glob(os.path.join(args.dir, "*.csv"))):
+        m = re.match(r"(.+)_s(\d+)$", os.path.basename(path)[:-4])
+        if m:
+            runs[m.group(1)][int(m.group(2))] = load(path)
+    if args.ref not in runs:
+        print(f"reference {args.ref} not found in {args.dir}/ (have {sorted(runs)})")
+        return 1
+    others = args.vs or [c for c in sorted(runs) if c != args.ref]
+
+    out_rows = []
+    for col, how, higher in METRICS:
+        if col not in next(iter(runs[args.ref].values()))[0]:
+            continue  # older CSVs predate acc_worst10
+        label = f"{how}_{col}" if how == "mean" else f"final_{col}"
+        recs = []
+        for other in others:
+            seeds = sorted(set(runs[args.ref]) & set(runs.get(other, {})))
+            if not seeds:
+                continue
+            a = np.array([reduce(runs[args.ref][s], col, how) for s in seeds])
+            b = np.array([reduce(runs[other][s], col, how) for s in seeds])
+            d = a - b
+            lo, hi = bootstrap_ci(d)
+            recs.append({"metric": label, "other": other, "n": len(seeds),
+                         "ref_mean": a.mean(), "other_mean": b.mean(), "diff": d.mean(),
+                         "ci_lo": lo, "ci_hi": hi, "p": sign_flip_p(d), "higher": higher})
+        for r, p_adj in zip(recs, holm([r["p"] for r in recs])):
+            r["p_holm"] = p_adj
+            better = (r["diff"] > 0) == r["higher"]
+            r["verdict"] = ("ref better" if better else "ref worse") \
+                if p_adj < args.alpha else "no significant difference"
+        out_rows.extend(recs)
+
+    print(f"# {args.dir}: {args.ref} vs others (paired by seed; diff = ref - other; "
+          f"Holm-corrected within each metric)\n")
+    cur = None
+    for r in out_rows:
+        if r["metric"] != cur:
+            cur = r["metric"]
+            arrow = "higher is better" if r["higher"] else "lower is better"
+            print(f"\n## {cur} ({arrow})\n")
+            print("| vs | n | ref | other | diff | 95% CI | p | p (Holm) | verdict |")
+            print("|---|---|---|---|---|---|---|---|---|")
+        print(f"| {r['other']} | {r['n']} | {r['ref_mean']:.4f} | {r['other_mean']:.4f} | "
+              f"{r['diff']:+.4f} | [{r['ci_lo']:+.4f}, {r['ci_hi']:+.4f}] | "
+              f"{r['p']:.4f} | {r['p_holm']:.4f} | {r['verdict']} |")
+
+    path = os.path.join(args.dir, f"stats_{args.ref}.csv")
+    with open(path, "w", newline="") as fh:
+        cols = ["metric", "other", "n", "ref_mean", "other_mean", "diff", "ci_lo", "ci_hi",
+                "p", "p_holm", "verdict"]
+        wr = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
+        wr.writeheader()
+        wr.writerows(out_rows)
+    print(f"\nwrote {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

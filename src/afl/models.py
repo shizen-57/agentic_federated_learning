@@ -4,7 +4,7 @@ The thesis studies the orchestration policy, not the architecture, so every
 model here stays small enough for a free Colab/Kaggle session:
 
 ``mlp``          ~1k params, synthetic data only.
-``cnn``          ~20k params, MNIST (the original Chapter 5 model).
+``cnn``          ~11k params, MNIST (the original Chapter 5 model).
 ``cnn_femnist``  ~220k params, FEMNIST's 62 classes (28x28 grayscale).
 ``cnn_cifar``    ~190k params, CIFAR-10 (3x32x32 colour); the classic
                  three-conv-block CNN, enough to separate policies on a task

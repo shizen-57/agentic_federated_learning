@@ -46,7 +46,7 @@ def main() -> int:
     groups: dict[str, list[list[dict]]] = defaultdict(list)
     for path in sorted(glob.glob(os.path.join(args.dir, "*.csv"))):
         name = os.path.basename(path)[:-4]
-        if name == "summary":
+        if name == "summary" or name.startswith("stats_"):
             continue
         groups[re.sub(r"_s\d+$", "", name)].append(load(path))
 
@@ -54,14 +54,18 @@ def main() -> int:
         print(f"no run CSVs found in {args.dir}/")
         return 1
 
-    cols = ["run", "seeds"] + [f"final_{k}" for k in FINAL] + \
-           [f"mean_{k}" for k in MEANS] + [f"rounds_to_{args.target:g}"]
     out_rows = []
+
+    # acc_worst10 only exists in CSVs written after the advanced-sweep upgrade.
+    final = FINAL + (["acc_worst10"] if all("acc_worst10" in r[0][0] for r in groups.values())
+                     else [])
+    cols = ["run", "seeds"] + [f"final_{k}" for k in final] + \
+           [f"mean_{k}" for k in MEANS] + [f"rounds_to_{args.target:g}"]
 
     for tag in sorted(groups):
         runs = groups[tag]
         rec = {"run": tag, "seeds": len(runs)}
-        for k in FINAL:
+        for k in final:
             vals = [r[-1][k] for r in runs]
             rec[f"final_{k}"] = (st.mean(vals), st.stdev(vals) if len(vals) > 1 else 0.0)
         for k in MEANS:

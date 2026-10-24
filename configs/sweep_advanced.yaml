@@ -1,0 +1,80 @@
+# The advanced experimental design (docs/ADVANCED_EXPERIMENTS.md).
+#
+# Each group = one base config + overrides + a set of conditions from
+# src/afl/conditions.py, run for every seed. Results land in
+# results/adv/<group>/<condition>_s<seed>.csv.
+#
+#   python scripts/sweep.py --list                      # what would run, and how much
+#   python scripts/sweep.py --groups 'weak_*' --jobs 4  # one family of groups
+#   python scripts/sweep.py --groups 'main_cifar' --shard 0/3   # split across machines
+#
+# Seeds are matched across conditions (same seed -> same data split, same device
+# profiles, same random draws), which is what makes the paired tests in
+# scripts/stats.py valid.
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+sets:
+  all: [c1_rl_fedavg, c2_rl_fedprox, c3_rl_fednova, c4_heuristic_fedprox,
+        c5_rl_fedprox_fednova, b_random, b_fedcs, b_powerofchoice, b_oort,
+        b_fedcer, b_mimic_impute, ablation_rawfail, ablation_cvsel]
+  # The claim tests plus the baselines they must beat.
+  focus: [c2_rl_fedprox, ablation_rawfail, ablation_cvsel, b_random, b_oort,
+          b_fedcs, b_fedcer]
+  # Minimum set for robustness checks (scale, non-IID severity).
+  core: [c2_rl_fedprox, ablation_rawfail, b_random, b_oort]
+  claims: [c2_rl_fedprox, ablation_rawfail, ablation_cvsel]
+
+# The regime the thesis argues ARL is for: 30% of clients are persistently
+# weak (low-end device, unreliable link, less available), availability is
+# sticky, and the weak clients are the ones holding the rarest classes.
+weak_rare: &weak_rare
+  system.weak_frac: 0.3
+  system.weak_select: rarity
+  system.avail_persistence: 0.8
+# Control: same weakness, but a random 30% -- weakness without value. If ARL
+# helps under weak_rare but not here, the effect is about value, as claimed.
+weak_random: &weak_random
+  system.weak_frac: 0.3
+  system.weak_select: random
+  system.avail_persistence: 0.8
+
+groups:
+  # 1. Main comparison: every condition, every dataset, at N=100 / K=10.
+  main_mnist:   {config: configs/adv/mnist.yaml,   conditions: all}
+  main_femnist: {config: configs/adv/femnist.yaml, conditions: all}
+  main_cifar:   {config: configs/adv/cifar10.yaml, conditions: all}
+
+  # 2. Persistent weak clients holding rare data -- the direct test of ARL.
+  weak_mnist:   {config: configs/adv/mnist.yaml,   set: *weak_rare, conditions: focus}
+  weak_femnist: {config: configs/adv/femnist.yaml, set: *weak_rare, conditions: focus}
+  weak_cifar:   {config: configs/adv/cifar10.yaml, set: *weak_rare, conditions: focus}
+
+  # 3. Control for (2): weak clients chosen at random.
+  weakrand_mnist:   {config: configs/adv/mnist.yaml,   set: *weak_random, conditions: claims}
+  weakrand_femnist: {config: configs/adv/femnist.yaml, set: *weak_random, conditions: claims}
+
+  # 4. Scale: N=30/K=5 (the pilot's setting) and N=200/K=20.
+  scale_n30_mnist:
+    config: configs/adv/mnist.yaml
+    set: {data.num_clients: 30, fl.clients_per_round: 5, data.min_samples: 100, data.max_samples: 900}
+    conditions: core
+  scale_n200_mnist:
+    config: configs/adv/mnist.yaml
+    set: {data.num_clients: 200, fl.clients_per_round: 20, data.min_samples: 40, data.max_samples: 350}
+    conditions: core
+  scale_n30_femnist:
+    config: configs/adv/femnist.yaml
+    set: {data.num_clients: 30, fl.clients_per_round: 5}
+    conditions: core
+  scale_n200_femnist:
+    config: configs/adv/femnist.yaml
+    set: {data.num_clients: 200, fl.clients_per_round: 20}
+    conditions: core
+
+  # 5. Non-IID severity: alpha 0.1 (very skewed) and 0.5 (milder). FEMNIST is
+  #    naturally partitioned, so it has no alpha to vary.
+  alpha01_mnist: {config: configs/adv/mnist.yaml,   set: {data.dirichlet_alpha: 0.1}, conditions: core}
+  alpha05_mnist: {config: configs/adv/mnist.yaml,   set: {data.dirichlet_alpha: 0.5}, conditions: core}
+  alpha01_cifar: {config: configs/adv/cifar10.yaml, set: {data.dirichlet_alpha: 0.1}, conditions: core}
+  alpha05_cifar: {config: configs/adv/cifar10.yaml, set: {data.dirichlet_alpha: 0.5}, conditions: core}
