@@ -36,6 +36,8 @@ measurements from real FL systems rather than picked arbitrarily:
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 
@@ -90,6 +92,10 @@ class ClientEnv:
         self.reliability = np.clip(0.55 + 0.15 * tier + rng.normal(0, 0.08, self.N), 0.3, 0.98)
         self.energy_cap = np.array([0.4, 1.0, 2.5])[tier] * rng.uniform(0.8, 1.2, self.N)
         self.tier = tier
+        if sysc.device_trace == "fedscale":
+            self._apply_fedscale_trace(seed)
+        elif sysc.device_trace != "tiers":
+            raise ValueError(f"unknown system.device_trace {sysc.device_trace}")
         if n_weak > 0:
             self.speed[self.weak] = sysc.weak_speed * rng_w.uniform(0.9, 1.1, n_weak)
             self.bandwidth[self.weak] = sysc.weak_bandwidth * rng_w.uniform(0.85, 1.15, n_weak)
@@ -115,6 +121,30 @@ class ClientEnv:
         self._round_rng: np.random.Generator | None = None
         self._draw: dict | None = None
         self.energy = self.energy_cap.copy()
+
+    def _apply_fedscale_trace(self, seed: int) -> None:
+        """Replace the guessed tiers with real phones from FedScale's trace.
+
+        Each client gets one device drawn from a sample of FedScale's
+        client_device_capacity trace (real per-device compute latency and
+        network throughput; see src/afl/traces/README.md). Speed and bandwidth
+        are expressed relative to the trace median, so a median phone looks
+        like the mid tier (1.0). The trace has no reliability or battery data,
+        so those still come from the tier the measured speed falls into.
+        Drawn from its own stream, so availability draws are unchanged.
+        """
+        z = np.load(os.path.join(os.path.dirname(__file__), "traces",
+                                 "fedscale_device_sample.npz"))
+        comp, comm = z["computation_ms"].astype(float), z["communication_kbps"].astype(float)
+        rng_t = np.random.default_rng(seed + 3000)
+        pick = rng_t.choice(len(comp), size=self.N, replace=False)
+        self.speed = np.median(comp) / comp[pick]
+        self.bandwidth = comm[pick] / np.median(comm)
+        tier = np.digitize(self.speed, [0.6, 1.6])          # 0 slow, 1 mid, 2 fast
+        tier[self.weak] = 1
+        self.tier = tier
+        self.reliability = np.clip(0.55 + 0.15 * tier + rng_t.normal(0, 0.08, self.N), 0.3, 0.98)
+        self.energy_cap = np.array([0.4, 1.0, 2.5])[tier] * rng_t.uniform(0.8, 1.2, self.N)
 
     def availability_prob(self, t: int) -> np.ndarray:
         """P(A_{i,t}=1) for every client: a per-client diurnal cosine cycle.
@@ -166,7 +196,7 @@ class ClientEnv:
 
     # ------------------------------------------------------------- mechanics
 
-    def workload(self, i: int, mode: str) -> tuple[float, float, float]:
+    def workload(self, i: int, mode: str, frac: float | None = None) -> tuple[float, float, float]:
         """Return (train_time, comm_time, energy) for client i under a mode.
 
         The constants are calibrated so that the three modes sit on different
@@ -178,20 +208,22 @@ class ClientEnv:
         """
         sysc = self.cfg.system
         epochs = sysc.local_epochs[mode]
-        frac = sysc.upload_frac[mode]
+        # frac overrides the mode's upload fraction (FedCG's per-client
+        # compression ratio); None keeps the mode's own.
+        frac = sysc.upload_frac[mode] if frac is None else frac
         d = self._draw
         t_train = epochs * (self.n_work[i] / 1200.0) / self.speed[i] * d["compute_jitter"][i]
         t_comm = 0.25 * frac / self.bandwidth[i] * d["channel"][i]
         energy = 0.08 * epochs / self.speed[i] + 0.05 * frac
         return t_train, t_comm, energy
 
-    def cost(self, i: int, mode: str) -> float:
+    def cost(self, i: int, mode: str, frac: float | None = None) -> float:
         """C^comp + C^comm of Sec. 3.6, in normalised units."""
         sysc = self.cfg.system
-        return (sysc.local_epochs[mode] * self.n_work[i] / 1000.0
-                + sysc.upload_frac[mode] * 1.0)
+        frac = sysc.upload_frac[mode] if frac is None else frac
+        return sysc.local_epochs[mode] * self.n_work[i] / 1000.0 + frac * 1.0
 
-    def outcome(self, i: int, mode: str) -> dict:
+    def outcome(self, i: int, mode: str, frac: float | None = None) -> dict:
         """tilde-Y^succ_{i,t}(E): completion, upload, deadline, acceptance.
 
         Pure with respect to the round's drawn random numbers, so it can be
@@ -203,7 +235,7 @@ class ClientEnv:
             return dict(success=0, latency=sysc.deadline, reason="unavailable",
                         t_train=0.0, t_comm=0.0)
 
-        t_train, t_comm, energy = self.workload(i, mode)
+        t_train, t_comm, energy = self.workload(i, mode, frac)
         total = t_train + t_comm
 
         if energy > self._energy_at_round_start[i]:
@@ -223,8 +255,23 @@ class ClientEnv:
         return dict(success=1, latency=total, reason="ok",
                     t_train=t_train, t_comm=t_comm)
 
-    def spend(self, i: int, mode: str) -> None:
-        _, _, energy = self.workload(i, mode)
+    def late_ok(self, i: int, mode: str, frac: float | None = None) -> bool:
+        """Would a client that missed the deadline finish within the staleness bound?
+
+        For the semi-asynchronous variant (fl.async_late): such a client's
+        update arrives up to system.staleness_max rounds late instead of being
+        lost. Same draws as outcome(), so the client must still be available,
+        charged, not dropped and not rejected -- only the deadline is relaxed.
+        """
+        out = self.outcome(i, mode, frac)
+        if out["reason"] != "deadline":
+            return False
+        sysc = self.cfg.system
+        return (out["latency"] <= sysc.deadline * (1 + sysc.staleness_max)
+                and self._draw["accept"][i] <= 0.98)
+
+    def spend(self, i: int, mode: str, frac: float | None = None) -> None:
+        _, _, energy = self.workload(i, mode, frac)
         self.energy[i] = max(0.0, self.energy[i] - energy)
 
     # -------------------------------------------------------------- observed

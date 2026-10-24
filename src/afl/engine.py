@@ -29,8 +29,12 @@ LOG_FIELDS = [
     "round", "accuracy", "acc_worst10", "test_loss", "reward", "cost", "latency",
     "n_selected", "n_success", "fail_ratio", "arl_online", "arl_selected", "arl_oracle",
     "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
-    "mode_priority", "weak_selected", "weak_success", "wall_s",
+    "mode_priority", "weak_selected", "weak_success", "late_delivered",
+    "budget_dropped", "debt_mean", "wall_s",
 ]
+
+LIGHTER = {"priority": "standard", "standard": "light", "light": None}
+SKETCH_DIM = 1024
 
 
 def _device(name: str) -> torch.device:
@@ -77,7 +81,22 @@ class Experiment:
         self.gen = torch.Generator().manual_seed(cfg.seed + 3)
         self.last_update: dict[int, torch.Tensor] = {}  # MIFA/MimiC substitution store
 
-        self.norm = {k: M.Normalizer() for k in ("acc", "cost", "lat", "arl", "faildmg")}
+        self.norm = {k: M.Normalizer() for k in ("acc", "cost", "lat", "arl", "faildmg", "debt")}
+
+        # State for the optional pieces; all empty/unused in the original runs.
+        self.late: list[tuple] = []               # semi-async updates due next round
+        self.debt = np.zeros(self.N)              # fairness debt (Sec. 3.13)
+        self.mem: dict[int, torch.Tensor] = {}    # MIFA: latest update of every client
+        self.mimic_c: dict[int, torch.Tensor] = {}  # MimiC: correction variables
+        self.ef_err: dict[int, torch.Tensor] = {}   # FedCG: top-k error feedback
+        self.hist_sketch = None                   # FedCG: projected update history
+        if cfg.policy.name == "fedcg":
+            P = self.global_flat.numel()
+            g = torch.Generator().manual_seed(cfg.seed + 31)
+            self.sk_idx = torch.randint(0, SKETCH_DIM, (P,), generator=g).to(self.dev)
+            self.sk_sign = (torch.randint(0, 2, (P,), generator=g) * 2 - 1).float().to(self.dev)
+            self.hist_sketch = np.zeros((self.N, SKETCH_DIM))
+            self.has_hist = np.zeros(self.N, dtype=bool)
         self.cal_probs: list[float] = []
         self.cal_out: list[int] = []
         self.rows: list[dict] = []
@@ -164,13 +183,95 @@ class Experiment:
             i: {m: sum(self.env.workload(i, m)[:2]) for m in self.cfg.system.modes}
             for i in range(self.N)
         }
-        return {
+        state = {
             "obs": obs, "hist": hist, "p_succ": p_succ, "eligible": eligible,
             "t_expected": t_expected, "n_i": self.d["n_i"],
             "local_loss": self.local_loss,
             "repr_value": M.standalone_value(self.d["sketch"]),
             "sketch": self.d["sketch"],
+            "n_work": self.env.n_work,
+            "debt": self.debt / (1.0 + self.debt.max()),
         }
+        if self.hist_sketch is not None:
+            self._probe_missing_history()
+            state["update_sketch"] = self.hist_sketch
+        return state
+
+    # ------------------------------------------------- optional components
+
+    def _sketch(self, v: torch.Tensor) -> np.ndarray:
+        """Count-sketch projection of a flat update to SKETCH_DIM dimensions."""
+        out = torch.zeros(SKETCH_DIM, device=self.dev).index_add_(0, self.sk_idx, v * self.sk_sign)
+        return out.cpu().numpy()
+
+    def _probe_missing_history(self) -> None:
+        """FedCG needs every client's historical update; for clients that have
+        never reported, use one epoch of local training from the current model
+        (the stand-in for the initial gradients DivFL-style selection assumes)."""
+        for i in np.where(~self.has_hist)[0]:
+            x, y = self._client_xy(int(i))
+            if len(y) == 0:
+                continue
+            upd, _ = local_train(self.cfg, self.global_flat, x, y, 1,
+                                 self.d["dim"], self.d["num_classes"], self.gen)
+            self.hist_sketch[i] = self._sketch(upd)
+            self.has_hist[i] = True
+
+    def _compress(self, i: int, upd: torch.Tensor, frac: float) -> torch.Tensor:
+        """FedCG upload: top-k sparsification at ratio frac with error feedback."""
+        v = upd + self.ef_err[i] if i in self.ef_err else upd
+        k = max(1, int(round(frac * v.numel())))
+        if k >= v.numel():
+            self.ef_err[i] = torch.zeros_like(v)
+            return v
+        idx = torch.topk(v.abs(), k, sorted=False).indices
+        sent = torch.zeros_like(v)
+        sent[idx] = v[idx]
+        self.ef_err[i] = v - sent
+        return sent
+
+    def _est_time(self, i: int, mode: str, state: dict, frac: float | None) -> float:
+        """Server-side estimate of a client's round time from observed descriptors."""
+        sysc = self.cfg.system
+        obs = state["obs"][i]
+        frac = sysc.upload_frac[mode] if frac is None else frac
+        return (sysc.local_epochs[mode] * (self.env.n_work[i] / 1200.0) / max(obs["speed_hat"], 1e-3)
+                + 0.25 * frac / max(obs["bw_hat"], 1e-3))
+
+    def _enforce_budget(self, selected, assign, state, fracs):
+        """Eq. (3.64)-(3.65): per-round cost budget C_max and time limit L_max.
+
+        Applied to every policy's chosen action, so constrained comparisons are
+        fair. A client whose estimated time exceeds L_max is moved to lighter
+        modes and dropped if even Light does not fit. While the round's cost
+        exceeds C_max, the lowest-priority client (last in the policy's order)
+        is moved to a lighter mode, or dropped once it is already on Light.
+        Only observable quantities are used. (For the RL policy this is an
+        action projection: the gradient still uses the sampled action.)
+        """
+        sysc = self.cfg.system
+        if sysc.cost_max >= 1e9 and sysc.latency_max >= 1e9:
+            return selected, assign, 0
+        assign = dict(assign)
+        keep, dropped = [], 0
+        for i in selected:
+            m = assign[i]
+            while self._est_time(i, m, state, fracs.get(i)) > sysc.latency_max and LIGHTER[m]:
+                m = LIGHTER[m]
+            if self._est_time(i, m, state, fracs.get(i)) > sysc.latency_max:
+                dropped += 1
+                continue
+            assign[i] = m
+            keep.append(i)
+        while keep and sum(self.env.cost(i, assign[i], fracs.get(i)) for i in keep) > sysc.cost_max:
+            for i in reversed(keep):
+                if LIGHTER[assign[i]]:
+                    assign[i] = LIGHTER[assign[i]]
+                    break
+            else:
+                keep.pop()
+                dropped += 1
+        return keep, {i: assign[i] for i in keep}, dropped
 
     # --------------------------------------------------------------- round
 
@@ -180,6 +281,12 @@ class Experiment:
         state = self._state(t)
 
         selected, assign = self.policy.act(state, t)
+        fracs = dict(getattr(self.policy, "upload_frac", {}) or {})
+        # A client still finishing last round's late update cannot take a new job.
+        busy = {item[0] for item in self.late}
+        if busy:
+            selected = [i for i in selected if i not in busy]
+        selected, assign, budget_dropped = self._enforce_budget(selected, assign, state, fracs)
         self._refresh_losses(selected)
 
         # V^repr_{i,t}(S_t) for every client (Eq. 3.26), not only the selected
@@ -189,8 +296,24 @@ class Experiment:
         rep_vals = M.per_client_representation_value(self.d["sketch"], selected)
         values: dict[int, float] = {i: float(rep_vals[i]) for i in range(self.N)}
 
-        updates, weights, steps, succ_p = [], [], [], []
+        updates, weights, steps, succ_p, recv_ids = [], [], [], [], []
         success: dict[int, int] = {}
+
+        # Semi-asynchronous deliveries from last round, now one round stale:
+        # Eq. (3.18)'s staleness check decides whether they still count.
+        late_delivered = 0
+        for i, upd, n_steps, issued, p in self.late:
+            if accepted(upd, issued, t, self.cfg):
+                updates.append(upd)
+                weights.append(self.d["n_i"][i])
+                steps.append(n_steps)
+                succ_p.append(p)
+                recv_ids.append(i)
+                self.x_succ[i] += 1
+                self.since_success[i] = 0
+                self.last_update[i] = upd.detach().clone()
+                late_delivered += 1
+        self.late = []
         pending_spends: list[tuple[int, str]] = []
         round_cost = 0.0
         latencies = []
@@ -198,14 +321,15 @@ class Experiment:
 
         for i in selected:
             mode = assign[i]
+            frac = fracs.get(i)
             mode_counts[mode] += 1
             self.x_sel[i] += 1
             # The server broadcasts the current global model with the invitation,
             # so the update is computed against round t. Staleness only bites in
             # the asynchronous variant, where this is set when the model is sent.
             self.issued_round[i] = t
-            round_cost += self.env.cost(i, mode)
-            out = self.env.outcome(i, mode)
+            round_cost += self.env.cost(i, mode, frac)
+            out = self.env.outcome(i, mode, frac)
             latencies.append(out["latency"])
             # Energy spend is deferred until after the oracle diagnostic below
             # is computed (Sec. 3.11, Eq. 3.29): applying it immediately would
@@ -213,7 +337,7 @@ class Experiment:
             # counterfactual is evaluated, so a client that genuinely could
             # have succeeded under the pre-decision energy state gets
             # incorrectly reported as oracle-ineligible.
-            pending_spends.append((i, mode))
+            pending_spends.append((i, mode, frac))
 
             ok = out["success"] == 1
             if ok:
@@ -225,13 +349,27 @@ class Experiment:
                         self.cfg, self.global_flat, x, y,
                         self.cfg.system.local_epochs[mode],
                         self.d["dim"], self.d["num_classes"], self.gen)
+                    if self.cfg.fl.aggregator == "fedcg":
+                        upd = self._compress(i, upd, frac if frac is not None else 1.0)
                     if accepted(upd, self.issued_round[i], t, self.cfg):
                         updates.append(upd)
                         weights.append(self.d["n_i"][i])
                         steps.append(n_steps)
                         succ_p.append(state["p_succ"][i][mode])
+                        recv_ids.append(i)
                     else:
                         ok = False
+            elif (self.cfg.fl.async_late and out["reason"] == "deadline"
+                  and self.env.late_ok(i, mode, frac)):
+                # Too slow for this round, but done within the staleness bound:
+                # train against the round-t model now, deliver next round.
+                x, y = self._client_xy(i)
+                if len(y) > 0:
+                    upd, n_steps = local_train(
+                        self.cfg, self.global_flat, x, y,
+                        self.cfg.system.local_epochs[mode],
+                        self.d["dim"], self.d["num_classes"], self.gen)
+                    self.late.append((i, upd, n_steps, t, state["p_succ"][i][mode]))
 
             success[i] = int(ok)
             if ok:
@@ -251,15 +389,43 @@ class Experiment:
                     updates.append(self.last_update[i])
                     weights.append(self.d["n_i"][i])
                     steps.append(1)
+                    succ_p.append(1.0)          # not a success: no Eq. (3.54) boost
+                    recv_ids.append(i)
 
             # The predictor learns from every issued invitation, success or not.
             self.predictor.update(state["obs"][i], state["hist"][i], mode, int(ok))
             self.cal_probs.append(state["p_succ"][i][mode])
             self.cal_out.append(int(ok))
 
-        delta = aggregate(self.cfg.fl.aggregator, updates, weights, steps)
+        agg = self.cfg.fl.aggregator
+        if agg == "mifa":
+            # MIFA (Gu et al. 2021, Alg. 1): keep every client's latest update
+            # (zero until it first reports) and step by their mean over all N.
+            for i, u in zip(recv_ids, updates):
+                self.mem[i] = u
+            delta = sum(self.mem.values()) / self.N if self.mem else None
+        elif agg == "mimic":
+            # MimiC (Sun et al. 2024, Alg. 1): correct each received update with
+            # the client's correction variable from its last active round,
+            # v_i = g_i + c_i; step by the mean v; then c_i = v - g_i.
+            if updates:
+                corrected = [u + self.mimic_c[i] if i in self.mimic_c else u
+                             for i, u in zip(recv_ids, updates)]
+                delta = sum(corrected) / len(corrected)
+                for i, u in zip(recv_ids, updates):
+                    self.mimic_c[i] = delta - u
+            else:
+                delta = None
+        else:
+            probs = succ_p if self.cfg.fl.importance_reweight else None
+            delta = aggregate(agg, updates, weights, steps, success_probs=probs,
+                              p_floor=self.cfg.fl.reweight_floor)
         if delta is not None:
             self.global_flat = self.global_flat + delta
+        if self.hist_sketch is not None:
+            for i, u in zip(recv_ids, updates):
+                self.hist_sketch[i] = self._sketch(u)
+                self.has_hist[i] = True
 
         # The reward always sees the same evaluation set from round to round
         # (the subset, if one is configured) so dAcc never mixes two test sets;
@@ -288,8 +454,15 @@ class Experiment:
 
         # Now safe to apply this round's real energy spend -- after the oracle
         # diagnostic above has queried every client's pre-spend state.
-        for i, mode in pending_spends:
-            self.env.spend(i, mode)
+        for i, mode, frac in pending_spends:
+            self.env.spend(i, mode, frac)
+
+        # Fairness debt (Sec. 3.13): each eligible client accrues its fair share
+        # K/N of service per round and pays it off with a successful contribution.
+        rho = len(selected) / self.N if selected else 0.0
+        elig = np.array([state["eligible"][i] for i in range(self.N)], dtype=float)
+        served = np.array([success.get(i, 0) for i in range(self.N)], dtype=float)
+        self.debt = np.maximum(0.0, self.debt + rho * elig - served)
 
         # Task 1/2 ablations: swap the value-weighted counterfactual damage term
         # for a naive raw failure count, and/or the capability-conditioned
@@ -312,6 +485,8 @@ class Experiment:
                   - r.delta * self.norm["lat"](latency)
                   - r.lambda_arl * damage_term
                   - r.lambda_fair * fairness_term)
+        if r.lambda_debt > 0:
+            reward -= r.lambda_debt * self.norm["debt"](float(self.debt.mean()))
         self.policy.observe_outcome(state, (selected, assign), reward,
                                     {"success": success})
 
@@ -330,6 +505,9 @@ class Experiment:
             "mode_priority": mode_counts["priority"],
             "weak_selected": int(sum(weak[i] for i in selected)),
             "weak_success": int(sum(weak[i] and success[i] for i in selected)),
+            "late_delivered": late_delivered,
+            "budget_dropped": budget_dropped,
+            "debt_mean": float(self.debt.mean()),
             "wall_s": time.time() - t0,
         }
         self.rows.append(row)

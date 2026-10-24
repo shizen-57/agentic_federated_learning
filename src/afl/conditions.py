@@ -37,6 +37,38 @@ CONDITIONS: dict[str, dict] = {
     # which is ~90% of ARL' at N=100/K=10 (docs/ADVANCED_EXPERIMENTS.md).
     "ablation_arlsel":       {"policy.name": "rl", "fl.aggregator": "fedprox",
                               "reward.damage_metric": "arl_selected"},
+
+    # --- Parts of Chapter 3 that the original runs left switched off ---------
+    # Multi-round credit: discounted returns over 10-round windows (gamma 0.95).
+    "c2_gamma":              {"policy.name": "rl", "fl.aggregator": "fedprox", "policy.horizon": 10},
+    # Eq. (3.54): reweight received updates by n_i / p_succ (floor 0.1).
+    "c2_reweight":           {"policy.name": "rl", "fl.aggregator": "fedprox", "fl.importance_reweight": True},
+    # Semi-asynchronous: late updates within the staleness bound still count.
+    "c2_async":              {"policy.name": "rl", "fl.aggregator": "fedprox", "fl.async_late": True},
+    # Fairness debt (Sec. 3.13) as an extra reward term and policy input.
+    "c2_debt":               {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_debt": 0.3},
+    # Eq. (3.64)-(3.65) budgets, applied identically to every policy compared.
+    "c2_budget":             {"policy.name": "rl", "fl.aggregator": "fedprox", "system.cost_max": 10.0, "system.latency_max": 1.0},
+    "b_random_budget":       {"policy.name": "random", "fl.aggregator": "fedprox", "system.cost_max": 10.0, "system.latency_max": 1.0},
+    "b_oort_budget":         {"policy.name": "oort", "fl.aggregator": "fedprox", "system.cost_max": 10.0, "system.latency_max": 1.0},
+
+    # --- Published baselines implemented from the papers' algorithms ---------
+    # MIFA (Gu et al., NeurIPS 2021) and MimiC (Sun et al., IEEE TMC 2024) are
+    # aggregation rules for unavailable clients; both papers sample clients
+    # without a scheduler, so they run under random selection here.
+    "b_mifa":                {"policy.name": "random", "fl.aggregator": "mifa"},
+    "b_mimic":               {"policy.name": "random", "fl.aggregator": "mimic"},
+    # FedCG (arXiv 2212.09483): diverse selection + per-client compression.
+    "b_fedcg":               {"policy.name": "fedcg", "fl.aggregator": "fedcg"},
+
+    # --- Reward-weight sensitivity (Sec. 3.18); c2 uses lambda_arl 0.5, lambda_fair 0.3
+    "sens_arl0":             {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_arl": 0.0},
+    "sens_arl025":           {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_arl": 0.25},
+    "sens_arl1":             {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_arl": 1.0},
+    "sens_arl2":             {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_arl": 2.0},
+    "sens_fair0":            {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_fair": 0.0},
+    "sens_fair01":           {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_fair": 0.1},
+    "sens_fair1":            {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_fair": 1.0},
 }
 
 

@@ -173,3 +173,77 @@ class OortPolicy(Policy):
         sel += [int(i) for i in self.rng.choice(rest, size=min(n_explore, len(rest)),
                                                 replace=False)]
         return sel, {i: _default_mode(self.cfg) for i in sel}
+
+
+class FedCGPolicy(Policy):
+    """FedCG (Li et al., "Adaptive Control of Client Selection and Gradient
+    Compression for Efficient Federated Learning", arXiv 2212.09483).
+
+    Implements Alg. 2 of the paper, mapped onto this simulator:
+
+    - Selection (Sec. V-B): greedy maximisation of the facility-location
+      objective, i.e. choose K clients minimising
+      Q(M) = sum_{n in N} min_{i in M} ||g_n - g_i||  (Eq. 14), where g_n is
+      the client's latest known update ("historical gradient information").
+      The engine supplies these as 1024-d count-sketch projections, which
+      approximately preserve the distances.
+    - Compression ratio (Sec. V-C, Eq. 17): each selected client gets the
+      largest ratio theta in (0, 1] whose estimated round time
+      H*T_cmp + theta*R/C still fits the round deadline -- the one-shot
+      solution of the paper's LP, since its objective sum (1-theta_n) H^2 G^2
+      only decreases as theta grows. Estimates use the observed (noisy) speed
+      and bandwidth only.
+    - Alg. 2 loop: K iterations; each picks a diverse set from the remaining
+      candidates, keeps it if its total compression ratio is the best so far,
+      then removes that set's most-compressed client from the candidates.
+    - Local training uses a fixed number of epochs (the paper's fixed H); the
+      engine applies top-k sparsification with error feedback at ratio theta
+      and aggregates with an equal-weight mean (aggregator "fedcg").
+
+    Like the paper, it does not model availability or failure: it assumes the
+    selected clients report back.
+    """
+
+    THETA_MIN = 0.01
+
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.upload_frac: dict[int, float] = {}
+
+    def _theta(self, state, i):
+        sysc = self.cfg.system
+        obs = state["obs"][i]
+        t_cmp = sysc.local_epochs["standard"] * (state["n_work"][i] / 1200.0) / max(obs["speed_hat"], 1e-3)
+        theta = (sysc.deadline - t_cmp) * max(obs["bw_hat"], 1e-3) / 0.25
+        return float(np.clip(theta, self.THETA_MIN, 1.0))
+
+    @staticmethod
+    def _greedy(dist, cands, K):
+        sel: list[int] = []
+        cur = np.full(dist.shape[0], np.inf)
+        for _ in range(K):
+            pool = [c for c in cands if c not in sel]
+            vals = np.minimum(cur[:, None], dist[:, pool]).sum(axis=0)
+            best = pool[int(np.argmin(vals))]
+            sel.append(best)
+            cur = np.minimum(cur, dist[:, best])
+        return sel
+
+    def act(self, state, t):
+        N = self.cfg.data.num_clients
+        K = min(self.cfg.fl.clients_per_round, N)
+        g = state["update_sketch"]
+        sq = (g ** 2).sum(axis=1)
+        dist = np.sqrt(np.maximum(sq[:, None] + sq[None, :] - 2 * g @ g.T, 0.0))
+        cands = list(range(N))
+        best_sel, best_theta, best_sum = None, None, -1.0
+        for _ in range(K):
+            if len(cands) < K:
+                break
+            sel = self._greedy(dist, cands, K)
+            theta = {i: self._theta(state, i) for i in sel}
+            if sum(theta.values()) > best_sum:
+                best_sel, best_theta, best_sum = sel, theta, sum(theta.values())
+            cands.remove(min(sel, key=lambda i: theta[i]))
+        self.upload_frac = dict(best_theta)
+        return list(best_sel), {i: "standard" for i in best_sel}

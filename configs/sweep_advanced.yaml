@@ -24,6 +24,12 @@ sets:
   # Minimum set for robustness checks (scale, non-IID severity).
   core: [c2_rl_fedprox, ablation_rawfail, b_random, b_oort]
   claims: [c2_rl_fedprox, ablation_rawfail, ablation_cvsel, ablation_arlsel]
+  # Parts of Chapter 3 switched on, budgets, and the published baselines.
+  ext: [c2_rl_fedprox, c2_gamma, c2_reweight, c2_async, c2_debt, c2_budget,
+        b_random_budget, b_oort_budget, b_mifa, b_mimic, b_fedcg]
+  # Reward-weight sensitivity (Sec. 3.18).
+  sens: [c2_rl_fedprox, sens_arl0, sens_arl025, sens_arl1, sens_arl2,
+         sens_fair0, sens_fair01, sens_fair1]
 
 # The regime the thesis argues ARL is for: 30% of clients are persistently
 # weak (slower than the mid tier, less reliable, less available) in a way
@@ -90,3 +96,19 @@ groups:
     set: *weak_rare
     conditions: [c2_rl_fedprox, ablation_rawfail]
     seeds: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]
+
+  # 7. Chapter 3 pieces the original runs left off (multi-round returns,
+  #    Eq. 3.54 reweighting, semi-async staleness, fairness debt, C_max/L_max
+  #    budgets) and the published MIFA, MimiC and FedCG algorithms, in the
+  #    weak-client regime where client dropouts matter most.
+  ext_mnist: {config: configs/adv/mnist.yaml,   set: *weak_rare, conditions: ext}
+  ext_cifar: {config: configs/adv/cifar10.yaml, set: *weak_rare, conditions: ext}
+
+  # 8. Reward-weight sensitivity (Sec. 3.18), including lambda_arl = 0 (no
+  #    damage term at all), in the regime ARL is meant for.
+  sens_cifar: {config: configs/adv/cifar10.yaml, set: *weak_rare, conditions: sens}
+
+  # 9. Real device heterogeneity: FedScale's measured phone speeds and
+  #    bandwidths instead of the three guessed tiers.
+  trace_mnist: {config: configs/adv/mnist.yaml,   set: {system.device_trace: fedscale}, conditions: focus}
+  trace_cifar: {config: configs/adv/cifar10.yaml, set: {system.device_trace: fedscale}, conditions: focus}

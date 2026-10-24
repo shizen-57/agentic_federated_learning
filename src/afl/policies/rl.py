@@ -17,6 +17,13 @@ Evaluation still uses the deterministic Top-K.
 policy-gradient steps. At that sample budget the variance reduction from a
 learned critic does not pay for the extra hyperparameters, and a simple,
 inspectable update is worth more for a thesis than a marginally better optimiser.
+
+*One-round or multi-round credit (policy.horizon).*  With horizon 1 (the
+original runs) each round's action is credited with that round's reward only.
+With horizon H > 1 the policy collects H rounds and credits each action with
+its discounted return over the rest of the window,
+G_t = sum_{k>=0} gamma^k r_{t+k} (reward.gamma), so a choice that pays off a few
+rounds later -- e.g. keeping a weak client alive -- can be learned.
 """
 from __future__ import annotations
 
@@ -50,12 +57,17 @@ class RLPolicy(Policy):
     def __init__(self, cfg):
         super().__init__(cfg)
         self.modes = list(cfg.system.modes)
-        self.net = ScoreNet(len(FEATURES), cfg.policy.rl_hidden, len(self.modes))
+        # The fairness-debt feature exists only when the debt module is on, so
+        # the original network (and its results) are unchanged otherwise.
+        self.use_debt = cfg.reward.lambda_debt > 0
+        n_feat = len(FEATURES) + (1 if self.use_debt else 0)
+        self.net = ScoreNet(n_feat, cfg.policy.rl_hidden, len(self.modes))
         self.opt = torch.optim.Adam(self.net.parameters(), lr=cfg.policy.rl_lr)
         self.baseline = 0.0
         self.baseline_n = 0
         self.gen = torch.Generator().manual_seed(cfg.seed + 17)
         self._pending = None
+        self._window: list = []           # (logp, entropy, reward) when horizon > 1
         self.train_mode = True
 
     # ------------------------------------------------------------- features
@@ -79,7 +91,7 @@ class RLPolicy(Policy):
                 np.tanh(hist["rounds_since_success"] / 10.0),
                 hist["selected_frac"],
                 state["local_loss"][i],
-            ])
+            ] + ([state["debt"][i]] if self.use_debt else []))
         return torch.tensor(rows, dtype=torch.float32)
 
     # ----------------------------------------------------------------- act
@@ -135,6 +147,12 @@ class RLPolicy(Policy):
     def observe_outcome(self, state, action, reward, info):
         if self._pending is None or not self.train_mode:
             return
+        if self.cfg.policy.horizon > 1:
+            self._window.append((self._pending["logp"], self._pending["entropy"], reward))
+            self._pending = None
+            if len(self._window) >= self.cfg.policy.horizon:
+                self._update_window()
+            return
         self.baseline_n += 1
         self.baseline += (reward - self.baseline) / self.baseline_n
         advantage = reward - self.baseline
@@ -146,3 +164,23 @@ class RLPolicy(Policy):
         nn.utils.clip_grad_norm_(self.net.parameters(), 5.0)
         self.opt.step()
         self._pending = None
+
+    def _update_window(self):
+        """REINFORCE on discounted returns within the window (horizon > 1)."""
+        gamma = self.cfg.reward.gamma
+        rewards = [r for _, _, r in self._window]
+        returns, g = [], 0.0
+        for r in reversed(rewards):
+            g = r + gamma * g
+            returns.append(g)
+        returns.reverse()
+        loss = 0.0
+        for (logp, ent, _), g in zip(self._window, returns):
+            self.baseline_n += 1
+            self.baseline += (g - self.baseline) / self.baseline_n
+            loss = loss - logp * (g - self.baseline) - self.cfg.policy.entropy_coef * ent
+        self.opt.zero_grad()
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.net.parameters(), 5.0)
+        self.opt.step()
+        self._window = []

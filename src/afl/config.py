@@ -30,8 +30,9 @@ class SystemCfg:
     local_epochs: dict = field(default_factory=lambda: {"light": 1, "standard": 2, "priority": 4})
     upload_frac: dict = field(default_factory=lambda: {"light": 0.25, "standard": 0.5, "priority": 1.0})
     deadline: float = 1.0               # tau_{i,t}, normalised round deadline
-    cost_max: float = 1e9               # C_max  (Eq. 3.64); effectively off by default
-    latency_max: float = 1e9            # L_max  (Eq. 3.65)
+    cost_max: float = 1e9               # C_max  (Eq. 3.64): per-round cost budget,
+                                        # enforced by Experiment._enforce_budget; 1e9 = off
+    latency_max: float = 1e9            # L_max  (Eq. 3.65): per-client expected time limit
     availability_p: float = 0.85        # mean of P(A_{i,t}=1) over a full diurnal cycle
     diurnal_amplitude: float = 0.35     # swing of availability around the mean across
                                         # the day (Hard et al. 2018, arXiv:1812.02903:
@@ -64,6 +65,10 @@ class SystemCfg:
     weak_reliability: float = 0.6       # link reliability of weak clients (mid tier ~0.7)
     weak_avail_drop: float = 0.1        # subtracted from weak clients' availability
     avail_persistence: float = 0.0      # P(availability carries over from last round)
+    device_trace: str = "tiers"         # tiers: the three guessed device tiers;
+                                        # fedscale: real per-device speed and
+                                        # bandwidth from FedScale's trace
+                                        # (src/afl/traces/README.md)
 
 
 @dataclass
@@ -74,6 +79,7 @@ class FLCfg:
     batch_size: int = 32
     mu: float = 0.01                    # FedProx proximal weight (Sec. 3.17)
     aggregator: str = "fedprox"         # fedavg | fedprox | fednova | fedprox_fednova
+                                        # | mifa | mimic | fedcg (published baselines)
     model: str = "mlp"                  # mlp | cnn | cnn_femnist | cnn_cifar
     device: str = "cpu"                 # cpu | cuda | auto
     eval_subset: int = 0                # if > 0, per-round accuracy uses a fixed
@@ -83,6 +89,15 @@ class FLCfg:
                                         # of a failed client's update with its
                                         # last known successful delta (Table 3.5);
                                         # tests prevention vs. imputation (Sec. 3.11)
+    importance_reweight: bool = False   # Eq. (3.54): weight each received update by
+                                        # n_i / p_succ to undo the bias of averaging
+                                        # only clients that succeeded
+    reweight_floor: float = 0.1         # lower bound on p_succ in that weight, so
+                                        # one unlikely success cannot get >10x weight
+    async_late: bool = False            # semi-asynchronous: a client that misses the
+                                        # deadline but finishes within staleness_max
+                                        # rounds delivers late instead of failing,
+                                        # so the staleness rule of Eq. (3.18) applies
 
 
 @dataclass
@@ -93,7 +108,8 @@ class RewardCfg:
     delta: float = 0.1
     lambda_arl: float = 0.5
     lambda_fair: float = 0.3
-    gamma: float = 0.95
+    lambda_debt: float = 0.0            # fairness debt (Sec. 3.13), off by default
+    gamma: float = 0.95                 # discount, used when policy.horizon > 1
     # Ablation toggles, added to test whether the thesis's two specific claims
     # (value-weighted counterfactual damage; capability-conditioned fairness)
     # actually change behaviour versus the naive alternative each replaces.
@@ -114,6 +130,9 @@ class PolicyCfg:
     rl_lr: float = 1e-2
     rl_hidden: int = 32
     entropy_coef: float = 0.01
+    horizon: int = 1                    # rounds per policy update. 1 = each round's own
+                                        # reward (the original runs); H > 1 = discounted
+                                        # returns over H rounds with reward.gamma
 
 
 @dataclass

@@ -274,3 +274,148 @@ def test_one_sided_sign_flip_and_group_seeds():
     assert sorted({j["seed"] for j in jobs}) == list(range(10, 40))   # fresh seeds only
     assert {j["cond"] for j in jobs} == {"c2_rl_fedprox", "ablation_rawfail"}
     assert jobs[0]["raw"]["system"]["weak_select"] == "rarity"
+
+
+# ------------------------------------- Chapter 3 pieces and published baselines
+
+def _small(**over):
+    base = {"data": {"num_clients": 12}, "fl": {"rounds": 6, "clients_per_round": 4}}
+    for k, v in over.items():
+        base.setdefault(k, {}).update(v)
+    return Cfg.from_dict(base)
+
+
+def test_budget_respects_cost_and_time_limits():
+    exp = Experiment(_small(system={"cost_max": 1.5, "latency_max": 1.0}))
+    for t in range(1, 5):
+        exp.env.new_round(t)
+        state = exp._state(t)
+        sel, assign = exp.policy.act(state, t)
+        keep, assign2, dropped = exp._enforce_budget(sel, assign, state, {})
+        assert sum(exp.env.cost(i, assign2[i]) for i in keep) <= 1.5 + 1e-9
+        assert all(exp._est_time(i, assign2[i], state, None) <= 1.0 for i in keep)
+        assert dropped == len(sel) - len(keep)
+    rows = Experiment(_small(system={"cost_max": 1.5, "latency_max": 1.0})).run(verbose=False)
+    assert all(r["cost"] <= 1.5 + 1e-9 for r in rows)
+
+
+def test_budget_is_a_no_op_by_default():
+    exp = Experiment(_small())
+    exp.env.new_round(1)
+    state = exp._state(1)
+    sel, assign = exp.policy.act(state, 1)
+    assert exp._enforce_budget(sel, assign, state, {}) == (sel, assign, 0)
+
+
+def test_semi_async_delivers_late_updates_only_within_the_staleness_bound():
+    over = dict(fl={"async_late": True, "rounds": 12}, system={"deadline": 0.4})
+    rows = Experiment(_small(**over)).run(verbose=False)
+    assert sum(r["late_delivered"] for r in rows) > 0
+    over["system"]["staleness_max"] = 0          # no lateness allowed -> nothing late
+    rows = Experiment(_small(**over)).run(verbose=False)
+    assert sum(r["late_delivered"] for r in rows) == 0
+
+
+def test_importance_reweighting_changes_the_aggregate_when_switched_on():
+    a = Experiment(_small()).run(verbose=False)
+    b = Experiment(_small(fl={"importance_reweight": True})).run(verbose=False)
+    assert [r["accuracy"] for r in a] != [r["accuracy"] for r in b]
+
+
+def test_multi_round_returns_update_the_policy_once_per_window():
+    exp = Experiment(_small(policy={"horizon": 3}, fl={"rounds": 6}))
+    before = [p.detach().clone() for p in exp.policy.net.parameters()]
+    exp.run_round(1); exp.run_round(2)
+    assert all(torch.equal(a, b) for a, b in zip(before, exp.policy.net.parameters()))
+    exp.run_round(3)
+    assert not all(torch.equal(a, b) for a, b in zip(before, exp.policy.net.parameters()))
+
+
+def test_fairness_debt_accrues_for_unserved_eligible_clients_and_is_a_feature():
+    exp = Experiment(_small(reward={"lambda_debt": 0.3}))
+    assert exp.policy.net.trunk[0].in_features == 13      # 12 features + debt
+    rows = exp.run(verbose=False)
+    assert all(r["debt_mean"] >= 0 for r in rows) and rows[-1]["debt_mean"] > 0
+    assert Experiment(_small()).policy.net.trunk[0].in_features == 12   # off by default
+
+
+def test_mifa_steps_by_the_mean_of_every_clients_latest_update():
+    exp = Experiment(_small(policy={"name": "random"}, fl={"aggregator": "mifa"}))
+    exp.run_round(1); exp.run_round(2)
+    before = exp.global_flat.clone()
+    exp.run_round(3)
+    if exp.mem:
+        expected = sum(exp.mem.values()) / exp.N        # never-seen clients count as zero
+        assert torch.allclose(exp.global_flat - before, expected, atol=1e-6)
+
+
+def test_mimic_corrects_received_updates_with_their_last_correction():
+    exp = Experiment(_small(policy={"name": "random"}, fl={"aggregator": "mimic", "rounds": 8}))
+    for t in range(1, 5):
+        exp.run_round(t)
+    prev = {i: c.clone() for i, c in exp.mimic_c.items()}
+    before = exp.global_flat.clone()
+    exp.run_round(5)
+    delta = exp.global_flat - before
+    recv = [i for i, c in exp.mimic_c.items() if i not in prev or not torch.equal(c, prev[i])]
+    if recv:
+        raw = {i: delta - exp.mimic_c[i] for i in recv}               # c_i = v - g_i
+        corrected = [raw[i] + prev[i] if i in prev else raw[i] for i in recv]
+        assert torch.allclose(sum(corrected) / len(corrected), delta, atol=1e-5)
+
+
+def test_fedcg_selects_k_clients_and_fits_compression_to_the_deadline():
+    exp = Experiment(_small(policy={"name": "fedcg"}, fl={"aggregator": "fedcg"}))
+    exp.env.new_round(1)
+    state = exp._state(1)
+    assert exp.has_hist.all()                                # history probed for everyone
+    sel, assign = exp.policy.act(state, 1)
+    assert len(sel) == len(set(sel)) == 4 and set(assign.values()) == {"standard"}
+    for i in sel:
+        theta = exp.policy.upload_frac[i]
+        assert 0.01 <= theta <= 1.0
+        if theta < 1.0 and theta > 0.01:                     # binding: estimated time == deadline
+            assert exp._est_time(i, "standard", state, theta) == pytest.approx(1.0, rel=1e-6)
+    rows = exp.run(verbose=False)
+    assert len(rows) == 6
+
+
+def test_fedcg_compression_keeps_top_k_and_carries_the_error():
+    exp = Experiment(_small(policy={"name": "fedcg"}, fl={"aggregator": "fedcg"}))
+    u = torch.tensor([0.5, -3.0, 0.1, 2.0, -0.2, 0.0])
+    sent = exp._compress(7, u, 2 / 6)
+    assert torch.equal(sent, torch.tensor([0.0, -3.0, 0.0, 2.0, 0.0, 0.0]))
+    assert torch.allclose(sent + exp.ef_err[7], u)
+    sent2 = exp._compress(7, torch.zeros(6), 2 / 6)          # error is sent next time
+    assert torch.equal(sent2, torch.tensor([0.5, 0.0, 0.0, 0.0, -0.2, 0.0]))
+
+
+def test_fedscale_trace_sets_real_device_profiles_without_moving_availability():
+    a = ClientEnv(Cfg.from_dict({"data": {"num_clients": 50}}), np.full(50, 300.0), seed=4)
+    b = ClientEnv(Cfg.from_dict({"data": {"num_clients": 50}, "system": {"device_trace": "fedscale"}}),
+                  np.full(50, 300.0), seed=4)
+    z = np.load(os.path.join(ROOT, "src", "afl", "traces", "fedscale_device_sample.npz"))
+    comp = z["computation_ms"].astype(float)
+    med = np.median(comp)
+    assert b.speed.min() >= med / comp.max() - 1e-9
+    assert b.speed.max() <= med / comp.min() + 1e-9
+    assert not np.allclose(a.speed, b.speed)
+    assert np.allclose(a.availability_prob(7), b.availability_prob(7))
+    c = ClientEnv(Cfg.from_dict({"data": {"num_clients": 50}, "system": {"device_trace": "fedscale"}}),
+                  np.full(50, 300.0), seed=4)
+    assert np.array_equal(b.speed, c.speed)                  # deterministic per seed
+
+
+def test_new_conditions_and_groups_are_all_runnable():
+    from afl.conditions import CONDITIONS
+    from sweep import build_jobs
+    from afl.run import _load
+    plan = _load(os.path.join(ROOT, "configs", "sweep_advanced.yaml"))
+    for g in ("ext_mnist", "ext_cifar", "sens_cifar", "trace_mnist", "trace_cifar"):
+        assert build_jobs(plan, [g], [0], "out", [])
+    for name in ("c2_gamma", "c2_reweight", "c2_async", "c2_debt", "c2_budget",
+                 "b_random_budget", "b_oort_budget", "b_mifa", "b_mimic", "b_fedcg", "sens_arl0"):
+        raw = {"data": {"num_clients": 12}, "fl": {"rounds": 2, "clients_per_round": 4}}
+        from afl.conditions import apply
+        apply(raw, CONDITIONS[name])
+        assert len(Experiment(Cfg.from_dict(raw)).run(verbose=False)) == 2, name
