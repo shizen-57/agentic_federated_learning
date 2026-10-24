@@ -140,8 +140,15 @@ Measured on this project's 4-core cloud CPU (no GPU), one run per core:
 | CIFAR-10, N=100 | ~7 s | ~20-25 min | 300 | **~25 h** |
 
 MNIST and FEMNIST are fine on any 4-core machine overnight. CIFAR-10 is the
-one to put on a GPU: `notebooks/run_sweep.ipynb` runs any group on Colab or
-Kaggle, resumably, and `--shard` splits a group across several free sessions.
+one to put on a GPU.
+
+**On Kaggle** use `notebooks/run_kaggle.ipynb`: it reads a GitHub token from
+Kaggle Secrets (the repository is private), runs any group in the
+background with *Save & Run All*, stops starting new runs before Kaggle's
+12-hour limit (`--max-hours`), spreads runs over both GPUs of a T4 x2
+machine, and continues an unfinished group in the next session from the
+previous version's output. Its first cell lists a suggested 8-session plan.
+`notebooks/run_sweep.ipynb` is the simpler Colab version.
 GPU speed-ups were not measured (no GPU was available while building this);
 expect most of the gain on CIFAR-10, since the simulator, predictor and policy
 run on the CPU either way.

@@ -23,7 +23,7 @@ import fnmatch
 import os
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 import multiprocessing as mp
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -67,11 +67,14 @@ def _deepcopy(d):
     return {k: _deepcopy(v) if isinstance(v, dict) else v for k, v in d.items()}
 
 
-def _run_one(raw: dict, threads: int) -> tuple[str, float]:
+def _run_one(raw: dict, threads: int, slot: int = 0) -> tuple[str, float]:
     import torch
     torch.set_num_threads(threads)
     from afl.config import Cfg
     from afl.engine import Experiment
+    # With several GPUs (e.g. Kaggle's 2x T4), spread runs across them by slot.
+    if raw.get("fl", {}).get("device") in ("auto", "cuda") and torch.cuda.device_count() > 1:
+        raw["fl"]["device"] = f"cuda:{slot % torch.cuda.device_count()}"
     t0 = time.time()
     exp = Experiment(Cfg.from_dict(raw))
     exp.run(verbose=False)
@@ -94,6 +97,9 @@ def main() -> int:
     ap.add_argument("--shard", default="0/1", help="i/n: run every n-th job starting at i")
     ap.add_argument("--force", action="store_true", help="re-run even if the CSV exists")
     ap.add_argument("--list", action="store_true", help="print the plan and exit")
+    ap.add_argument("--max-hours", type=float, default=0,
+                    help="stop starting new runs after this many hours and let the running "
+                         "ones finish (for sessions with a hard limit, e.g. Kaggle's 12 h)")
     args = ap.parse_args()
 
     plan = _load(args.plan)
@@ -134,29 +140,50 @@ def main() -> int:
 
     threads = args.threads or max(1, (os.cpu_count() or 1) // max(args.jobs, 1))
     t_start = time.time()
+    deadline = t_start + args.max_hours * 3600 if args.max_hours > 0 else float("inf")
     finished = failed = 0
+    queue = list(pending)
+
+    def report(j, result=None, exc=None):
+        nonlocal finished, failed
+        if exc is None:
+            finished += 1
+            print(f"[{finished}/{len(pending)}] {result[0]} {result[1]:.0f}s", flush=True)
+        else:  # keep going: one bad run must not end a sweep
+            failed += 1
+            print(f"FAILED {j['group']}/{j['raw']['tag']}: {exc!r}", flush=True)
+
     if args.jobs <= 1:
-        for j in pending:
+        while queue and time.time() < deadline:
+            j = queue.pop(0)
             try:
-                name, secs = _run_one(j["raw"], threads)
-                finished += 1
-                print(f"[{finished}/{len(pending)}] {name} {secs:.0f}s", flush=True)
-            except Exception as exc:  # keep going: one bad run must not end a sweep
-                failed += 1
-                print(f"FAILED {j['group']}/{j['raw']['tag']}: {exc!r}", flush=True)
+                report(j, _run_one(j["raw"], threads))
+            except Exception as exc:
+                report(j, exc=exc)
     else:
+        # Submit lazily, never more than --jobs at a time, so --max-hours can
+        # stop new runs from starting; each run keeps its own GPU slot.
         ctx = mp.get_context("spawn")
         with ProcessPoolExecutor(max_workers=args.jobs, mp_context=ctx) as pool:
-            futs = {pool.submit(_run_one, j["raw"], threads): j for j in pending}
-            for fut in as_completed(futs):
-                j = futs[fut]
-                try:
-                    name, secs = fut.result()
-                    finished += 1
-                    print(f"[{finished}/{len(pending)}] {name} {secs:.0f}s", flush=True)
-                except Exception as exc:
-                    failed += 1
-                    print(f"FAILED {j['group']}/{j['raw']['tag']}: {exc!r}", flush=True)
+            running: dict = {}
+            free_slots = list(range(args.jobs))
+            while queue or running:
+                while queue and free_slots and time.time() < deadline:
+                    j, slot = queue.pop(0), free_slots.pop(0)
+                    running[pool.submit(_run_one, j["raw"], threads, slot)] = (j, slot)
+                if not running:
+                    break
+                done_set, _ = wait(running, return_when=FIRST_COMPLETED)
+                for fut in done_set:
+                    j, slot = running.pop(fut)
+                    free_slots.append(slot)
+                    try:
+                        report(j, fut.result())
+                    except Exception as exc:
+                        report(j, exc=exc)
+    if queue:
+        print(f"time budget of {args.max_hours} h reached: {len(queue)} runs not started "
+              f"(run the same command again to continue)", flush=True)
     print(f"finished {finished}, failed {failed}, wall {time.time() - t_start:.0f}s")
     return 1 if failed else 0
 

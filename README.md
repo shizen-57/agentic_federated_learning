@@ -61,6 +61,9 @@ python scripts/sweep.py --groups 'weak_*' --jobs 4                # resumable, s
 python scripts/stats.py --dir results/adv/weak_mnist --ref c2_rl_fedprox
 ```
 
+To run it on Kaggle's free GPUs, import [notebooks/run_kaggle.ipynb](notebooks/run_kaggle.ipynb)
+into Kaggle; its first cell has the setup steps and a session plan.
+
 Design, rationale, compute costs and how to read the results:
 [docs/ADVANCED_EXPERIMENTS.md](docs/ADVANCED_EXPERIMENTS.md).
 
