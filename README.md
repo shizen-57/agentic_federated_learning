@@ -56,7 +56,7 @@ Colab session costs you one run rather than the whole sweep.
 
 ```bash
 pip install pyarrow pillow && python scripts/prepare_femnist.py   # once
-python scripts/sweep.py --list                                    # 16 groups, 980 runs
+python scripts/sweep.py --list                                    # 16 groups, 1,060 runs
 python scripts/sweep.py --groups 'weak_*' --jobs 4                # resumable, shardable
 python scripts/stats.py --dir results/adv/weak_mnist --ref c2_rl_fedprox
 ```

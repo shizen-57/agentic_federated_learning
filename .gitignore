@@ -3,8 +3,13 @@ __pycache__/
 .ipynb_checkpoints/
 .pytest_cache/
 data/
-results*/
+# Pilot per-run CSVs stay local; the advanced sweep's per-run CSVs are small
+# (~25 KB) and are committed so figures and tests can be redone without rerunning.
+results*/*
 !results/.gitkeep
 !results/summary.csv
+!results/adv/
+results/adv/*.log
+results/adv/**/*.part
 *.egg-info/
 .venv/

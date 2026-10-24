@@ -82,7 +82,8 @@ def _run_one(raw: dict, threads: int) -> tuple[str, float]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--plan", default=os.path.join(ROOT, "configs", "sweep_advanced.yaml"))
-    ap.add_argument("--groups", nargs="*", help="group names or glob patterns (default: all)")
+    ap.add_argument("--groups", nargs="*",
+                    help="group names or glob patterns, space- or comma-separated (default: all)")
     ap.add_argument("--seeds", type=int, nargs="+", help="override the plan's seeds")
     ap.add_argument("--out", default=os.path.join("results", "adv"))
     ap.add_argument("--set", action="append", default=[],
@@ -96,7 +97,8 @@ def main() -> int:
     args = ap.parse_args()
 
     plan = _load(args.plan)
-    jobs = build_jobs(plan, args.groups, args.seeds, args.out, args.set)
+    groups = [g for arg in (args.groups or []) for g in arg.split(",") if g] or None
+    jobs = build_jobs(plan, groups, args.seeds, args.out, args.set)
     i, n = (int(v) for v in args.shard.split("/"))
     jobs = [j for k, j in enumerate(jobs) if k % n == i]
 

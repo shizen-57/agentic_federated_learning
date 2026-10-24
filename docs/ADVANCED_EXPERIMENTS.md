@@ -16,7 +16,7 @@ the design that replaces it.
 | Rounds | 100 | 100 (MNIST), 200 (FEMNIST, CIFAR-10) |
 | Model | CNN, 11k params | 11k (MNIST), 222k (FEMNIST), 189k (CIFAR-10) |
 | Failure model | independent every round | adds a **persistent weak-client regime** (below) |
-| Conditions | 13, four run by hand | 13, all in one registry (`src/afl/conditions.py`) |
+| Conditions | 13, four run by hand | 14, all in one registry (`src/afl/conditions.py`) |
 | Seeds | 5 | **10** |
 | Statistics | mean ± std | + **paired sign-flip tests, bootstrap CIs, Holm correction** |
 | New metric | -- | `acc_worst10`: accuracy on the worst 10% of classes |
@@ -66,21 +66,45 @@ claim, not a measured property of real fleets. The thesis should present it as
 "the regime in which the mechanism is predicted to matter", and report the
 `weak_random` control and the original independent-failure results beside it.
 
-## The design: 16 groups, 980 runs
+## A second finding: most of ARL' is about clients never invited
+
+Eq. (3.27) sums ARL' over **all** clients, so an eligible client that was
+simply not invited counts as a loss. Instrumenting the round loop shows how
+much of the signal that is:
+
+| Setting | Mean ARL'_t | From invited clients that failed | From eligible clients never invited |
+|---|---|---|---|
+| N=30, K=5 (pilot) | 3.75 | 0.54 (14%) | 3.22 (86%) |
+| N=100, K=10 | 6.87 | 0.65 (9%) | 6.22 (91%) |
+| N=100, K=10, weak_rare | 7.05 | 0.73 (10%) | 6.32 (90%) |
+
+So the part of ARL that rewards *protecting a valuable client from a bad
+configuration* -- the part the prevention argument rests on -- is about a
+tenth of the term. The rest rewards choosing a high-coverage set (which
+shrinks every outsider's marginal value). This is a second candidate
+explanation for the pilot's null ablation, alongside independent failures.
+
+To separate the two, the sweep adds `ablation_arlsel`: the same policy with
+ARL' counted only over invited clients (`reward.damage_metric:
+arl_selected`). Every run also logs `arl_selected`. The thesis's own formula
+stays the default for `c2_rl_fedprox`; which one the thesis should use is a
+decision for the authors once the results are in.
+
+## The design: 16 groups, 1,060 runs
 
 `configs/sweep_advanced.yaml` (`python scripts/sweep.py --list`):
 
 | Family | Groups | Conditions | Question |
 |---|---|---|---|
-| Main | `main_{mnist,femnist,cifar}` | all 13 | Does the full comparison hold on harder data and at N=100? |
-| Weak, rare-data | `weak_{mnist,femnist,cifar}` | 7 (claims + baselines) | **Does ARL beat a raw failure count when valuable clients are the weak ones?** |
-| Weak, random | `weakrand_{mnist,femnist}` | 3 (c2 + both ablations) | Control: is any effect about value? |
+| Main | `main_{mnist,femnist,cifar}` | all 14 | Does the full comparison hold on harder data and at N=100? |
+| Weak, rare-data | `weak_{mnist,femnist,cifar}` | 8 (claims + baselines) | **Does ARL beat a raw failure count when valuable clients are the weak ones?** |
+| Weak, random | `weakrand_{mnist,femnist}` | 4 (c2 + three ablations) | Control: is any effect about value? |
 | Scale | `scale_n{30,200}_{mnist,femnist}` | 4 | Does it hold from 30 to 200 clients? |
 | Non-IID | `alpha{01,05}_{mnist,cifar}` | 4 | Does it hold for very skewed and milder splits? |
 
-Conditions sets: `all` = the 13 of `afl.conditions`; `focus` = c2, both
+Condition sets: `all` = the 14 of `afl.conditions`; `focus` = c2, the three
 ablations, Random, Oort, FedCS, FedCER-like; `core` = c2, raw-failure
-ablation, Random, Oort; `claims` = c2 and both ablations.
+ablation, Random, Oort; `claims` = c2 and the three ablations.
 
 ## How to run it
 
@@ -107,12 +131,29 @@ python scripts/stats.py  --dir results/adv/weak_mnist --ref c2_rl_fedprox
 
 ## Compute
 
-TIMINGS_PLACEHOLDER
+Measured on this project's 4-core cloud CPU (no GPU), one run per core:
+
+| Dataset | Per round | One run | Runs in plan | Whole dataset, 4 runs at a time |
+|---|---|---|---|---|
+| MNIST, N=100 | ~2 s | ~3-4 min | 420 | **~6 h** |
+| FEMNIST, N=100 | ~1.2 s | ~4-5 min | 340 | **~6-7 h** |
+| CIFAR-10, N=100 | ~7 s | ~20-25 min | 300 | **~25 h** |
+
+MNIST and FEMNIST are fine on any 4-core machine overnight. CIFAR-10 is the
+one to put on a GPU: `notebooks/run_sweep.ipynb` runs any group on Colab or
+Kaggle, resumably, and `--shard` splits a group across several free sessions.
+GPU speed-ups were not measured (no GPU was available while building this);
+expect most of the gain on CIFAR-10, since the simulator, predictor and policy
+run on the CPU either way.
+
+Measured update norms are 0.2-1.6 for every model, far below the acceptance
+rule's `norm_clip = 10`, so the larger models are not spuriously rejected.
 
 ## Reading the results
 
 - **The claim test** is `stats.py --dir results/adv/weak_<dataset> --ref
-  c2_rl_fedprox --vs ablation_rawfail ablation_cvsel`. Look at
+  c2_rl_fedprox --vs ablation_rawfail ablation_cvsel ablation_arlsel`, and
+  the same with `--ref ablation_arlsel --vs ablation_rawfail`. Look at
   `final_acc_worst10` and `mean_arl_oracle` first: those are what
   representation loss should move. Overall accuracy can hide it.
 - With 10 seeds the smallest possible exact p-value is 2/1024 ≈ 0.002, so a
