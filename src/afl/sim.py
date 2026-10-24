@@ -78,13 +78,21 @@ class ClientEnv:
         # Static device profile. Three tiers, so a valuable-but-slow client is a
         # thing that actually exists in the population rather than an accident.
         tier = rng.choice([0, 1, 2], size=self.N, p=[0.35, 0.4, 0.25])
-        tier[self.weak] = 0                      # weak clients are always low-end
+        # Weak clients sit on the mid tier's energy budget but get their own,
+        # slower device profile below. Not the low tier: a low-tier client with
+        # an average data volume misses the deadline even under Light (~16%
+        # success), so no configuration choice could rescue it and the regime
+        # would test nothing. Weak clients are calibrated to be *mode-sensitive*:
+        # Light usually works, Standard rarely, Priority almost never.
+        tier[self.weak] = 1
         self.speed = np.array([0.35, 1.0, 2.2])[tier] * rng.uniform(0.8, 1.2, self.N)
         self.bandwidth = np.array([0.3, 1.0, 2.0])[tier] * rng.uniform(0.7, 1.3, self.N)
         self.reliability = np.clip(0.55 + 0.15 * tier + rng.normal(0, 0.08, self.N), 0.3, 0.98)
         self.energy_cap = np.array([0.4, 1.0, 2.5])[tier] * rng.uniform(0.8, 1.2, self.N)
         self.tier = tier
         if n_weak > 0:
+            self.speed[self.weak] = sysc.weak_speed * rng_w.uniform(0.9, 1.1, n_weak)
+            self.bandwidth[self.weak] = sysc.weak_bandwidth * rng_w.uniform(0.85, 1.15, n_weak)
             self.reliability[self.weak] = np.clip(
                 sysc.weak_reliability + rng_w.normal(0, 0.05, n_weak), 0.1, 0.98)
         self.avail_shift = np.where(self.weak, -sysc.weak_avail_drop, 0.0)

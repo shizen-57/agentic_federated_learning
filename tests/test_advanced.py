@@ -45,7 +45,7 @@ def test_defaults_leave_the_device_profile_unchanged():
         assert np.array_equal(getattr(a, k), getattr(b, k))
 
 
-def test_weak_clients_are_the_rare_data_holders_and_are_low_end():
+def test_weak_clients_are_the_rare_data_holders():
     sk = _sketch()
     cfg = Cfg.from_dict({"data": {"num_clients": 30},
                          "system": {"weak_frac": 0.3, "weak_select": "rarity",
@@ -54,10 +54,32 @@ def test_weak_clients_are_the_rare_data_holders_and_are_low_end():
     assert env.weak.sum() == 9
     score = rarity_score(sk)
     assert score[env.weak].min() >= score[~env.weak].max()
-    assert (env.tier[env.weak] == 0).all()
-    assert env.reliability[env.weak].mean() < env.reliability[~env.weak].mean()
+    assert env.speed[env.weak].max() < 1.0               # slower than the mid tier
+    assert env.reliability[env.weak].mean() < 0.65          # below the mid tier (0.70)
     p = env.availability_prob(5)
-    assert np.allclose(p[env.weak], 0.85 - 0.15) and np.allclose(p[~env.weak], 0.85)
+    assert np.allclose(p[env.weak], 0.85 - 0.1) and np.allclose(p[~env.weak], 0.85)
+
+
+def test_weak_clients_are_mode_sensitive_not_dead():
+    """The regime only tests ARL if the configuration choice decides the outcome.
+
+    A weak client must usually succeed under Light and almost never under
+    Priority; if it failed under every mode (as low-tier clients mostly do),
+    no scheduler could rescue it and ARL would have nothing to reward.
+    """
+    sk = _sketch(100)
+    cfg = Cfg.from_dict({"data": {"num_clients": 100},
+                         "system": {"weak_frac": 0.3, "avail_persistence": 0.8,
+                                    "work_ref_samples": 500}})
+    env = ClientEnv(cfg, np.full(100, 300.0), seed=0, sketch=sk)
+    ok = {m: [] for m in ("light", "priority")}
+    for t in range(1, 101):
+        env.new_round(t)
+        for i in np.where(env.weak)[0]:
+            for m in ok:
+                ok[m].append(env.outcome(i, m)["success"])
+    light, prio = np.mean(ok["light"]), np.mean(ok["priority"])
+    assert light > 0.3 and prio < 0.1 and light > 4 * prio
 
 
 def test_random_weak_selection_is_not_value_correlated_by_construction():

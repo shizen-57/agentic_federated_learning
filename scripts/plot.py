@@ -33,7 +33,7 @@ def load_groups(d: str) -> dict[str, list[dict[str, np.ndarray]]]:
     groups = defaultdict(list)
     for path in sorted(glob.glob(os.path.join(d, "*.csv"))):
         name = os.path.basename(path)[:-4]
-        if name == "summary":
+        if name == "summary" or name.startswith("stats_"):
             continue
         with open(path) as fh:
             rows = list(csv.DictReader(fh))

@@ -26,7 +26,7 @@ the configurations below keep it inside a free Colab session.
 | Clients `N` | 30 (100 for the scalability ablation) | Non-IID heterogeneity and starvation dynamics appear at 30. Nothing in Chapter 3 needs 1000. |
 | Selected `K` | 5 | Standard 10-20% participation rate. |
 | Rounds `T` | 100 | Enough for the accuracy curves to separate and for CV_t to stabilise. |
-| Model | ~20k-param CNN | The thesis studies the *policy*, not the architecture. |
+| Model | ~11k-param CNN | The thesis studies the *policy*, not the architecture. |
 | Dataset | MNIST, Dirichlet(0.3) | Free, 11 MB, universally comparable. |
 | Seeds | 5 | Non-negotiable -- see below. |
 
@@ -87,6 +87,12 @@ contribution-success predictor, online ARL' and oracle ARL*, CV_t and Jain
 fairness, FedAvg/FedProx/FedNova, the acceptance rule of Equation (3.18), the
 importance-reweighting correction of Equation (3.54), and the Random / FedCS /
 Power-of-Choice / Oort baselines.
+
+> **Update:** items 1, 2 and 4 below have since been done -- FedCER-like and
+> MIFA/MimiC-like baselines in `src/afl/policies/baselines.py` and
+> `fl.impute_missing`, and CIFAR-10, FEMNIST and alpha in {0.1, 0.5} in the
+> advanced sweep ([ADVANCED_EXPERIMENTS.md](ADVANCED_EXPERIMENTS.md)). The
+> list is kept as originally written.
 
 Not implemented, in the order they are worth adding:
 

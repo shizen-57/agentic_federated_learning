@@ -17,17 +17,19 @@ seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 sets:
   all: [c1_rl_fedavg, c2_rl_fedprox, c3_rl_fednova, c4_heuristic_fedprox,
         c5_rl_fedprox_fednova, b_random, b_fedcs, b_powerofchoice, b_oort,
-        b_fedcer, b_mimic_impute, ablation_rawfail, ablation_cvsel]
+        b_fedcer, b_mimic_impute, ablation_rawfail, ablation_cvsel, ablation_arlsel]
   # The claim tests plus the baselines they must beat.
-  focus: [c2_rl_fedprox, ablation_rawfail, ablation_cvsel, b_random, b_oort,
-          b_fedcs, b_fedcer]
+  focus: [c2_rl_fedprox, ablation_rawfail, ablation_cvsel, ablation_arlsel,
+          b_random, b_oort, b_fedcs, b_fedcer]
   # Minimum set for robustness checks (scale, non-IID severity).
   core: [c2_rl_fedprox, ablation_rawfail, b_random, b_oort]
-  claims: [c2_rl_fedprox, ablation_rawfail, ablation_cvsel]
+  claims: [c2_rl_fedprox, ablation_rawfail, ablation_cvsel, ablation_arlsel]
 
 # The regime the thesis argues ARL is for: 30% of clients are persistently
-# weak (low-end device, unreliable link, less available), availability is
-# sticky, and the weak clients are the ones holding the rarest classes.
+# weak (slower than the mid tier, less reliable, less available) in a way
+# that makes them mode-sensitive -- Light usually works (~33%), Priority
+# almost never (~4%) -- availability is sticky, and the weak clients are the
+# ones holding the rarest classes.
 weak_rare: &weak_rare
   system.weak_frac: 0.3
   system.weak_select: rarity

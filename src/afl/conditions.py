@@ -32,6 +32,11 @@ CONDITIONS: dict[str, dict] = {
                               "reward.damage_metric": "raw_fail"},
     "ablation_cvsel":        {"policy.name": "rl", "fl.aggregator": "fedprox",
                               "reward.fairness_metric": "cv_selection"},
+    # c2 with ARL' counted only over the invited clients: separates "value-
+    # weight the policy's own failures" from Eq. (3.27)'s never-invited term,
+    # which is ~90% of ARL' at N=100/K=10 (docs/ADVANCED_EXPERIMENTS.md).
+    "ablation_arlsel":       {"policy.name": "rl", "fl.aggregator": "fedprox",
+                              "reward.damage_metric": "arl_selected"},
 }
 
 

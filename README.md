@@ -52,6 +52,18 @@ python -m pytest tests -q
 `run_experiments.py` skips any run whose CSV already exists, so a reclaimed
 Colab session costs you one run rather than the whole sweep.
 
+## Advanced sweep (FEMNIST, CIFAR-10, 100-200 clients, weak-client regime)
+
+```bash
+pip install pyarrow pillow && python scripts/prepare_femnist.py   # once
+python scripts/sweep.py --list                                    # 16 groups, 980 runs
+python scripts/sweep.py --groups 'weak_*' --jobs 4                # resumable, shardable
+python scripts/stats.py --dir results/adv/weak_mnist --ref c2_rl_fedprox
+```
+
+Design, rationale, compute costs and how to read the results:
+[docs/ADVANCED_EXPERIMENTS.md](docs/ADVANCED_EXPERIMENTS.md).
+
 ## What maps to what
 
 | Thesis | Code |
@@ -70,14 +82,16 @@ Colab session costs you one run rather than the whole sweep.
 | Reward (Eq. 3.55) | `Experiment.run_round` |
 | Policy `pi: o_t -> (S_t, E_t)` (Sec. 3.14) | `src/afl/policies/rl.py` |
 | Baselines (Table 3.5) | `src/afl/policies/baselines.py` |
-| Experimental conditions (Table 3.4) | `RUNS` in `scripts/run_experiments.py` |
+| Experimental conditions (Table 3.4, 3.5, ablations) | `CONDITIONS` in `src/afl/conditions.py` |
+| Persistent weak-client regime | `ClientEnv.__init__` / `new_round` in `src/afl/sim.py` |
+| Paired significance tests | `scripts/stats.py` |
 
 ## Metrics logged every round
 
-`accuracy`, `test_loss`, `reward`, `cost`, `latency`, `n_selected`, `n_success`,
+`accuracy`, `acc_worst10` (mean accuracy of the worst 10% of classes), `test_loss`, `reward`, `cost`, `latency`, `n_selected`, `n_success`,
 `fail_ratio` (`D^fail_t`), `arl_online` (`ARL'_t`), `arl_oracle` (`ARL*_t`),
 `cv` (`CV_t`), `jain`, `ece` (predictor calibration error), per-mode assignment
-counts, and wall-clock seconds.
+counts, `weak_selected`/`weak_success` (weak-client regime), and wall-clock seconds.
 
 `ARL'`, `ARL*` and `ece` are logged together on purpose: Section 3.23 asks for
 all three, and the gap between ARL' and ARL* is only interpretable next to the
@@ -85,11 +99,17 @@ calibration of the predictor that produced ARL'.
 
 ## Known gaps
 
-The FedCER/FedCG and MIFA/MimiC baselines of Table 3.5 are **not** implemented.
-They are the two most important missing pieces and are the first items in
-[docs/EXPERIMENT_PLAN.md](docs/EXPERIMENT_PLAN.md). Until they exist, Section
-3.22's "closest prior work" claim and Section 3.11's prevention-versus-imputation
-argument rest on argument rather than measurement.
+- The FedCER/FedCG and MIFA/MimiC baselines of Table 3.5 are implemented as
+  simplified "-like" versions (`b_fedcer`, `b_mimic_impute`), not the
+  published algorithms; FedCG itself is not implemented.
+- Defined in Chapter 3 but not used by the code: the discount factor `gamma`
+  (the policy update is one-step REINFORCE), the cost/latency budgets
+  `C_max`/`L_max` (Eq. 3.64-3.65), and the Eq. (3.54) importance reweighting
+  (supported by `aggregate()` but never switched on). The staleness check
+  never fires because rounds are synchronous.
+- No reward-coefficient sensitivity sweep (Sec. 3.18) and no fairness-debt
+  module (Sec. 3.13, optional).
+- Everything is simulated; see [docs/REALISM_CALIBRATION.md](docs/REALISM_CALIBRATION.md).
 
 ## Authors
 

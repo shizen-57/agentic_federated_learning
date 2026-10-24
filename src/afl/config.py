@@ -59,8 +59,10 @@ class SystemCfg:
     weak_select: str = "rarity"         # rarity: the clients holding the rarest
                                         # classes are the weak ones; random: a random
                                         # subset (control -- weakness without value)
-    weak_reliability: float = 0.45      # link reliability of weak clients
-    weak_avail_drop: float = 0.15       # subtracted from weak clients' availability
+    weak_speed: float = 0.8             # weak clients' device speed (mid tier = 1.0)
+    weak_bandwidth: float = 0.6         # weak clients' bandwidth (mid tier = 1.0)
+    weak_reliability: float = 0.6       # link reliability of weak clients (mid tier ~0.7)
+    weak_avail_drop: float = 0.1        # subtracted from weak clients' availability
     avail_persistence: float = 0.0      # P(availability carries over from last round)
 
 
@@ -96,6 +98,12 @@ class RewardCfg:
     # (value-weighted counterfactual damage; capability-conditioned fairness)
     # actually change behaviour versus the naive alternative each replaces.
     damage_metric: str = "arl"          # "arl" | "raw_fail" -- Task 1 ablation
+                                        # | "arl_selected": ARL' restricted to the
+                                        # clients actually invited. Eq. (3.27) sums
+                                        # over all clients, and at N=100/K=10 ~90%
+                                        # of it comes from clients never invited,
+                                        # so the value-weighting of the policy's own
+                                        # failures is a small part of the signal.
     fairness_metric: str = "cv_success"  # "cv_success" | "cv_selection" -- Task 2 ablation
 
 

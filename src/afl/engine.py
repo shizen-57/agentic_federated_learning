@@ -27,7 +27,7 @@ from .sim import ClientEnv
 
 LOG_FIELDS = [
     "round", "accuracy", "acc_worst10", "test_loss", "reward", "cost", "latency",
-    "n_selected", "n_success", "fail_ratio", "arl_online", "arl_oracle",
+    "n_selected", "n_success", "fail_ratio", "arl_online", "arl_selected", "arl_oracle",
     "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
     "mode_priority", "weak_selected", "weak_success", "wall_s",
 ]
@@ -277,6 +277,9 @@ class Experiment:
         # still cost the round its time.
         latency = max(latencies) if latencies else 0.0
         arl_on = M.arl_online(values, state["eligible"], success)
+        # The part of ARL'_t caused by the policy's own invitations failing,
+        # without the never-invited clients Eq. (3.27) also sums over.
+        arl_sel = M.arl_online({i: values[i] for i in selected}, state["eligible"], success)
         arl_or = M.arl_oracle(values, self.env, success)
         cv = M.cv_fairness(self.x_succ)          # successful-contribution CV (core metric, Eq. 3.32)
         cv_sel = M.cv_fairness(self.x_sel)        # raw-selection-count CV (Task 2 ablation comparator)
@@ -296,8 +299,12 @@ class Experiment:
         r = self.cfg.reward
         if r.damage_metric == "raw_fail":
             damage_term = self.norm["faildmg"](fail_ratio)
-        else:
+        elif r.damage_metric == "arl_selected":
+            damage_term = self.norm["arl"](arl_sel)
+        elif r.damage_metric == "arl":
             damage_term = self.norm["arl"](arl_on)
+        else:
+            raise ValueError(f"unknown reward.damage_metric {r.damage_metric}")
         fairness_term = cv_sel if r.fairness_metric == "cv_selection" else cv
 
         reward = (r.alpha * self.norm["acc"](d_acc)
@@ -315,7 +322,7 @@ class Experiment:
             "cost": round_cost, "latency": latency,
             "n_selected": len(selected), "n_success": n_succ,
             "fail_ratio": fail_ratio,
-            "arl_online": arl_on, "arl_oracle": arl_or,
+            "arl_online": arl_on, "arl_selected": arl_sel, "arl_oracle": arl_or,
             "cv": cv, "cv_selection": cv_sel, "jain": M.jain(self.x_succ),
             "ece": M.calibration_error(self.cal_probs[-200:], self.cal_out[-200:]),
             "mode_light": mode_counts["light"],
