@@ -22,7 +22,8 @@ import torch
 def _weighted(updates, weights):
     w = torch.tensor(weights, dtype=torch.float32)
     w = w / w.sum()
-    return sum(u * wi for u, wi in zip(updates, w))
+    # float(): the weights live on the CPU while updates may be on a GPU.
+    return sum(u * float(wi) for u, wi in zip(updates, w))
 
 
 def aggregate(rule: str, updates, n_i, steps, success_probs=None):

@@ -1,9 +1,14 @@
-"""Deliberately small global models.
+"""Global models, small on purpose.
 
-Nothing here is larger than ~100k parameters. That is a research constraint, not
-a shortcut: the thesis studies the orchestration policy, and a small global model
-keeps a 60-round, 30-client experiment inside a free Colab session while leaving
-the non-IID dynamics the policy has to cope with fully intact.
+The thesis studies the orchestration policy, not the architecture, so every
+model here stays small enough for a free Colab/Kaggle session:
+
+``mlp``          ~1k params, synthetic data only.
+``cnn``          ~20k params, MNIST (the original Chapter 5 model).
+``cnn_femnist``  ~220k params, FEMNIST's 62 classes (28x28 grayscale).
+``cnn_cifar``    ~190k params, CIFAR-10 (3x32x32 colour); the classic
+                 three-conv-block CNN, enough to separate policies on a task
+                 that is not saturated after a few rounds.
 """
 from __future__ import annotations
 
@@ -39,9 +44,48 @@ class SmallCNN(nn.Module):
         return self.fc(self.conv(x).flatten(1))
 
 
+class FemnistCNN(nn.Module):
+    """For FEMNIST: same 28x28 input as SmallCNN, wider, with a hidden FC layer."""
+
+    def __init__(self, num_classes: int = 62):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(1, 16, 5, padding=2), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(16, 32, 5, padding=2), nn.ReLU(), nn.MaxPool2d(2),
+        )
+        self.fc = nn.Sequential(nn.Linear(32 * 7 * 7, 128), nn.ReLU(),
+                                nn.Linear(128, num_classes))
+
+    def forward(self, x):
+        x = x.view(-1, 1, 28, 28)
+        return self.fc(self.conv(x).flatten(1))
+
+
+class CifarCNN(nn.Module):
+    """For CIFAR-10, fed as a flat 3072-vector in CHW order."""
+
+    def __init__(self, num_classes: int = 10):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(3, 32, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(64, 64, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+        )
+        self.fc = nn.Sequential(nn.Linear(64 * 4 * 4, 128), nn.ReLU(),
+                                nn.Linear(128, num_classes))
+
+    def forward(self, x):
+        x = x.view(-1, 3, 32, 32)
+        return self.fc(self.conv(x).flatten(1))
+
+
 def build_model(cfg, dim: int, num_classes: int) -> nn.Module:
     if cfg.fl.model == "cnn":
         return SmallCNN(num_classes)
+    if cfg.fl.model == "cnn_femnist":
+        return FemnistCNN(num_classes)
+    if cfg.fl.model == "cnn_cifar":
+        return CifarCNN(num_classes)
     return MLP(dim, num_classes)
 
 

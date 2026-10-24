@@ -12,7 +12,9 @@ from typing import Any
 
 @dataclass
 class DataCfg:
-    dataset: str = "synthetic"          # synthetic | mnist
+    dataset: str = "synthetic"          # synthetic | mnist | cifar10 | femnist
+                                        # (femnist ignores dirichlet_alpha: one
+                                        # client per real writer)
     num_clients: int = 30               # N          (Sec. 3.1)
     dirichlet_alpha: float = 0.3        # non-IID severity (Sec. 3.5)
     min_samples: int = 40
@@ -40,6 +42,26 @@ class SystemCfg:
                                         # rounds/day, so a 100-round run spans ~1 day
     staleness_max: int = 1              # acceptance rule (Eq. 3.18)
     norm_clip: float = 10.0             # acceptance rule (Eq. 3.18)
+    work_ref_samples: float = 0.0       # if > 0, rescale every client's simulated
+                                        # workload so the mean client looks like it
+                                        # holds this many samples. Keeps the
+                                        # Light/Standard/Priority deadline separation
+                                        # the same across datasets whose per-client
+                                        # sample counts differ (FEMNIST writers vs
+                                        # a Dirichlet split). 0 = off (original runs).
+    # Persistent-unreliability regime (docs/ADVANCED_EXPERIMENTS.md). Off by
+    # default. The original simulator draws failures independently per round, so
+    # "valuable client fails" and "any client fails" mostly coincide and ARL has
+    # nothing to add over a raw failure count; this regime makes a fixed subset of
+    # clients persistently weak, and optionally makes that subset the rare-data
+    # holders, which is the setting the thesis argues ARL is for.
+    weak_frac: float = 0.0              # fraction of clients that are persistently weak
+    weak_select: str = "rarity"         # rarity: the clients holding the rarest
+                                        # classes are the weak ones; random: a random
+                                        # subset (control -- weakness without value)
+    weak_reliability: float = 0.45      # link reliability of weak clients
+    weak_avail_drop: float = 0.15       # subtracted from weak clients' availability
+    avail_persistence: float = 0.0      # P(availability carries over from last round)
 
 
 @dataclass
@@ -50,7 +72,11 @@ class FLCfg:
     batch_size: int = 32
     mu: float = 0.01                    # FedProx proximal weight (Sec. 3.17)
     aggregator: str = "fedprox"         # fedavg | fedprox | fednova | fedprox_fednova
-    model: str = "mlp"                  # mlp | cnn
+    model: str = "mlp"                  # mlp | cnn | cnn_femnist | cnn_cifar
+    device: str = "cpu"                 # cpu | cuda | auto
+    eval_subset: int = 0                # if > 0, per-round accuracy uses a fixed
+                                        # random subset of this many test samples;
+                                        # the final round always uses the full set
     impute_missing: bool = False        # MIFA/MimiC-style post-hoc substitution
                                         # of a failed client's update with its
                                         # last known successful delta (Table 3.5);
