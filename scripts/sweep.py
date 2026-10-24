@@ -37,11 +37,12 @@ def build_jobs(plan: dict, groups: list[str] | None, seeds: list[int] | None,
                out: str, extra: list[str]) -> list[dict]:
     """Expand the plan into one fully-specified raw config per run."""
     sets = plan.get("sets", {})
-    use_seeds = seeds if seeds is not None else plan["seeds"]
     jobs = []
     for gname, g in plan["groups"].items():
         if groups and not any(fnmatch.fnmatch(gname, pat) for pat in groups):
             continue
+        # A group may fix its own seeds (e.g. fresh seeds for a confirmatory test).
+        use_seeds = seeds if seeds is not None else g.get("seeds", plan["seeds"])
         conds = g["conditions"]
         conds = sets[conds] if isinstance(conds, str) else conds
         unknown = [c for c in conds if c not in CONDITIONS]

@@ -54,6 +54,29 @@ FEMNIST results exist, as the one pre-specified test for `weak_femnist`:
 > ARL. If it is not significant, the thesis reports ARL as not shown to
 > matter.
 
+### Confirmatory CIFAR-10 test (`confirm_cifar`), also fixed before running
+
+The thesis argues ARL's effect is real but small. 10 seeds cannot tell a
+small effect from none, so the right move is a fresh, adequately sized test
+-- not adding seeds to `weak_cifar` until it crosses p < 0.05, which would
+inflate the false-positive rate.
+
+Effect sizes estimated from seeds 0-9 (`c2_rl_fedprox` minus
+`ablation_rawfail`, final worst-10%-class accuracy): CIFAR-10 +0.051
+(sd 0.095, d = 0.53 -> ~22 seeds for 80% power, one-sided); MNIST +0.016
+(d = 0.16 -> ~257 seeds, impractical: MNIST is near its ceiling). Estimates
+from 10 seeds tend to be optimistic, so the test uses 30 seeds.
+
+> **Pre-specified:** group `confirm_cifar` = the `weak_cifar` setting with
+> **fresh seeds 10-39 only** (never pooled with seeds 0-9), conditions
+> `c2_rl_fedprox` and `ablation_rawfail`. One test: paired sign-flip,
+> `final_acc_worst10`, one-sided (ARL better), alpha = 0.05:
+> `python scripts/stats.py --dir results/adv/confirm_cifar --ref c2_rl_fedprox --vs ablation_rawfail --one-sided`
+> (read the `final_acc_worst10` row only). Significant -> the thesis can
+> claim ARL improves the worst-represented classes on CIFAR-10 in this
+> regime, with the effect size and its CI. Not significant -> ARL is reported
+> as not shown to matter. Other metrics in that output are descriptive only.
+
 ## Where the RL policy does help
 
 All RL variants -- including the plain failure-count one -- behave alike, and

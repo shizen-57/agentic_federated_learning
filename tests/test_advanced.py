@@ -259,3 +259,18 @@ def test_cifar_local_search_ignores_incomplete_directories(tmp_path):
     from afl.data import _cifar_from_dir
     with pytest.raises(Exception):
         _cifar_from_dir(str(tmp_path / "cifar-10-batches-py"))
+
+
+def test_one_sided_sign_flip_and_group_seeds():
+    from stats import sign_flip_p
+    d = np.ones(5)
+    assert sign_flip_p(d, alternative="greater") == pytest.approx(1 / 32)
+    assert sign_flip_p(d, alternative="less") == pytest.approx(1.0)
+    assert sign_flip_p(-d, alternative="less") == pytest.approx(1 / 32)
+    from sweep import build_jobs
+    from afl.run import _load
+    plan = _load(os.path.join(ROOT, "configs", "sweep_advanced.yaml"))
+    jobs = build_jobs(plan, ["confirm_cifar"], None, "out", [])
+    assert sorted({j["seed"] for j in jobs}) == list(range(10, 40))   # fresh seeds only
+    assert {j["cond"] for j in jobs} == {"c2_rl_fedprox", "ablation_rawfail"}
+    assert jobs[0]["raw"]["system"]["weak_select"] == "rarity"

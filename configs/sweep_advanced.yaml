@@ -80,3 +80,13 @@ groups:
   alpha05_mnist: {config: configs/adv/mnist.yaml,   set: {data.dirichlet_alpha: 0.5}, conditions: core}
   alpha01_cifar: {config: configs/adv/cifar10.yaml, set: {data.dirichlet_alpha: 0.1}, conditions: core}
   alpha05_cifar: {config: configs/adv/cifar10.yaml, set: {data.dirichlet_alpha: 0.5}, conditions: core}
+
+  # 6. Pre-specified confirmatory test (docs/ADVANCED_RESULTS.md), decided
+  #    after weak_cifar seeds 0-9 hinted at a small effect and BEFORE these
+  #    runs: fresh seeds 10-39 only (never pooled with 0-9), ARL reward vs the
+  #    plain failure count, one metric (final_acc_worst10), one-sided, alpha 0.05.
+  confirm_cifar:
+    config: configs/adv/cifar10.yaml
+    set: *weak_rare
+    conditions: [c2_rl_fedprox, ablation_rawfail]
+    seeds: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]

@@ -51,18 +51,26 @@ def reduce(rows: list[dict], col: str, how: str) -> float:
     return float(np.mean([r[col] for r in rows]))
 
 
-def sign_flip_p(d: np.ndarray, n_random: int = 100_000, seed: int = 0) -> float:
-    """Two-sided p-value for H0: the paired differences are symmetric about 0."""
+def sign_flip_p(d: np.ndarray, n_random: int = 100_000, seed: int = 0,
+                alternative: str = "two-sided") -> float:
+    """p-value for H0: the paired differences are symmetric about 0.
+
+    alternative: "two-sided", "greater" (mean difference > 0) or "less".
+    """
     n = len(d)
-    obs = abs(d.mean())
+    obs = d.mean()
     if n == 0:
         return float("nan")
     if n <= 16:
         signs = np.array(list(itertools.product([1.0, -1.0], repeat=n)))
     else:
         signs = np.random.default_rng(seed).choice([1.0, -1.0], size=(n_random, n))
-    null = np.abs((signs * d).mean(axis=1))
-    return float((null >= obs - 1e-12).mean())
+    null = (signs * d).mean(axis=1)
+    if alternative == "greater":
+        return float((null >= obs - 1e-12).mean())
+    if alternative == "less":
+        return float((null <= obs + 1e-12).mean())
+    return float((np.abs(null) >= abs(obs) - 1e-12).mean())
 
 
 def bootstrap_ci(d: np.ndarray, n_boot: int = 10_000, seed: int = 0) -> tuple[float, float]:
@@ -90,6 +98,8 @@ def main() -> int:
     ap.add_argument("--ref", default="c2_rl_fedprox")
     ap.add_argument("--vs", nargs="*", help="conditions to compare against (default: all)")
     ap.add_argument("--alpha", type=float, default=0.05)
+    ap.add_argument("--one-sided", action="store_true",
+                    help="test only 'reference is better' (for a pre-specified directional test)")
     args = ap.parse_args()
 
     runs: dict[str, dict[int, list[dict]]] = defaultdict(dict)
@@ -118,7 +128,9 @@ def main() -> int:
             lo, hi = bootstrap_ci(d)
             recs.append({"metric": label, "other": other, "n": len(seeds),
                          "ref_mean": a.mean(), "other_mean": b.mean(), "diff": d.mean(),
-                         "ci_lo": lo, "ci_hi": hi, "p": sign_flip_p(d), "higher": higher})
+                         "ci_lo": lo, "ci_hi": hi, "higher": higher,
+                         "p": sign_flip_p(d, alternative=("greater" if higher else "less")
+                                          if args.one_sided else "two-sided")})
         for r, p_adj in zip(recs, holm([r["p"] for r in recs])):
             r["p_holm"] = p_adj
             better = (r["diff"] > 0) == r["higher"]
@@ -127,7 +139,8 @@ def main() -> int:
         out_rows.extend(recs)
 
     print(f"# {args.dir}: {args.ref} vs others (paired by seed; diff = ref - other; "
-          f"Holm-corrected within each metric)\n")
+          f"Holm-corrected within each metric; "
+          f"{'one-sided: ref better' if args.one_sided else 'two-sided'})\n")
     cur = None
     for r in out_rows:
         if r["metric"] != cur:
