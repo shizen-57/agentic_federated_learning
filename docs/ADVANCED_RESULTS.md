@@ -144,3 +144,6 @@ reported alone as evidence of a better scheduler.
 - The regime was designed before seeing results and was not retuned
   afterwards; tuning it until ARL wins would invalidate the test.
 - FEMNIST, the main comparison, scale and non-IID groups are pending.
+- Oort's system utility uses each round's true (hidden) client times
+  (`t_expected` in `engine._state`), which a real server would not know. Only
+  Oort uses it, so wins over Oort understate the proposed policy's margin.

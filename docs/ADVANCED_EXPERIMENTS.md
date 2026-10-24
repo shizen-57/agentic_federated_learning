@@ -90,7 +90,7 @@ arl_selected`). Every run also logs `arl_selected`. The thesis's own formula
 stays the default for `c2_rl_fedprox`; which one the thesis should use is a
 decision for the authors once the results are in.
 
-## The design: 16 groups, 1,060 runs
+## The design: 22 groups, 1,580 runs
 
 `configs/sweep_advanced.yaml` (`python scripts/sweep.py --list`):
 
@@ -101,10 +101,65 @@ decision for the authors once the results are in.
 | Weak, random | `weakrand_{mnist,femnist}` | 4 (c2 + three ablations) | Control: is any effect about value? |
 | Scale | `scale_n{30,200}_{mnist,femnist}` | 4 | Does it hold from 30 to 200 clients? |
 | Non-IID | `alpha{01,05}_{mnist,cifar}` | 4 | Does it hold for very skewed and milder splits? |
+| Confirmation | `confirm_cifar` | 2, fresh seeds 10-39 | Pre-specified test of ARL vs the plain failure count (ADVANCED_RESULTS.md) |
+| Chapter 3 extensions | `ext_{mnist,cifar}` | 11 (`ext`) | Do gamma, Eq. 3.54, semi-async staleness, fairness debt and budgets change the picture? How do the published MIFA, MimiC and FedCG compare? |
+| Sensitivity | `sens_cifar` | 8 (`sens`) | Does the result depend on the reward weights (Sec. 3.18), and does the ARL term matter at all (`lambda_arl` = 0)? |
+| Real devices | `trace_{mnist,cifar}` | 8 (`focus`) | Does it hold with FedScale's measured phones instead of guessed tiers? |
 
-Condition sets: `all` = the 14 of `afl.conditions`; `focus` = c2, the three
+Condition sets: `all` = the 14 core conditions; `focus` = c2, the three
 ablations, Random, Oort, FedCS, FedCER-like; `core` = c2, raw-failure
-ablation, Random, Oort; `claims` = c2 and the three ablations.
+ablation, Random, Oort; `claims` = c2 and the three ablations; `ext` = c2,
+c2_gamma, c2_reweight, c2_async, c2_debt, c2/Random/Oort under budgets
+(C_max = 10, L_max = 1.0), MIFA, MimiC, FedCG; `sens` = c2 and lambda_arl in
+{0, 0.25, 1, 2}, lambda_fair in {0, 0.1, 1}.
+
+## The remaining pieces of Chapter 3, and the published baselines
+
+Each is off by default; re-running `weak_mnist` seed 0 (all 8 conditions)
+with them in the code reproduced the committed CSVs exactly in every column
+of every round.
+
+- **gamma** (`policy.horizon`): with H > 1 the policy is updated once per
+  H-round window on discounted returns G_t = sum_k gamma^k r_{t+k}, so a choice
+  that pays off a few rounds later can be credited. `c2_gamma` uses H = 10.
+- **C_max / L_max** (`system.cost_max`, `system.latency_max`): applied to every
+  policy's chosen action from observable estimates -- a client whose
+  estimated time exceeds L_max moves to a lighter mode or is dropped; while
+  the round's cost exceeds C_max the lowest-priority client moves to a
+  lighter mode or is dropped. Same rule for RL, Random and Oort.
+- **Eq. 3.54** (`fl.importance_reweight`): updates weighted by n_i / p_succ,
+  with p_succ floored at 0.1 (`fl.reweight_floor`) -- without a floor one
+  lucky success predicted at 1% would get 100x weight.
+- **Staleness** (`fl.async_late`): a client that misses the deadline but would
+  finish within `staleness_max` rounds trains on the round-t model and
+  delivers next round; Eq. 3.18's staleness check decides whether it counts.
+  Semi-asynchronous only.
+- **Fairness debt** (`reward.lambda_debt`): d_i <- max(0, d_i + (K/N) e_i - s_i)
+  with e_i the eligibility gate and s_i a successful contribution; the mean
+  debt is a reward penalty and each client's debt a policy input. This is
+  the standard virtual-queue form; check it against the thesis's Sec. 3.13.
+- **MIFA** (Gu et al., NeurIPS 2021, Alg. 1): the server keeps every client's
+  latest update (zero before it first reports) and steps by their mean over
+  all N clients.
+- **MimiC** (Sun et al., IEEE TMC 2024, Alg. 1): each received update g_i is
+  corrected with the client's correction variable from its last active
+  round, v_i = g_i + c_i; the server steps by the mean v and sets c_i = v - g_i.
+- **FedCG** (Li et al., arXiv 2212.09483, Alg. 1-2): greedy facility-location
+  selection on clients' latest updates (count-sketch projected to 1,024
+  dimensions; clients never seen get one probe epoch), a per-client
+  compression ratio set to the largest value whose estimated time fits the
+  deadline, top-k sparsification with error feedback, equal-weight mean.
+  Like the paper it does not model availability.
+- **FedScale device trace** (`system.device_trace: fedscale`): per-client
+  compute speed and bandwidth drawn from a 20,000-device sample of FedScale's
+  measured `client_device_capacity` trace (Apache-2.0; `src/afl/traces/`),
+  relative to the trace median. Reliability and battery still come from the
+  speed tier, since the trace does not record them.
+
+MIFA and MimiC are aggregation rules for absent clients; their papers sample
+clients without a scheduler, so they run under random selection. FedCER is
+still the simplified `b_fedcer`: its paper could not be identified from the
+name alone.
 
 ## How to run it
 

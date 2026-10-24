@@ -56,7 +56,7 @@ Colab session costs you one run rather than the whole sweep.
 
 ```bash
 pip install pyarrow pillow && python scripts/prepare_femnist.py   # once
-python scripts/sweep.py --list                                    # 16 groups, 1,060 runs
+python scripts/sweep.py --list                                    # 22 groups, 1,580 runs
 python scripts/sweep.py --groups 'weak_*' --jobs 4                # resumable, shardable
 python scripts/stats.py --dir results/adv/weak_mnist --ref c2_rl_fedprox
 ```
@@ -100,18 +100,36 @@ counts, `weak_selected`/`weak_success` (weak-client regime), and wall-clock seco
 all three, and the gap between ARL' and ARL* is only interpretable next to the
 calibration of the predictor that produced ARL'.
 
+## Status of Chapter 3 and Table 3.5 in code
+
+Everything below is implemented, off by default (so earlier results are
+reproduced exactly), and has its own experiment group in
+`configs/sweep_advanced.yaml`:
+
+| Thesis | Code switch | Group |
+|---|---|---|
+| Discount `gamma` (multi-round credit) | `policy.horizon > 1` | `ext_*` (`c2_gamma`) |
+| Budgets `C_max`, `L_max` (Eq. 3.64-3.65) | `system.cost_max`, `system.latency_max` | `ext_*` (`*_budget`) |
+| Importance reweighting (Eq. 3.54) | `fl.importance_reweight` | `ext_*` (`c2_reweight`) |
+| Staleness rule (Eq. 3.18), semi-asynchronous | `fl.async_late` | `ext_*` (`c2_async`) |
+| Fairness debt (Sec. 3.13) | `reward.lambda_debt` | `ext_*` (`c2_debt`) |
+| Reward-weight sensitivity (Sec. 3.18) | `sens_*` conditions | `sens_cifar` |
+| MIFA, MimiC, FedCG (Table 3.5), from the papers' algorithms | `fl.aggregator: mifa / mimic`, `policy.name: fedcg` | `ext_*` |
+| Real device heterogeneity (FedScale trace) | `system.device_trace: fedscale` | `trace_*` |
+
 ## Known gaps
 
-- The FedCER/FedCG and MIFA/MimiC baselines of Table 3.5 are implemented as
-  simplified "-like" versions (`b_fedcer`, `b_mimic_impute`), not the
-  published algorithms; FedCG itself is not implemented.
-- Defined in Chapter 3 but not used by the code: the discount factor `gamma`
-  (the policy update is one-step REINFORCE), the cost/latency budgets
-  `C_max`/`L_max` (Eq. 3.64-3.65), and the Eq. (3.54) importance reweighting
-  (supported by `aggregate()` but never switched on). The staleness check
-  never fires because rounds are synchronous.
-- No reward-coefficient sensitivity sweep (Sec. 3.18) and no fairness-debt
-  module (Sec. 3.13, optional).
+- **FedCER** is still the simplified `b_fedcer` ("FedCER-like"): its paper
+  could not be identified from the name alone. Add the thesis's reference [6]
+  and it can be implemented like the others.
+- **Fairness debt** follows the standard virtual-queue form (each eligible
+  client accrues K/N per round and pays it off with a successful
+  contribution). Check it against the thesis's own Sec. 3.13 definition.
+- **Asynchrony** is semi-asynchronous only: a late client may deliver up to
+  `staleness_max` rounds late. A fully asynchronous server is not modelled.
+- **Oort sees true round times**: `t_expected` uses each round's hidden draws,
+  which a real server would not have. Only Oort uses it, so comparisons
+  against Oort are, if anything, conservative for the proposed policy.
 - Everything is simulated; see [docs/REALISM_CALIBRATION.md](docs/REALISM_CALIBRATION.md).
 
 ## Authors

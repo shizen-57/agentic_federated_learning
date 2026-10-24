@@ -38,9 +38,16 @@ def build_jobs(plan: dict, groups: list[str] | None, seeds: list[int] | None,
     """Expand the plan into one fully-specified raw config per run."""
     sets = plan.get("sets", {})
     jobs = []
-    for gname, g in plan["groups"].items():
-        if groups and not any(fnmatch.fnmatch(gname, pat) for pat in groups):
-            continue
+    names = list(plan["groups"])
+    if groups:
+        # Run groups in the order they were asked for (by first matching
+        # pattern), so a session that hits its time limit has done the most
+        # important ones first.
+        rank = {n: min((k for k, pat in enumerate(groups) if fnmatch.fnmatch(n, pat)),
+                       default=None) for n in names}
+        names = sorted((n for n in names if rank[n] is not None), key=lambda n: rank[n])
+    for gname in names:
+        g = plan["groups"][gname]
         # A group may fix its own seeds (e.g. fresh seeds for a confirmatory test).
         use_seeds = seeds if seeds is not None else g.get("seeds", plan["seeds"])
         conds = g["conditions"]

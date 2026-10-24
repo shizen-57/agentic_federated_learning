@@ -66,12 +66,22 @@ methodological precedent (trace-driven calibration) this qualitatively
 follows, rather than presenting the tiered heterogeneity as an arbitrary
 choice.
 
+### 3. Optional: real measured devices (FedScale trace)
+
+`system.device_trace: fedscale` replaces the three guessed tiers with
+per-client compute speed and bandwidth drawn from a 20,000-device sample of
+FedScale's `client_device_capacity` trace (Lai et al., ICML 2022; measured on
+real phones; Apache-2.0, `src/afl/traces/`). The `trace_*` groups of the
+advanced sweep rerun the key comparison this way. Reliability and battery
+still come from the speed tier, because the trace does not record them.
+
 ## What is NOT independently calibrated (stated plainly, not hidden)
 
 - The **exact numeric values** of the speed/bandwidth/reliability tiers (e.g.,
   the specific multipliers 0.35/1.0/2.2) are not drawn from a published trace
-  file -- FedScale's actual device trace was not available to replay in this
-  environment (no network access to download it). They are a heavy-tailed
+  file. FedScale's trace is now available as an option (section 3 above), but
+  the default runs keep the tiers so earlier results stay comparable, and
+  reliability and battery are never trace-based. They are a heavy-tailed
   approximation *in the same qualitative shape* as what such traces show, not
   a numeric match to any specific published table.
 - The dataset partition (MNIST, Dirichlet-alpha non-IID split) is an

@@ -419,3 +419,12 @@ def test_new_conditions_and_groups_are_all_runnable():
         from afl.conditions import apply
         apply(raw, CONDITIONS[name])
         assert len(Experiment(Cfg.from_dict(raw)).run(verbose=False)) == 2, name
+
+
+def test_sweep_runs_groups_in_the_order_asked():
+    from sweep import build_jobs
+    from afl.run import _load
+    plan = _load(os.path.join(ROOT, "configs", "sweep_advanced.yaml"))
+    jobs = build_jobs(plan, ["confirm_cifar", "main_mnist"], [0], "out", [])
+    order = list(dict.fromkeys(j["group"] for j in jobs))
+    assert order == ["confirm_cifar", "main_mnist"]
