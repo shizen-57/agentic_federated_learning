@@ -458,6 +458,13 @@ not instead of it.
 > success, `arl2_shared` vs `arl2_full` (does per-decision credit matter?),
 > `v2_c2` and Random.
 
+**Development check (MNIST, seeds 0-2, bug check only; nothing was changed
+afterwards):** no errors or NaNs; the full ARL-v2 policy drives its own loss
+down (mean ARL-v2 0.012 vs 0.058 for the plain failure count and 0.285 for
+Random), so the per-decision credit is wired correctly; without churn no
+client leaves, with churn 9-40 of 100 leave (Random 32-40, RL variants
+9-30), so the scenario is neither trivial nor degenerate.
+
 ## GPU runs are not bit-reproducible
 
 The same configuration and seed gives different results across the three
