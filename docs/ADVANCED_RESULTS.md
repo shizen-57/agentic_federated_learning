@@ -855,8 +855,24 @@ other clients (`ece_light`, ..., `ece_weak`, `ece_strong`).
 > of that seed stopped, and the cost to first reach 90% of Random's final
 > accuracy -- which separates better decisions from simply training less.
 
-**Development check (`dev_s2_mnist`, seeds 0-2, CPU; bug check only):**
-see below once it has finished.
+**Development check (`dev_s2_mnist`, seeds 0-2, CPU, all fixes on; bug
+check only, nothing was changed afterwards):** run from a frozen snapshot of
+commit `c8a91ef`; 69 of 69 runs finished, no errors or NaNs, one code
+fingerprint (`cf531573f0858241`), every method started from the same model
+within each seed (3 distinct initial models for 3 seeds), no mid-run source
+change. Behaviour is as designed: with the check-in pool, Random's failure
+ratio is 0.71 (it no longer invites offline clients), the expected-work
+rule moves Random/Oort/Power-of-Choice/FAVOR/DELTA/REFL off all-Standard and
+cuts their failures (e.g. Oort 0.74 -> 0.48), ARL-v3 mixes modes (6.3 Light /
+1.2 Standard / 2.4 Priority per round), and the strict gate fills ~0.7-2
+slots per round for the RL variants when fewer than 10 online clients pass
+the gate (logged as `gate_filled`).
+
+**Frozen.** The code the `s2_*` runs must be made with has fingerprint
+`cf531573f0858241` (commit `c8a91ef`; `FROZEN_CODE_HASH` in
+`scripts/prespec_s2.py`). Later commits that change only docs or scripts
+keep it; any change to `src/afl` changes it, and `prespec_s2.py` then gives
+no verdict on runs made with the new code.
 
 **Still open, not addressed by these runs:** generalisation to fleets,
 availability patterns and partitions the policy was not developed on; and

@@ -42,7 +42,7 @@ from sweep import ROOT, build_jobs, run_status  # noqa: E402
 
 # Fingerprint (afl.provenance.code_hash) of the simulator code the s2 runs
 # must have been made with, fixed when the design was frozen.
-FROZEN_CODE_HASH = None
+FROZEN_CODE_HASH = "cf531573f0858241"   # commit c8a91ef
 
 SEEDS = set(range(100, 120))
 BASELINES = ["b_favor", "b_favor_ew", "b_refl", "b_refl_ew", "b_delta", "b_delta_ew",
