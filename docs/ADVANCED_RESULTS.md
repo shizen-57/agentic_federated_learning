@@ -641,6 +641,8 @@ None of the three chooses modes, so they use Standard, as Random and Oort do.
 > `s2_femnist` (12 tests, Holm across all 12).
 > **C2.** The same 12 pairs on mean `fail_ratio`, two-sided (12 tests).
 >
+> All four families are computed by `python scripts/prespec_s2.py`.
+>
 > Everything else -- `s2_main_*` (no weak clients), cost, clients lost,
 > `rl_ew` vs `c2_rl_fedprox`, `arl3_shared`, the original baselines under the
 > fixed simulator -- is descriptive.
