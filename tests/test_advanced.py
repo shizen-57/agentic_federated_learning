@@ -480,3 +480,54 @@ def test_marginal_value_input_matches_what_arl_rewards_and_is_opt_in():
     jobs = build_jobs(_load(os.path.join(ROOT, "configs", "sweep_advanced.yaml")), ["value_cifar"], None, "o", [])
     assert sorted({j["seed"] for j in jobs}) == list(range(40, 60))
     assert all(j["raw"]["policy"]["value_feature"] == "marginal" for j in jobs)
+
+
+# ------------------------------------------------------------ ARL-v2 and churn
+
+def test_churn_is_off_by_default_and_departures_are_permanent():
+    env = ClientEnv(Cfg.from_dict({"data": {"num_clients": 20}}), np.full(20, 300.0), seed=0)
+    assert np.isinf(env.patience).all()
+    cfg = Cfg.from_dict({"data": {"num_clients": 20}, "system": {"churn_after": 2, "churn_prob": 1.0}})
+    env = ClientEnv(cfg, np.full(20, 300.0), seed=0)
+    env.record(3, "unavailable"); env.record(3, "unavailable")
+    assert not env.departed[3]                       # offline rounds do not count
+    env.record(3, "deadline"); env.record(3, "ok"); env.record(3, "deadline")
+    assert not env.departed[3]                       # a success resets the streak
+    env.record(3, "energy")
+    assert env.departed[3]
+    for t in range(1, 6):
+        env.new_round(t)
+        assert not env._draw["available"][3]
+        assert env.outcome(3, "light")["reason"] == "unavailable"
+
+
+def test_churn_patience_is_the_same_for_every_policy():
+    cfg = Cfg.from_dict({"data": {"num_clients": 40}, "system": {"churn_after": 3}})
+    a = ClientEnv(cfg, np.full(40, 300.0), seed=5)
+    b = ClientEnv(cfg, np.full(40, 300.0), seed=5)
+    assert np.array_equal(a.patience, b.patience) and 0 < np.isfinite(a.patience).sum() < 40
+
+
+def test_arl_v2_counts_only_avoidable_failures_of_invited_clients():
+    rows = Experiment(_small(reward={"damage_metric": "arl_v2"},
+                             policy={"value_feature": "marginal"})).run(verbose=False)
+    assert all(r["arl_v2"] >= 0 for r in rows)
+    exp = Experiment(_small())
+    exp.env.new_round(1)
+    state = exp._state(1)
+    # The formula: gap of the assigned mode vs the best mode, times value and coverage factor.
+    i = 0
+    p = state["p_succ"][i]
+    best = max(p, key=p.get)
+    assert max(p.values()) - p[best] == 0.0            # choosing the safest mode forfeits nothing
+
+
+def test_per_client_credit_changes_learning_only_when_switched_on():
+    a = Experiment(_small(reward={"damage_metric": "arl_v2"}, policy={"value_feature": "marginal"}))
+    b = Experiment(_small(reward={"damage_metric": "arl_v2"},
+                          policy={"value_feature": "marginal", "per_client_credit": True}))
+    ra, rb = a.run(verbose=False), b.run(verbose=False)
+    pa = torch.cat([p.detach().flatten() for p in a.policy.net.parameters()])
+    pb = torch.cat([p.detach().flatten() for p in b.policy.net.parameters()])
+    assert not torch.allclose(pa, pb)
+    assert all("arl_v2" in r and "departed" in r for r in rb)

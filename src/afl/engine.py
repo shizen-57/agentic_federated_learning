@@ -30,7 +30,7 @@ LOG_FIELDS = [
     "n_selected", "n_success", "fail_ratio", "arl_online", "arl_selected", "arl_oracle",
     "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
     "mode_priority", "weak_selected", "weak_success", "late_delivered",
-    "budget_dropped", "debt_mean", "wall_s",
+    "budget_dropped", "debt_mean", "arl_v2", "departed", "wall_s",
 ]
 
 LIGHTER = {"priority": "standard", "standard": "light", "light": None}
@@ -88,7 +88,8 @@ class Experiment:
         self.gen = torch.Generator().manual_seed(cfg.seed + 3)
         self.last_update: dict[int, torch.Tensor] = {}  # MIFA/MimiC substitution store
 
-        self.norm = {k: M.Normalizer() for k in ("acc", "cost", "lat", "arl", "faildmg", "debt")}
+        self.norm = {k: M.Normalizer() for k in ("acc", "cost", "lat", "arl", "faildmg", "debt", "v2c")}
+        self.cov_ema = np.zeros(self.d["num_classes"])   # ARL-v2 class-coverage history
         if cfg.policy.value_feature == "marginal":
             self.value_input = M.expected_marginal_value(
                 self.d["sketch"], cfg.fl.clients_per_round, seed=cfg.seed + 41)
@@ -312,6 +313,7 @@ class Experiment:
 
         updates, weights, steps, succ_p, recv_ids = [], [], [], [], []
         success: dict[int, int] = {}
+        reasons: dict[int, str] = {}
 
         # Semi-asynchronous deliveries from last round, now one round stale:
         # Eq. (3.18)'s staleness check decides whether they still count.
@@ -344,6 +346,7 @@ class Experiment:
             self.issued_round[i] = t
             round_cost += self.env.cost(i, mode, frac)
             out = self.env.outcome(i, mode, frac)
+            reasons[i] = out["reason"]
             latencies.append(out["latency"])
             # Energy spend is deferred until after the oracle diagnostic below
             # is computed (Sec. 3.11, Eq. 3.29): applying it immediately would
@@ -470,6 +473,31 @@ class Experiment:
         # diagnostic above has queried every client's pre-spend state.
         for i, mode, frac in pending_spends:
             self.env.spend(i, mode, frac)
+        for i, why in reasons.items():
+            self.env.record(i, why)
+
+        # ARL-v2: the representation loss this round's decisions caused. Only
+        # invited clients that failed count; each is weighted by
+        #   gap_i   success probability its assigned mode gave up vs. its best mode
+        #           (zero if the scheduler already chose the safest mode),
+        #   V_i     its representation value this round (Eq. 3.26), and
+        #   a_i     1 + its data share in classes that have been under-covered
+        #           lately, so a long absence costs more than a short gap.
+        sketch = self.d["sketch"]
+        deficit = 1.0 - self.cov_ema / max(float(self.cov_ema.max()), 1e-9)
+        v2: dict[int, float] = {}
+        for i in selected:
+            if success.get(i, 0):
+                v2[i] = 0.0
+                continue
+            p = state["p_succ"][i]
+            gap = max(p.values()) - p[assign[i]]
+            v2[i] = float(gap * values[i] * (1.0 + sketch[i] @ deficit))
+        arl_v2 = float(sum(v2.values()))
+        ok_ids = [i for i in selected if success.get(i, 0)]
+        cov = sketch[ok_ids].max(axis=0) if ok_ids else np.zeros_like(self.cov_ema)
+        b = self.cfg.reward.arl_v2_ema
+        self.cov_ema = (1 - b) * self.cov_ema + b * cov
 
         # Fairness debt (Sec. 3.13): each eligible client accrues its fair share
         # K/N of service per round and pays it off with a successful contribution.
@@ -490,6 +518,10 @@ class Experiment:
             damage_term = self.norm["arl"](arl_sel)
         elif r.damage_metric == "arl":
             damage_term = self.norm["arl"](arl_on)
+        elif r.damage_metric == "arl_v2":
+            # With per-decision credit the damage leaves the shared reward and
+            # is handed to the policy client by client instead.
+            damage_term = 0.0 if self.cfg.policy.per_client_credit else self.norm["arl"](arl_v2)
         else:
             raise ValueError(f"unknown reward.damage_metric {r.damage_metric}")
         fairness_term = cv_sel if r.fairness_metric == "cv_selection" else cv
@@ -501,8 +533,11 @@ class Experiment:
                   - r.lambda_fair * fairness_term)
         if r.lambda_debt > 0:
             reward -= r.lambda_debt * self.norm["debt"](float(self.debt.mean()))
+        client_adv = None
+        if r.damage_metric == "arl_v2" and self.cfg.policy.per_client_credit:
+            client_adv = {i: -r.lambda_arl * self.norm["v2c"](v2[i]) for i in selected}
         self.policy.observe_outcome(state, (selected, assign), reward,
-                                    {"success": success})
+                                    {"success": success, "client_adv": client_adv})
 
         weak = self.env.weak
         row = {
@@ -522,6 +557,8 @@ class Experiment:
             "late_delivered": late_delivered,
             "budget_dropped": budget_dropped,
             "debt_mean": float(self.debt.mean()),
+            "arl_v2": arl_v2,
+            "departed": int(self.env.departed.sum()),
             "wall_s": time.time() - t0,
         }
         self.rows.append(row)

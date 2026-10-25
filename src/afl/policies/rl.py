@@ -110,37 +110,44 @@ class RLPolicy(Policy):
             elig = torch.ones(N, dtype=torch.bool)
         masked = scores.masked_fill(~elig, -1e9)
 
-        sel, logp_sel = self._sample_topk(masked, K)
+        sel, logp_sel, step_logp = self._sample_topk(masked, K)
 
         logp_mode = 0.0
         entropy = 0.0
         assign = {}
+        # Per-client log-probabilities (pick + mode), for per-decision credit.
+        logp_client = dict(step_logp)
         for i in sel:
             dist = torch.distributions.Categorical(logits=mode_logits[i])
             m = dist.sample() if self.train_mode else mode_logits[i].argmax()
-            logp_mode = logp_mode + dist.log_prob(m)
+            lp = dist.log_prob(m)
+            logp_mode = logp_mode + lp
+            logp_client[int(i)] = logp_client[int(i)] + lp
             entropy = entropy + dist.entropy()
             assign[int(i)] = self.modes[int(m)]
 
         sel_entropy = torch.distributions.Categorical(logits=masked).entropy()
-        self._pending = {"logp": logp_sel + logp_mode, "entropy": entropy + sel_entropy}
+        self._pending = {"logp": logp_sel + logp_mode, "entropy": entropy + sel_entropy,
+                         "logp_client": logp_client}
         return [int(i) for i in sel], assign
 
     def _sample_topk(self, logits: torch.Tensor, K: int):
         """Sequential softmax sampling without replacement (Plackett-Luce)."""
         avail = logits.clone()
-        chosen, logp = [], 0.0
+        chosen, logp, steps = [], 0.0, {}
         for _ in range(K):
             dist = torch.distributions.Categorical(logits=avail)
             if self.train_mode:
                 i = dist.sample()
             else:
                 i = avail.argmax()
-            logp = logp + dist.log_prob(i)
+            lp = dist.log_prob(i)
+            logp = logp + lp
+            steps[int(i)] = lp
             chosen.append(int(i))
             avail = avail.clone()
             avail[int(i)] = -1e9
-        return chosen, logp
+        return chosen, logp, steps
 
     # -------------------------------------------------------------- learn
 
@@ -159,6 +166,13 @@ class RLPolicy(Policy):
 
         loss = -(self._pending["logp"] * advantage) \
                - self.cfg.policy.entropy_coef * self._pending["entropy"]
+        # Per-decision credit (ARL-v2): each invited client's own advantage
+        # goes only to the log-probability of that client's pick and mode.
+        client_adv = (info or {}).get("client_adv")
+        if client_adv:
+            for i, a in client_adv.items():
+                if i in self._pending["logp_client"]:
+                    loss = loss - self._pending["logp_client"][i] * a
         self.opt.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(self.net.parameters(), 5.0)

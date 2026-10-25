@@ -122,6 +122,16 @@ class ClientEnv:
         self._draw: dict | None = None
         self.energy = self.energy_cap.copy()
 
+        # Client churn (off unless system.churn_after > 0). Each client's
+        # patience is fixed up front from its own stream, so every policy faces
+        # the same clients; whether they actually leave depends on the policy.
+        rng_c = np.random.default_rng(seed + 4000)
+        limited = rng_c.random(self.N) < sysc.churn_prob
+        self.patience = np.where(limited & (sysc.churn_after > 0),
+                                 float(sysc.churn_after), np.inf)
+        self.fail_streak = np.zeros(self.N)
+        self.departed = np.zeros(self.N, dtype=bool)
+
     def _apply_fedscale_trace(self, seed: int) -> None:
         """Replace the guessed tiers with real phones from FedScale's trace.
 
@@ -184,6 +194,8 @@ class ClientEnv:
             if self._prev_available is not None:
                 self._draw["available"] = np.where(keep, self._prev_available,
                                                    self._draw["available"])
+        # A client that has left never comes back.
+        self._draw["available"] = self._draw["available"] & ~self.departed
         self._prev_available = self._draw["available"].copy()
         # Energy recharges a little each round; a client drained last round may
         # be back but weaker, which is what makes availability non-stationary.
@@ -269,6 +281,15 @@ class ClientEnv:
         sysc = self.cfg.system
         return (out["latency"] <= sysc.deadline * (1 + sysc.staleness_max)
                 and self._draw["accept"][i] <= 0.98)
+
+    def record(self, i: int, reason: str) -> None:
+        """Track consecutive attempted-and-failed invitations for churn."""
+        if reason in ("deadline", "energy", "dropped", "rejected"):
+            self.fail_streak[i] += 1
+            if self.fail_streak[i] >= self.patience[i]:
+                self.departed[i] = True
+        elif reason == "ok":
+            self.fail_streak[i] = 0
 
     def spend(self, i: int, mode: str, frac: float | None = None) -> None:
         _, _, energy = self.workload(i, mode, frac)

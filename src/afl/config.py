@@ -65,6 +65,13 @@ class SystemCfg:
     weak_reliability: float = 0.6       # link reliability of weak clients (mid tier ~0.7)
     weak_avail_drop: float = 0.1        # subtracted from weak clients' availability
     avail_persistence: float = 0.0      # P(availability carries over from last round)
+    churn_after: int = 0                # client churn: a client with limited patience
+                                        # leaves for good after this many consecutive
+                                        # invitations that it attempted and failed
+                                        # (deadline, energy, link drop, rejection).
+                                        # 0 = off. Offline rounds do not count.
+    churn_prob: float = 0.5             # share of clients with limited patience (fixed
+                                        # per client at the start, same for every policy)
     device_trace: str = "tiers"         # tiers: the three guessed device tiers;
                                         # fedscale: real per-device speed and
                                         # bandwidth from FedScale's trace
@@ -123,6 +130,13 @@ class RewardCfg:
                                         # of it comes from clients never invited,
                                         # so the value-weighting of the policy's own
                                         # failures is a small part of the signal.
+                                        # | "arl_v2": loss the policy caused -- invited
+                                        # clients that failed, weighted by the success
+                                        # probability their assigned mode gave up, by
+                                        # V^repr, and by how under-covered their classes
+                                        # have been lately (see engine.run_round)
+    arl_v2_ema: float = 0.1             # rate of the class-coverage moving average that
+                                        # ARL-v2 uses to tell short gaps from long ones
     fairness_metric: str = "cv_success"  # "cv_success" | "cv_selection" -- Task 2 ablation
 
 
@@ -142,6 +156,9 @@ class PolicyCfg:
     fedcg_margin: float = 1.0           # FedCG fits each client's compression to
                                         # margin x deadline (1.0 = the paper's exact fit;
                                         # <1 leaves slack for timing jitter)
+    per_client_credit: bool = False     # ARL-v2: each invited client's own loss is
+                                        # credited to that client's pick and mode only,
+                                        # instead of the shared round reward
     horizon: int = 1                    # rounds per policy update. 1 = each round's own
                                         # reward (the original runs); H > 1 = discounted
                                         # returns over H rounds with reward.gamma

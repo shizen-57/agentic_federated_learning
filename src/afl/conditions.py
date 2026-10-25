@@ -74,6 +74,14 @@ CONDITIONS: dict[str, dict] = {
     "v2_c2":                 {"policy.name": "rl", "fl.aggregator": "fedprox", "policy.value_feature": "marginal"},
     "v2_rawfail":            {"policy.name": "rl", "fl.aggregator": "fedprox", "policy.value_feature": "marginal", "reward.damage_metric": "raw_fail"},
     "v2_arlsel":             {"policy.name": "rl", "fl.aggregator": "fedprox", "policy.value_feature": "marginal", "reward.damage_metric": "arl_selected"},
+    # ARL-v2 (docs/ADVANCED_RESULTS.md): avoidable-by-configuration,
+    # accumulated, and (in the full version) credited per decision.
+    "arl2_full":             {"policy.name": "rl", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v2", "policy.per_client_credit": True},
+    "arl2_shared":           {"policy.name": "rl", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v2"},
     "v2_arl0":               {"policy.name": "rl", "fl.aggregator": "fedprox", "policy.value_feature": "marginal", "reward.lambda_arl": 0.0},
 
     # --- Reward-weight sensitivity (Sec. 3.18); c2 uses lambda_arl 0.5, lambda_fair 0.3

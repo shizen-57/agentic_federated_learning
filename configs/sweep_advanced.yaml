@@ -31,6 +31,9 @@ sets:
   follow: [c2_rl_fedprox, b_mimic, c2_mimic, b_fedcg, b_fedcg_m07]
   # Fair re-test of ARL with the corrected value input.
   value: [v2_c2, v2_rawfail, v2_arlsel, v2_arl0]
+  # ARL-v2 against the plain failure count and the original ARL (all with the
+  # corrected value input), plus Random for context.
+  arl2: [arl2_full, arl2_shared, v2_rawfail, v2_c2, b_random]
   # Reward-weight sensitivity (Sec. 3.18).
   sens: [c2_rl_fedprox, sens_arl0, sens_arl025, sens_arl1, sens_arl2,
          sens_fair0, sens_fair01, sens_fair1]
@@ -44,6 +47,15 @@ weak_rare: &weak_rare
   system.weak_frac: 0.3
   system.weak_select: rarity
   system.avail_persistence: 0.8
+# Weak clients holding rare data, AND clients that can quit: half the clients
+# leave for good after 3 consecutive invitations they attempted and failed.
+# The scenario where a scheduler's mistakes cause permanent loss.
+weak_churn: &weak_churn
+  system.weak_frac: 0.3
+  system.weak_select: rarity
+  system.avail_persistence: 0.8
+  system.churn_after: 3
+  system.churn_prob: 0.5
 # Control: same weakness, but a random 30% -- weakness without value. If ARL
 # helps under weak_rare but not here, the effect is about value, as claimed.
 weak_random: &weak_random
@@ -152,3 +164,15 @@ groups:
     set: *weak_rare
     conditions: [c2_rl_fedprox, c2_mimic, b_mimic]
     seeds: [60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79]
+
+  # 13. ARL-v2 (design frozen in docs/ADVANCED_RESULTS.md before any run).
+  #     Development runs on MNIST, seeds 0-2: bug check only, not used to
+  #     choose or tune anything.
+  dev_mnist:       {config: configs/adv/mnist.yaml, set: *weak_rare,  conditions: arl2, seeds: [0, 1, 2]}
+  dev_churn_mnist: {config: configs/adv/mnist.yaml, set: *weak_churn, conditions: arl2, seeds: [0, 1, 2]}
+  #     Pre-specified confirmation: fresh seeds 80-99, CIFAR-10 and FEMNIST,
+  #     weak-client regime with and without churn.
+  arl2_cifar:         {config: configs/adv/cifar10.yaml, set: *weak_rare,  conditions: arl2, seeds: [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]}
+  arl2_churn_cifar:   {config: configs/adv/cifar10.yaml, set: *weak_churn, conditions: arl2, seeds: [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]}
+  arl2_femnist:       {config: configs/adv/femnist.yaml, set: *weak_rare,  conditions: arl2, seeds: [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]}
+  arl2_churn_femnist: {config: configs/adv/femnist.yaml, set: *weak_churn, conditions: arl2, seeds: [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]}

@@ -415,6 +415,49 @@ Random and Oort and matches or beats their accuracy.
 > scheduler alone. **Descriptive only:** `b_mimic` in the same groups,
 > failures, cost, worst-class accuracy.
 
+## ARL-v2: a redesign built from the diagnosis (frozen before testing)
+
+The diagnosis found four reasons the original ARL could not matter. ARL-v2
+changes one thing per reason. The design below was fixed **before** any
+ARL-v2 run; the MNIST development runs (`dev_mnist`, `dev_churn_mnist`,
+seeds 0-2) are used only to catch bugs, not to tune or choose.
+
+| Why ARL' failed | ARL-v2 |
+|---|---|
+| ~90% of ARL' is about clients never invited | only **invited** clients that **failed** count |
+| the eligibility gate already protects clients, so "failed but predicted eligible" adds little | each failure is weighted by **gap_i = max_m p_succ(i, m) - p_succ(i, assigned mode)**: the success probability the scheduler's own mode choice gave up. Zero if it already chose the safest mode. This is the thesis's distinctive idea -- feasibility is partly caused by the configuration -- made into the loss itself |
+| missing one round is temporary, so the damage ARL' counts mostly does not last | weighted by **a_i = 1 + sum_k c_ik u_k**, where u_k = 1 - q_k / max(q) is how under-covered class k has been lately (q = moving average of per-round class coverage by successful clients, rate 0.1): losing a client whose classes have gone uncovered for a while costs up to 2x |
+| one reward per round for ~20 decisions | **per-decision credit** (`policy.per_client_credit`): each invited client's loss d_i is normalised and credited only to the log-probability of that client's pick and mode; it leaves the shared reward |
+
+Per round: d_i = gap_i x V^repr_i x a_i for each invited client that failed,
+ARL-v2_t = sum d_i (logged as `arl_v2`). The policy also gets the corrected
+value input (`policy.value_feature: marginal`). Conditions: `arl2_full`
+(all four changes), `arl2_shared` (same loss in the shared reward, no
+per-decision credit), compared with `v2_rawfail` (plain failure count) and
+`v2_c2` (original ARL'), all with the corrected value input, plus Random.
+
+**Client churn** (`system.churn_after: 3`, `churn_prob: 0.5`): half the
+clients, fixed per seed and the same for every policy, leave for good after
+3 consecutive invitations they attempted and failed (deadline, battery,
+link drop, rejection; offline rounds do not count). This is the setting
+where a scheduler's mistakes cause permanent loss, which is what ARL is
+meant to prevent. It is reported next to the standard weak-client regime,
+not instead of it.
+
+> **Pre-specified primary tests (four, Holm-corrected):** paired sign-flip,
+> one-sided (ARL-v2 better), `final_acc_worst10`, `arl2_full` vs
+> `v2_rawfail`, **fresh seeds 80-99**, in each of `arl2_cifar`,
+> `arl2_churn_cifar`, `arl2_femnist`, `arl2_churn_femnist`:
+> `python scripts/stats.py --dir results/adv/<group> --ref arl2_full --vs v2_rawfail --one-sided`
+> (the `final_acc_worst10` row). Holm across the four p-values: sorted
+> ascending, they must pass 0.0125, 0.0167, 0.025, 0.05 in turn. A group
+> passes -> ARL-v2 protects the worst-represented classes better than a plain
+> failure count in that setting. None passes -> ARL-v2 is reported as not
+> shown to matter either. **Descriptive only:** clients departed (and how
+> many were weak rare-data clients), failure ratio, accuracy, weak-client
+> success, `arl2_shared` vs `arl2_full` (does per-decision credit matter?),
+> `v2_c2` and Random.
+
 ## GPU runs are not bit-reproducible
 
 The same configuration and seed gives different results across the three
