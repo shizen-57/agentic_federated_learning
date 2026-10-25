@@ -60,7 +60,7 @@ def main() -> int:
     final = FINAL + (["acc_worst10"] if all("acc_worst10" in r[0][0] for r in groups.values())
                      else [])
     cols = ["run", "seeds"] + [f"final_{k}" for k in final] + \
-           [f"mean_{k}" for k in MEANS] + [f"rounds_to_{args.target:g}"]
+           [f"mean_{k}" for k in MEANS] + [f"reached_{args.target:g}", f"rounds_to_{args.target:g}"]
 
     for tag in sorted(groups):
         runs = groups[tag]
@@ -71,8 +71,12 @@ def main() -> int:
         for k in MEANS:
             vals = [st.mean([row[k] for row in r]) for r in runs]
             rec[f"mean_{k}"] = (st.mean(vals), st.stdev(vals) if len(vals) > 1 else 0.0)
+        # Rounds to target is only defined for runs that reach it, so always
+        # report how many did: otherwise one lucky run out of ten would look
+        # faster than ten runs that all get there a little later.
         vals = [rounds_to_target(r, args.target) for r in runs]
         good = [v for v in vals if not math.isnan(v)]
+        rec[f"reached_{args.target:g}"] = f"{len(good)}/{len(vals)}"
         rec[f"rounds_to_{args.target:g}"] = (
             (st.mean(good), st.stdev(good) if len(good) > 1 else 0.0) if good else (float("nan"), 0.0))
         out_rows.append(rec)

@@ -190,6 +190,24 @@ class Normalizer:
         self.m2 = 0.0
         self.eps = eps
 
+    def batch(self, xs: list[float]) -> list[float]:
+        """Standardise a batch with the statistics from before it, then add it.
+
+        Every value in the batch is judged against the same mean and spread,
+        so the result does not depend on the order of the batch.
+        """
+        if self.n < 2:
+            out = [0.0] * len(xs)
+        else:
+            std = (self.m2 / (self.n - 1)) ** 0.5
+            out = [float((x - self.mean) / (std + self.eps)) for x in xs]
+        for x in xs:
+            self.n += 1
+            d = x - self.mean
+            self.mean += d / self.n
+            self.m2 += d * (x - self.mean)
+        return out
+
     def __call__(self, x: float) -> float:
         self.n += 1
         d = x - self.mean

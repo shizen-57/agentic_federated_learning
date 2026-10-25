@@ -26,6 +26,7 @@ from .models import build_model, get_flat, set_flat
 from .policies import build_policy
 from .policies.base import best_work_mode, mode_by_rule
 from .predictor import SuccessPredictor
+from .provenance import code_hash
 from .sim import ClientEnv
 
 LOG_FIELDS = [
@@ -38,7 +39,7 @@ LOG_FIELDS = [
     # protocol-fix diagnostics (docs/ADVANCED_RESULTS.md, "Protocol fix")
     "val_accuracy", "acc_client_worst10", "acc_client_weak", "cov_lost", "cov_lost_avoid",
     "gap_max_all", "gap_max_weak", "ece_light", "ece_standard", "ece_priority",
-    "ece_weak", "ece_strong", "wall_s",
+    "ece_weak", "ece_strong", "gate_filled", "wall_s",
 ]
 
 LIGHTER = {"priority": "standard", "standard": "light", "light": None}
@@ -267,6 +268,10 @@ class Experiment:
             "n_work": self.env.n_work,
             "debt": self.debt / (1.0 + self.debt.max()),
             "cov_deficit": 1.0 - self.cov_ema / max(float(self.cov_ema.max()), 1e-9),
+            # Protocol fix (system.checkin_pool): the clients that checked in
+            # this round. None = every policy may pick any client (original).
+            "candidates": ([int(i) for i in np.where(self.env._draw["available"])[0]]
+                           if self.cfg.system.checkin_pool else None),
         }
         if self.hist_sketch is not None:
             self._probe_missing_history()
@@ -513,8 +518,13 @@ class Experiment:
             # so the update is computed against round t. Staleness only bites in
             # the asynchronous variant, where this is set when the model is sent.
             self.issued_round[i] = t
-            round_cost += self.env.cost(i, mode, frac)
             out = self.env.outcome(i, mode, frac)
+            # Protocol fix (system.charge_actual): an offline client, or one
+            # whose battery cannot cover the job, does no work and spends
+            # nothing. Originally every invitation was charged in full.
+            ran = not (self.cfg.system.charge_actual and out["reason"] in ("unavailable", "energy"))
+            if ran:
+                round_cost += self.env.cost(i, mode, frac)
             reasons[i] = out["reason"]
             latencies.append(out["latency"])
             # Energy spend is deferred until after the oracle diagnostic below
@@ -523,7 +533,8 @@ class Experiment:
             # counterfactual is evaluated, so a client that genuinely could
             # have succeeded under the pre-decision energy state gets
             # incorrectly reported as oracle-ineligible.
-            pending_spends.append((i, mode, frac))
+            if ran:
+                pending_spends.append((i, mode, frac))
 
             ok = out["success"] == 1
             if ok:
@@ -599,13 +610,14 @@ class Experiment:
                     self.since_success[i] += 1
 
         agg = self.cfg.fl.aggregator
-        scale = getattr(self.policy, "agg_scale", None)
-        if scale is not None:
-            # DELTA's unbiased aggregation: each update weighted by n_i / p_i,
-            # p_i its sampling probability (self-normalised over what arrived).
-            weights = [w * scale(i) for w, i in zip(weights, recv_ids)]
         base_flat = self.global_flat
-        if agg == "refl":
+        agg_w = getattr(self.policy, "agg_weights", None)
+        if agg_w is not None:
+            # DELTA: the policy's own unbiased (Horvitz-Thompson) weights,
+            # applied as they are -- not renormalised over what arrived.
+            delta = (sum(u * float(w) for u, w in zip(updates, agg_w(recv_ids)))
+                     if updates else None)
+        elif agg == "refl":
             delta = self._refl_aggregate(updates, weights, stale)
         elif agg == "mifa":
             # MIFA (Gu et al. 2021, Alg. 1): keep every client's latest update
@@ -786,11 +798,20 @@ class Experiment:
         if r.lambda_debt > 0:
             reward -= r.lambda_debt * self.norm["debt"](float(self.debt.mean()))
         client_adv = None
+        if r.batch_client_norm:
+            # Protocol fix: one set of statistics for the whole round, so a
+            # client's credit does not depend on where it sits in the order.
+            def norm(key, vals):
+                return dict(zip(selected, self.norm[key].batch([vals[i] for i in selected])))
+        else:
+            def norm(key, vals):
+                return {i: self.norm[key](vals[i]) for i in selected}
         if r.damage_metric == "arl_v2" and self.cfg.policy.per_client_credit:
-            client_adv = {i: -r.lambda_arl * self.norm["v2c"](v2[i]) for i in selected}
+            z = norm("v2c", v2)
+            client_adv = {i: -r.lambda_arl * z[i] for i in selected}
         elif r.damage_metric == "arl_v3" and self.cfg.policy.per_client_credit:
-            client_adv = {i: -r.lambda_arl * self.norm["v3c"](v3_loss[i])
-                          + r.lambda_cov * self.norm["v3cg"](v3_gain[i]) for i in selected}
+            zl, zg = norm("v3c", v3_loss), norm("v3cg", v3_gain)
+            client_adv = {i: -r.lambda_arl * zl[i] + r.lambda_cov * zg[i] for i in selected}
         self.policy.observe_outcome(state, (selected, assign), reward, {
             "success": success, "client_adv": client_adv, "t": t,
             # For the baselines that learn from what arrived (FAVOR, DELTA, REFL).
@@ -821,6 +842,7 @@ class Experiment:
             "arl_v3_loss": arl_v3_loss, "arl_v3_gain": arl_v3_gain,
             "val_accuracy": acc_r, "cov_lost": cov_lost, "cov_lost_avoid": cov_lost_avoid,
             **self._client_metrics(success, late_ids),
+            "gate_filled": int(getattr(self.policy, "gate_filled", 0)),
             "wall_s": time.time() - t0,
         }
         self.rows.append(row)
@@ -851,6 +873,7 @@ class Experiment:
         os.replace(tmp, path)
         meta = self.cfg.to_dict()
         meta["init_checksum"] = self.init_checksum   # same for every method under fl.clean_rng
+        meta["code_hash"] = code_hash()              # which version of the simulator made it
         with open(os.path.join(self.cfg.out, f"{self.cfg.tag}.config.json"), "w") as fh:
             json.dump(meta, fh, indent=2, default=str)
         return path

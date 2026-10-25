@@ -656,14 +656,13 @@ def test_delta_redistributes_the_mass_of_the_clients_that_reported():
     cfg = _tiny({"b_delta": None})
     pol = DELTAPolicy(cfg)
     N = cfg.data.num_clients
-    pol.act({}, 1)
+    pol.act({"n_i": np.full(N, 10.0)}, 1)
     u = {0: torch.zeros(5), 1: torch.ones(5) * 0.1}
     pol.observe_outcome(None, None, 0.0, {"recv_ids": [0, 1], "stale": {}, "updates": u,
                                           "grad_var": {0: 0.0, 1: 0.0}})
     assert pol.p.sum() == pytest.approx(1.0)
     assert pol.p[0] + pol.p[1] == pytest.approx(2.0 / N)  # mass of S_t kept
     assert pol.p[0] == pytest.approx(pol.p[1])            # equal distance from their mean
-    assert pol.agg_scale(0) == pytest.approx(N)
 
 
 def test_local_gradient_variance_is_tracked_on_request():
@@ -841,3 +840,167 @@ def test_prespecified_families_use_conditions_that_are_run():
             conds = plan["groups"][g]["conditions"]
             conds = plan["sets"][conds] if isinstance(conds, str) else conds
             assert ref in conds and other in conds, (fam, g, ref, other)
+
+
+# ----------------------------------------------------- second review fixes
+
+def test_second_review_fixes_are_off_by_default():
+    cfg = Cfg()
+    assert not cfg.reward.batch_client_norm and not cfg.system.charge_actual
+    assert not cfg.system.checkin_pool and not cfg.policy.strict_gate
+
+
+def test_batch_normalisation_does_not_depend_on_order():
+    from afl import metrics as M
+    vals = [0.5, 2.0, -1.0, 3.0]
+    seen = None
+    for order in ([0, 1, 2, 3], [3, 2, 1, 0], [2, 0, 3, 1]):
+        n = M.Normalizer()
+        n.batch([1.0, 2.0, 0.0])                       # some history
+        z = dict(zip(order, n.batch([vals[k] for k in order])))
+        if seen is not None:
+            assert all(z[k] == pytest.approx(seen[k]) for k in range(4))
+        seen = z
+    seq = M.Normalizer()
+    seq.batch([1.0, 2.0, 0.0])
+    a = [seq(v) for v in vals]
+    seq2 = M.Normalizer()
+    seq2.batch([1.0, 2.0, 0.0])
+    b = [seq2(v) for v in reversed(vals)][::-1]
+    assert a != pytest.approx(b)                         # the old way is order-dependent
+
+
+def test_offline_invitation_costs_nothing_only_with_the_fix():
+    for on in (False, True):
+        exp = Experiment(_tiny({"b_random": None, "system.charge_actual": on}, rounds=1))
+        exp.env.new_round(1)
+        off = int(np.where(~exp.env._draw["available"])[0][0])
+        before = exp.env.energy[off]
+        exp.policy.act = lambda state, t, off=off: ([off], {off: "priority"})
+        exp.env.new_round = lambda t: None             # keep this round's draws
+        row = exp.run_round(1)
+        if on:
+            assert exp.env.energy[off] == before and row["cost"] == 0.0
+        else:
+            assert exp.env.energy[off] < before and row["cost"] > 0.0
+
+
+def test_multi_round_updates_with_per_client_credit_are_rejected():
+    with pytest.raises(ValueError):
+        Experiment(_tiny({"arl3_full": None, "policy.horizon": 5}))
+
+
+def test_strict_gate_keeps_the_clients_that_pass_and_fills_by_success():
+    from afl.policies.base import gate
+    cfg = _tiny({"c2_rl_fedprox": None, "policy.strict_gate": True})
+    N, K = 20, 10
+    p = {i: {"light": 0.9 - 0.01 * i, "standard": 0.1, "priority": 0.1} for i in range(N)}
+    st = {"eligible": {i: int(i < 9) for i in range(N)}, "p_succ": p}
+    elig, fill = gate(cfg, st, list(range(N)), K)
+    assert elig == list(range(9)) and fill == [9]
+    cfg.policy.strict_gate = False
+    assert gate(cfg, st, list(range(N)), K)[1] == []
+    # RL: the 9 passing clients are always kept.
+    exp = Experiment(_tiny({"c2_rl_fedprox": None, "policy.strict_gate": True}))
+    exp.cfg.fl.clients_per_round = K
+    exp.env.new_round(1)
+    s = exp._state(1)
+    s["eligible"], s["p_succ"] = st["eligible"], p
+    sel, _ = exp.policy.act(s, 1)
+    assert set(range(9)) <= set(sel) and len(sel) == K and exp.policy.gate_filled == 1
+
+
+def test_delta_weights_are_unbiased_when_everyone_reports():
+    from afl.policies.published import DELTAPolicy
+    cfg = _tiny({"b_delta": None})
+    cfg.data.num_clients, cfg.fl.clients_per_round = 2, 2
+    pol = DELTAPolicy(cfg)
+    pol.p = np.array([0.9, 0.1])
+    u = {0: 0.0, 1: 10.0}
+    est = []
+    for _ in range(20000):
+        sel, _ = pol.act({"n_i": np.array([50.0, 50.0])}, 1)
+        est.append(sum(w * u[i] for i, w in zip(sel, pol.agg_weights(sel))))
+    assert np.mean(est) == pytest.approx(5.0, abs=0.15)   # the old rule gave 9
+
+
+def test_every_policy_picks_only_online_clients_with_the_check_in_pool():
+    for cond in ("b_random", "b_fedcs", "b_powerofchoice", "b_oort", "c4_heuristic_fedprox",
+                 "b_fedcer", "b_cov_ew", "b_favor", "b_delta", "b_refl", "c2_rl_fedprox",
+                 "arl3_full", "b_fedcg"):
+        exp = Experiment(_tiny({cond: None, "system.checkin_pool": True, "fl.compress_upload": True},
+                               rounds=3))
+        orig = exp.policy.act
+        def spy(state, t, orig=orig, exp=exp, cond=cond):
+            sel, assign = orig(state, t)
+            online = set(np.where(exp.env._draw["available"])[0].tolist())
+            assert set(sel) <= online, cond
+            return sel, assign
+        exp.policy.act = spy
+        exp.run(verbose=False)
+
+
+def test_report_shows_how_many_runs_reach_the_target(tmp_path):
+    import csv, subprocess
+    def write(name, accs):
+        with open(tmp_path / f"{name}.csv", "w", newline="") as fh:
+            wr = csv.DictWriter(fh, fieldnames=["round", "accuracy", "cv", "jain", "fail_ratio",
+                                                "arl_online", "arl_oracle", "cost", "latency", "ece",
+                                                "reward"])
+            wr.writeheader()
+            for t, a in enumerate(accs, 1):
+                wr.writerow({"round": t, "accuracy": a, "cv": 0, "jain": 1, "fail_ratio": 0,
+                             "arl_online": 0, "arl_oracle": 0, "cost": 0, "latency": 0, "ece": 0,
+                             "reward": 0})
+    write("A_s0", [0.1, 0.9])
+    for s in range(1, 10):
+        write(f"A_s{s}", [0.1, 0.2])
+    for s in range(10):
+        write(f"B_s{s}", [0.1, 0.5, 0.9])
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "report.py"),
+                          "--dir", str(tmp_path), "--target", "0.8"],
+                         capture_output=True, text=True).stdout
+    line_a = next(l for l in out.splitlines() if l.startswith("| A "))
+    line_b = next(l for l in out.splitlines() if l.startswith("| B "))
+    assert "1/10" in line_a and "10/10" in line_b
+
+
+def test_sweep_reruns_results_from_other_configs_code_or_unfinished(tmp_path):
+    import json, subprocess
+    plan = tmp_path / "plan.yaml"
+    plan.write_text(
+        "seeds: [0]\nsets: {}\ngroups:\n  g: {config: configs/quick.yaml, "
+        "set: {fl.rounds: 2}, conditions: [b_random]}\n")
+    cmd = [sys.executable, os.path.join(ROOT, "scripts", "sweep.py"), "--plan", str(plan),
+           "--out", str(tmp_path / "out")]
+    run = lambda *extra: subprocess.run(cmd + list(extra), capture_output=True, text=True,
+                                        cwd=ROOT).stdout
+    run()
+    assert "1 already done" in run()
+    meta_path = tmp_path / "out" / "g" / "b_random_s0.config.json"
+    meta = json.loads(meta_path.read_text())
+    meta["code_hash"] = "old"
+    meta_path.write_text(json.dumps(meta))
+    out = run("--list")
+    assert "made by different code" in out
+    assert "todo=0" in run("--list", "--ignore-code")
+    meta["reward"]["lambda_arl"] = 9.0
+    meta_path.write_text(json.dumps(meta))
+    assert "different config" in run("--list", "--ignore-code")
+
+
+def test_confirmatory_report_gives_no_verdict_on_partial_data(tmp_path):
+    import json, subprocess
+    g = tmp_path / "s2_cifar"
+    g.mkdir()
+    for cond, base in (("arl3_full", 0.5), ("v2_rawfail", 0.1)):
+        for s in range(100, 108):                       # 8 of 20 seeds
+            (g / f"{cond}_s{s}.csv").write_text(
+                "round,acc_worst10,accuracy,fail_ratio,acc_client_worst10\n"
+                f"1,{base},{base},0.1,{base}\n")
+            (g / f"{cond}_s{s}.config.json").write_text(json.dumps(
+                {"fl": {"rounds": 1, "val_frac": 0.3, "clean_rng": True}, "code_hash": "x"}))
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "prespec_s2.py"),
+                          "--root", str(tmp_path)], capture_output=True, text=True).stdout
+    fam_a = out.split("## Family A ")[1].split("## Family")[0]
+    assert "INCOMPLETE" in fam_a and "| yes |" not in fam_a

@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 
 from .. import metrics as M
-from .base import Policy, best_work_mode
+from .base import Policy, best_work_mode, gate, pool
 
 
 def _default_mode(cfg) -> str:
@@ -43,9 +43,9 @@ class FedCERPolicy(Policy):
         K = min(self.cfg.fl.clients_per_round, N)
         sketch = state["sketch"]
 
-        remaining = list(range(N))
+        remaining = pool(state, N)
         selected: list[int] = []
-        for _ in range(K):
+        for _ in range(min(K, len(remaining))):
             vals = M.per_client_representation_value(sketch, selected)
             best = max(remaining, key=lambda i: vals[i])
             selected.append(best)
@@ -86,8 +86,18 @@ class RoundRobinPolicy(Policy):
     def act(self, state, t):
         N = self.cfg.data.num_clients
         K = min(self.cfg.fl.clients_per_round, N)
-        sel = [(self._cursor + j) % N for j in range(K)]
-        self._cursor = (self._cursor + K) % N
+        c = state.get("candidates")
+        if c is None:
+            sel = [(self._cursor + j) % N for j in range(K)]
+            self._cursor = (self._cursor + K) % N
+        else:
+            # Continue the rotation, skipping clients that did not check in.
+            cs, sel, j = set(c), [], 0
+            while len(sel) < min(K, len(cs)) and j < N:
+                if (self._cursor + j) % N in cs:
+                    sel.append((self._cursor + j) % N)
+                j += 1
+            self._cursor = (self._cursor + j) % N
         return sel, {i: _default_mode(self.cfg) for i in sel}
 
 
@@ -100,7 +110,12 @@ class RandomPolicy(Policy):
 
     def act(self, state, t):
         K = min(self.cfg.fl.clients_per_round, self.cfg.data.num_clients)
-        sel = [int(i) for i in self.rng.choice(self.cfg.data.num_clients, size=K, replace=False)]
+        c = state.get("candidates")
+        if c is None:
+            sel = [int(i) for i in self.rng.choice(self.cfg.data.num_clients, size=K, replace=False)]
+        else:
+            sel = [int(i) for i in self.rng.choice(np.array(c, dtype=int), size=min(K, len(c)),
+                                                   replace=False)] if c else []
         return sel, {int(i): _default_mode(self.cfg) for i in sel}
 
 
@@ -115,7 +130,11 @@ class FedCSPolicy(Policy):
     def act(self, state, t):
         K = min(self.cfg.fl.clients_per_round, self.cfg.data.num_clients)
         p = np.array([state["p_succ"][i]["light"] for i in range(self.cfg.data.num_clients)])
-        sel = [int(i) for i in np.argsort(-p)[:K]]
+        c = state.get("candidates")
+        if c is None:
+            sel = [int(i) for i in np.argsort(-p)[:K]]
+        else:
+            sel = [int(i) for i in sorted(c, key=lambda i: -p[i])[:K]]
         return sel, {int(i): "light" for i in sel}
 
 
@@ -134,7 +153,13 @@ class PowerOfChoicePolicy(Policy):
     def act(self, state, t):
         N = self.cfg.data.num_clients
         K = min(self.cfg.fl.clients_per_round, N)
-        cand = self.rng.choice(N, size=min(self.d * K, N), replace=False)
+        c = state.get("candidates")
+        if c is None:
+            cand = self.rng.choice(N, size=min(self.d * K, N), replace=False)
+        elif not c:
+            return [], {}
+        else:
+            cand = self.rng.choice(np.array(c, dtype=int), size=min(self.d * K, len(c)), replace=False)
         loss = np.array([state["local_loss"][i] for i in cand])
         sel = [int(cand[j]) for j in np.argsort(-loss)[:K]]
         return sel, {i: _default_mode(self.cfg) for i in sel}
@@ -170,10 +195,17 @@ class OortPolicy(Policy):
                 self.cfg.system.deadline / t_exp) ** self.alpha
             util[i] = stat * pen
 
+        c = state.get("candidates")
+        if c is not None:
+            cs = set(c)
+            util = np.where([i in cs for i in range(N)], util, -np.inf)
+            K = min(K, len(cs))
+            if K == 0:
+                return [], {}
         n_explore = max(1, int(self.eps * K))
         order = list(np.argsort(-util))
         sel = [int(i) for i in order[:K - n_explore]]
-        rest = [i for i in range(N) if i not in sel]
+        rest = [i for i in (range(N) if c is None else c) if i not in sel]
         sel += [int(i) for i in self.rng.choice(rest, size=min(n_explore, len(rest)),
                                                 replace=False)]
         return sel, {i: _default_mode(self.cfg) for i in sel}
@@ -240,7 +272,10 @@ class FedCGPolicy(Policy):
         g = state["update_sketch"]
         sq = (g ** 2).sum(axis=1)
         dist = np.sqrt(np.maximum(sq[:, None] + sq[None, :] - 2 * g @ g.T, 0.0))
-        cands = list(range(N))
+        cands = pool(state, N)
+        K = min(K, len(cands))
+        if K == 0:
+            return [], {}
         best_sel, best_theta, best_sum = None, None, -1.0
         for _ in range(K):
             if len(cands) < K:
@@ -279,15 +314,20 @@ class GreedyCoveragePolicy(Policy):
         w = state["cov_deficit"] + 0.1
         mode = {i: best_work_mode(self.cfg, state["p_succ"][i]) for i in range(N)}
         q = np.array([state["p_succ"][i][mode[i]] for i in range(N)])
-        pool = [i for i in range(N) if state["eligible"][i]]
-        if len(pool) < K:
-            pool = list(range(N))
+        cands = pool(state, N)
+        elig, fill = gate(self.cfg, state, cands, K)
+        self.gate_filled = len(fill)
+        if self.cfg.policy.strict_gate:
+            ok = elig
+        else:
+            ok = elig if len(elig) >= K else cands
         tie = self.rng.random(N) * 1e-9                  # random order among exact ties
         cur = np.zeros(sk.shape[1])
         sel: list[int] = []
-        for _ in range(K):
+        for _ in range(min(K, len(ok))):
             gain = q * (np.maximum(sk - cur, 0.0) @ w) + tie
-            best = max((i for i in pool if i not in sel), key=lambda i: gain[i])
+            best = max((i for i in ok if i not in sel), key=lambda i: gain[i])
             sel.append(best)
             cur = np.maximum(cur, sk[best])
+        sel += list(fill)
         return sel, {i: mode[i] for i in sel}

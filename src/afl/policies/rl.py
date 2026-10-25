@@ -31,7 +31,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .base import Policy
+from .base import Policy, gate, pool
 
 FEATURES = [
     "repr_value", "n_i_norm", "p_light", "p_standard", "p_priority",
@@ -63,6 +63,12 @@ class RLPolicy(Policy):
         self.use_cov = cfg.policy.coverage_features
         n_feat = len(FEATURES) + (1 if self.use_debt else 0) + (2 if self.use_cov else 0)
         self.clean = cfg.fl.clean_rng
+        if cfg.policy.horizon > 1 and cfg.policy.per_client_credit:
+            # The multi-round update only sees the shared reward, and with
+            # per-client credit the damage term has been moved out of it, so
+            # this combination would silently drop the ARL signal.
+            raise ValueError("policy.horizon > 1 with policy.per_client_credit is not supported")
+        self.gate_filled = 0
         if self.clean:
             # Own seed for the network; sampling below uses self.gen. Neither
             # touches PyTorch's global generator.
@@ -130,19 +136,21 @@ class RLPolicy(Policy):
         N = self.cfg.data.num_clients
         K = min(self.cfg.fl.clients_per_round, N)
         x = self._feature_matrix(state)
+        allowed, k_s, fill = self._allowed(state, N, K)
+        if k_s == 0 and not fill:
+            self._pending = None
+            return [], {}
         if self.use_cov:
-            return self._act_sequential(state, x, N, K)
+            return self._act_sequential(state, x, allowed, k_s, fill)
         scores, mode_logits = self.net(x)
 
         # Eligibility gate (Sec. 3.10): a client with no feasible configuration
         # is masked out entirely rather than merely scored low, so the policy
         # never spends one of its K slots on a client that cannot succeed.
-        elig = torch.tensor([state["eligible"][i] for i in range(N)], dtype=torch.bool)
-        if elig.sum() < K:
-            elig = torch.ones(N, dtype=torch.bool)
-        masked = scores.masked_fill(~elig, -1e9)
+        masked = scores.masked_fill(~allowed, -1e9)
 
-        sel, logp_sel, step_logp = self._sample_topk(masked, K)
+        sel, logp_sel, step_logp = self._sample_topk(masked, k_s)
+        sel = sel + fill
 
         logp_mode = 0.0
         entropy = 0.0
@@ -163,7 +171,7 @@ class RLPolicy(Policy):
                 m = dist.sample() if self.train_mode else mode_logits[i].argmax()
             lp = dist.log_prob(m)
             logp_mode = logp_mode + lp
-            logp_client[int(i)] = logp_client[int(i)] + lp
+            logp_client[int(i)] = logp_client.get(int(i), 0.0) + lp
             entropy = entropy + dist.entropy()
             assign[int(i)] = self.modes[int(m)]
 
@@ -172,17 +180,34 @@ class RLPolicy(Policy):
                          "logp_client": logp_client}
         return [int(i) for i in sel], assign
 
-    def _act_sequential(self, state, x, N, K):
+    def _allowed(self, state, N: int, K: int):
+        """Mask of clients the policy may sample, how many to sample, and the
+        gate's fill-ins (base.gate). Without the protocol switches this is the
+        original rule: the gated clients, or everyone if fewer than K pass."""
+        cands = pool(state, N)
+        elig, fill = gate(self.cfg, state, cands, K)
+        if self.cfg.policy.strict_gate:
+            ok = elig
+        else:
+            ok = elig if len(elig) >= K else cands
+        mask = torch.zeros(N, dtype=torch.bool)
+        mask[ok] = True
+        self.gate_filled = len(fill)
+        return mask, min(K, len(ok)), fill
+
+    def _act_sequential(self, state, x, allowed, K, fill):
         """Pick K clients one at a time, recomputing the coverage inputs (and so
         every score) after each pick, so the policy can choose clients that
         complement the ones already chosen. The log-probability is still the
         exact sequential one, so REINFORCE is unchanged."""
-        elig = torch.tensor([state["eligible"][i] for i in range(N)], dtype=torch.bool)
-        if elig.sum() < K:
-            elig = torch.ones(N, dtype=torch.bool)
-        open_ = elig.clone()
+        open_ = allowed.clone()
         picked, steps, mode_rows = [], {}, {}
         logp, entropy = 0.0, 0.0
+        if K == 0:
+            g, gu = self._coverage_inputs(state, [])
+            xs = x.clone()
+            xs[:, -2], xs[:, -1] = g, gu
+            _, mode_logits = self.net(xs)
         for k in range(K):
             g, gu = self._coverage_inputs(state, picked)
             xs = x.clone()
@@ -197,6 +222,9 @@ class RLPolicy(Policy):
             mode_rows[i] = mode_logits[i]
             picked.append(i)
             open_[i] = False
+        for i in fill:                       # gate fill-ins: not sampled, modes still are
+            mode_rows[i] = mode_logits[i]
+        picked = picked + list(fill)
         assign, logp_client = {}, dict(steps)
         fixed_modes = self.cfg.policy.mode_rule != "own"
         for i in picked:
@@ -205,7 +233,7 @@ class RLPolicy(Policy):
                 continue
             m, lp = self._draw(mode_rows[i])
             logp = logp + lp
-            logp_client[i] = logp_client[i] + lp
+            logp_client[i] = logp_client.get(i, 0.0) + lp
             entropy = entropy + torch.distributions.Categorical(logits=mode_rows[i]).entropy()
             assign[i] = self.modes[m]
         self._pending = {"logp": logp, "entropy": entropy, "logp_client": logp_client}
@@ -235,6 +263,9 @@ class RLPolicy(Policy):
 
     def observe_outcome(self, state, action, reward, info):
         if self._pending is None or not self.train_mode:
+            return
+        if not torch.is_tensor(self._pending["logp"]):
+            self._pending = None               # nothing was sampled this round
             return
         if self.cfg.policy.horizon > 1:
             self._window.append((self._pending["logp"], self._pending["entropy"], reward))

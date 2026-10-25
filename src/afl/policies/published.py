@@ -20,7 +20,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .base import Policy
+from .base import Policy, pool
 
 
 class FAVORPolicy(Policy):
@@ -111,10 +111,12 @@ class FAVORPolicy(Policy):
         eps = max(0.05, 1.0 - t / (0.3 * T))
         with torch.no_grad():
             q = self.net(s).cpu().numpy()
-        order = list(np.argsort(-q))
+        cands = pool(state, self.N)
+        cs = set(cands)
+        order = [i for i in np.argsort(-q) if i in cs]
         sel: list[int] = []
-        for _ in range(K):
-            rest = [i for i in range(self.N) if i not in sel]
+        for _ in range(min(K, len(cands))):
+            rest = [i for i in cands if i not in sel]
             if self.rng.random() < eps:
                 sel.append(int(self.rng.choice(rest)))
             else:
@@ -164,14 +166,26 @@ class DELTAPolicy(Policy):
     zeta_i = ||g_i - mean_{S_t} g|| (gradient diversity, g_i the client's
     summed local gradients = -update / lr) and sigma_i^2 the variance of its
     per-batch gradients (local variance). alpha_1 = alpha_2 = 0.5, the
-    paper's default. K clients are drawn without replacement with these
-    probabilities and aggregated with the unbiased weights n_i / p_i
-    (the engine applies `agg_scale`).
+    paper's default.
 
-    Change forced by this setting: the paper assumes every sampled client
-    reports; here clients can fail, so the weights are normalised over the
-    updates that arrived (self-normalised importance weighting), as every
-    other aggregator here normalises.
+    Sampling and aggregation are matched so the estimate is unbiased: K
+    independent draws *with replacement* from p (the paper's with-replacement
+    case), so the inclusion weight of a draw is exactly p_i, and the server
+    step is the unnormalised Horvitz-Thompson sum
+        Delta = sum_i  m_i * q_i / (K * p_i) * Delta_i,
+    m_i = how many of the K draws picked client i, q_i = n_i / sum_j n_j its
+    data share. Its expectation is sum_i q_i Delta_i, the full-participation
+    FedAvg step, when every sampled client reports. (A first version drew
+    without replacement and normalised n_i / p_i over the arrivals, which is
+    not unbiased: two equal clients with updates 0 and 10 and draw weights
+    0.9 / 0.1 gave 9 instead of 5.)
+
+    Changes forced by this setting: a client drawn twice trains once and its
+    update counts m_i times; with system.checkin_pool, p is restricted to the
+    clients online this round (unbiased for that population); and the paper
+    assumes every sampled client reports -- here a failed client's term is
+    simply missing (counted as zero), which is what the estimator does when
+    an update does not arrive.
     """
 
     wants_grad_stats = True
@@ -180,17 +194,29 @@ class DELTAPolicy(Policy):
         super().__init__(cfg)
         self.N = cfg.data.num_clients
         self.p = np.full(self.N, 1.0 / self.N)
-        self.p_used = self.p.copy()
+        self.weights_used: dict[int, float] = {}
         self.rng = np.random.default_rng(cfg.seed + 23)
 
     def act(self, state, t):
         K = min(self.cfg.fl.clients_per_round, self.N)
-        self.p_used = self.p.copy()
-        sel = [int(i) for i in self.rng.choice(self.N, size=K, replace=False, p=self.p)]
+        cands = np.array(pool(state, self.N), dtype=int)
+        if len(cands) == 0:
+            self.weights_used = {}
+            return [], {}
+        p = self.p[cands] / self.p[cands].sum()
+        draws = self.rng.choice(len(cands), size=K, replace=True, p=p)
+        n = np.asarray(state["n_i"], dtype=float)
+        q = n / n[cands].sum()
+        self.weights_used = {}
+        for d in draws:
+            i = int(cands[d])
+            self.weights_used[i] = self.weights_used.get(i, 0.0) + q[i] / (K * p[d])
+        sel = sorted(self.weights_used)
         return sel, {i: "standard" for i in sel}
 
-    def agg_scale(self, i: int) -> float:
-        return 1.0 / max(float(self.p_used[i]), 1e-12)
+    def agg_weights(self, recv_ids: list[int]) -> list[float]:
+        """Absolute (not normalised) weight of each update that arrived."""
+        return [self.weights_used.get(i, 0.0) for i in recv_ids]
 
     def observe_outcome(self, state, action, reward, info):
         fresh = [i for i in info["recv_ids"]
@@ -236,16 +262,20 @@ class REFLPolicy(Policy):
     def act(self, state, t):
         K = min(self.cfg.fl.clients_per_round, self.N)
         n_t = max(1, K - int(state["n_late"]))
-        online = [i for i in range(self.N) if state["obs"][i]["avail_hint"] > 0.5]
-        pool = [i for i in online if t - self.last_submit[i] > self.cfg.policy.refl_hold]
-        if len(pool) < n_t:
-            pool = online
-        if len(pool) < n_t:
-            pool = list(range(self.N))
-        pool = list(self.rng.permutation(pool))          # random order among ties
+        c = state.get("candidates")
+        if c is None:
+            online = [i for i in range(self.N) if state["obs"][i]["avail_hint"] > 0.5]
+        else:
+            online = list(c)
+        ready = [i for i in online if t - self.last_submit[i] > self.cfg.policy.refl_hold]
+        if len(ready) < n_t:
+            ready = online
+        if len(ready) < n_t and c is None:
+            ready = list(range(self.N))
+        ready = list(self.rng.permutation(ready))        # random order among ties
         fc = state["avail_forecast"]
-        pool.sort(key=lambda i: fc[i])                   # stable: least available first
-        sel = [int(i) for i in pool[:n_t]]
+        ready.sort(key=lambda i: fc[i])                  # stable: least available first
+        sel = [int(i) for i in ready[:n_t]]
         return sel, {i: "standard" for i in sel}
 
     def observe_outcome(self, state, action, reward, info):

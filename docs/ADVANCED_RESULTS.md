@@ -11,7 +11,9 @@
    count** in 17 of 18 groups (4 points higher on average), with no accuracy
    gain. Exploratory, but very consistent.
 3. **The learned joint policy's real benefit is efficiency, not accuracy:**
-   about 30-45% fewer failed invitations than Random/Oort in every group,
+   about 30-45% fewer failed invitations than Random/Oort in every group
+   (but see item 12: the baselines also invited offline clients, which the
+   RL policy could see and avoid),
    ~20% lower cost, and (on CIFAR-10) higher accuracy than Random. On MNIST
    and FEMNIST its accuracy shows no significant difference from Random, Oort
    and imputation (which is not the same as shown equal).
@@ -54,7 +56,11 @@
     that ARL's per-client value can hide the joint loss of two clients
     holding the same rare class. All confirmed and fixed for the `s2_*`
     groups ("Protocol fix"); every accuracy comparison above was made
-    before the fix and needs the `s2_*` confirmation.
+    before the fix and needs the `s2_*` confirmation. A second review found
+    more (order-dependent credit, offline clients charged and invited by
+    the baselines, a gate that switched itself off, a biased DELTA weighting,
+    reports that could hide failures or reuse stale runs), also fixed; the
+    failure-ratio advantage over Random/Oort also needs re-confirming.
 
 Groups: 1,190 runs on Kaggle 2x T4 (17 groups, 10 seeds each; `confirm_cifar`
 30 fresh seeds), plus 120 weak-client MNIST runs on this project's CPU. Every
@@ -622,8 +628,9 @@ the class docstrings):
 - **DELTA** (Wang et al., NeurIPS 2023), practical version: sampling
   probabilities proportional to sqrt(alpha zeta_i^2 + alpha sigma_i^2)
   (gradient diversity and local gradient variance, alpha = 0.5), updated for
-  the clients that reported, unbiased n_i / p_i aggregation (normalised over
-  the updates that arrived, since clients here can fail).
+  the clients that reported; K draws with replacement and the matching
+  unbiased (Horvitz-Thompson) weights m_i q_i / (K p_i), not renormalised
+  (see "Second review" below for why).
 - **REFL** (Abdelmoniem et al., EuroSys 2023): picks the online clients
   *least* likely to be available next round (forecast right 90% of the time,
   as the paper assumes), clients sit out 5 rounds after submitting, fewer
@@ -689,6 +696,63 @@ bit-identical results with them off (re-checked on the same 7 conditions).
    expected-work modes + greedy expected coverage gain weighted by recent
    class deficits). FAVOR remains the single-run online adaptation
    described above, not the paper's multi-run pre-training.
+
+#### Second review (also before any `s2_*` run)
+
+A second outside review found eight more problems. All were checked in the
+code and confirmed; all are fixed for `s2_*`, off by default, and every
+earlier condition (16 checked, including all baselines whose code changed)
+still gives bit-identical results with the fixes off.
+
+1. **Per-client credit depended on processing order.** ARL-v2/v3 credit was
+   standardised by a running normaliser updated after *each* client, so the
+   same loss could be a penalty or a reward depending on where the client
+   sat in the list. **Fix (`reward.batch_client_norm`):** the whole round is
+   standardised with the statistics from before it, then they are updated.
+2. **Offline clients were charged as if they had trained.** Every invitation
+   cost the mode's full cost and battery, even for a client that was offline
+   or could not start. **Fix (`system.charge_actual`):** cost and battery
+   only for clients that actually ran.
+3. **Multi-round credit silently dropped per-client ARL.** With
+   `policy.horizon > 1` the per-client credit was never read, while the
+   shared reward no longer contained it. No ARL-v2/v3 condition used this
+   combination; it is now rejected with an error.
+4. **The eligibility gate switched itself off.** With fewer than K clients
+   passing it, the gate was dropped for everyone. **Fix
+   (`policy.strict_gate`):** the clients that pass are always kept, the free
+   slots are filled with the highest predicted success, and the number of
+   fill-ins is logged (`gate_filled`). Used by the RL policy and the
+   greedy-coverage rule, the two methods that use the gate.
+5. **DELTA's weighting was not unbiased.** It drew without replacement but
+   weighted by the draw probabilities and renormalised: two equal clients
+   with updates 0 and 10 and draw weights 0.9 / 0.1 gave 9 instead of 5.
+   **Fix:** draws with replacement and Horvitz-Thompson weights, which are
+   unbiased when every sampled client reports (checked by simulation: 5.0).
+6. **"Rounds to target" hid runs that never got there.** `report.py` now
+   prints how many runs reached the target next to the rounds taken by
+   those that did; `budget_s2.py` already did.
+7. **A resumed sweep could reuse out-of-date results.** A run counted as
+   done if its CSV existed. **Fix:** each run's saved config now carries a
+   fingerprint of the simulator code (`code_hash`), and `sweep.py` re-runs
+   any result whose config, code version or number of rounds does not match
+   (`--ignore-code` to keep results across a code change deliberately).
+8. **The confirmatory report could print "passes: yes" on partial data.**
+   `prespec_s2.py` now prints no verdict for a family unless every run is
+   present, finished, made with the protocol fix and by one code version.
+
+**Availability was never really uncertain.** The "noisy" availability
+hint is in [0.7, 1] for an online client and [0, 0.3] for an offline one,
+so a threshold at 0.5 always tells them apart, and the success predictor
+uses it. The RL policy therefore effectively knew who was online, while
+Random, Oort, Power-of-Choice, FedCS and the rest invited offline clients and
+counted those as failures. Real servers select among the devices that have
+checked in, so that comparison was unfair to the baselines: **part of the
+RL policy's earlier "30-45% fewer failed invitations" is likely just
+avoiding offline clients.** **Fix (`system.checkin_pool`):** every policy
+selects only from the clients online this round. The hint remains as it was
+(knowing who is online is a fair assumption once everyone has it); what
+stays uncertain is whether an online client finishes (deadline, battery,
+link).
 
 New per-run logs for "who benefits": `acc_client_worst10` (each client's
 expected accuracy on its own label mix -- reported per-class accuracy
@@ -769,9 +833,11 @@ unchanged), so try one short run on Kaggle before relying on it.
 
 ## What this supports for the thesis
 
-- Supported (3 datasets, 10 seeds, robust to scale, skew and real device
-  speeds): a learned joint selection-and-configuration policy wastes far fewer
-  invitations than Random/Oort (about 0.45 vs 0.65-0.73), costs ~20-30% less,
+- Supported before the fixes, to be re-confirmed by `s2_*` (3 datasets, 10
+  seeds, robust to scale, skew and real device speeds): a learned joint
+  selection-and-configuration policy wastes far fewer invitations than
+  Random/Oort (about 0.45 vs 0.65-0.73; part of this gap came from the
+  baselines inviting offline clients), costs ~20-30% less,
   protects weak and rare-data clients better, and clearly beats FedCER-like,
   FedCS and Power-of-Choice. On CIFAR-10 it is also more accurate than Random.
   On MNIST and FEMNIST its accuracy shows no significant difference from

@@ -122,6 +122,7 @@ reproduced exactly), and has its own experiment group in
 | FAVOR, DELTA, REFL, from the papers' algorithms | `policy.name: favor / delta / refl` | `s2_*` |
 | Protocol fix: validation set for rewards, same start model, absence counter | `fl.val_frac`, `fl.clean_rng`, `fl.absence_counter` | `s2_*` |
 | Coverage inputs for the RL policy, Shapley client value, set-level coverage loss | `policy.coverage_features`, `metrics.coverage_shapley`, `cov_lost` | `s2_*` |
+| Second review: order-free credit, charge only what ran, check-in pool for all, strict gate | `reward.batch_client_norm`, `system.charge_actual`, `system.checkin_pool`, `policy.strict_gate` | `s2_*` |
 
 ## Known gaps
 
@@ -143,6 +144,10 @@ reproduced exactly), and has its own experiment group in
   the same seed did not start from the same model. Accuracy comparisons from
   those groups need the `s2_*` confirmation ("Protocol fix" in
   [docs/ADVANCED_RESULTS.md](docs/ADVANCED_RESULTS.md)).
+- **Before the second-review fixes**, Random, Oort and the other baselines
+  invited offline clients while the RL policy could see who was online, so
+  part of RL's lower failure ratio in the old groups is avoiding offline
+  clients. In `s2_*` every method picks from the clients that checked in.
 - **Class histograms** reveal each client's label proportions to the server;
   they are not privacy-preserving by themselves.
 - Everything is simulated; see [docs/REALISM_CALIBRATION.md](docs/REALISM_CALIBRATION.md).

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import json
 import os
 import sys
 import time
@@ -104,6 +105,9 @@ def main() -> int:
                     help="torch threads per run (default: cores // jobs)")
     ap.add_argument("--shard", default="0/1", help="i/n: run every n-th job starting at i")
     ap.add_argument("--force", action="store_true", help="re-run even if the CSV exists")
+    ap.add_argument("--ignore-code", action="store_true",
+                    help="reuse finished runs even if the simulator code has changed since "
+                         "(config and round count are still checked)")
     ap.add_argument("--list", action="store_true", help="print the plan and exit")
     ap.add_argument("--max-hours", type=float, default=0,
                     help="stop starting new runs after this many hours and let the running "
@@ -116,8 +120,41 @@ def main() -> int:
     i, n = (int(v) for v in args.shard.split("/"))
     jobs = [j for k, j in enumerate(jobs) if k % n == i]
 
+    from afl.config import Cfg
+    from afl.provenance import code_hash
+    current = code_hash()
+    stale: dict[str, int] = {}
+
+    def check(j) -> str:
+        """'ok' if this run exists and was made by this config and this code;
+        'missing'; or why an existing result cannot be reused."""
+        base = os.path.join(j["raw"]["out"], j["raw"]["tag"])
+        if not os.path.exists(base + ".csv"):
+            return "missing"
+        if not os.path.exists(base + ".config.json"):
+            return "no saved config"
+        with open(base + ".config.json") as fh:
+            meta = json.load(fh)
+        want = json.loads(json.dumps(Cfg.from_dict(_deepcopy(j["raw"])).to_dict(), default=str))
+        got = {k: v for k, v in meta.items() if k not in ("init_checksum", "code_hash")}
+        # The GPU a run landed on is not part of the experiment.
+        for d in (want, got):
+            d.get("fl", {}).pop("device", None)
+        if got != want:
+            return "different config"
+        if not args.ignore_code and meta.get("code_hash") != current:
+            return "made by different code"
+        with open(base + ".csv") as fh:
+            n_rows = sum(1 for _ in fh) - 1
+        if n_rows != want["fl"]["rounds"]:
+            return "incomplete"
+        return "ok"
+
     def done(j):
-        return os.path.exists(os.path.join(j["raw"]["out"], f"{j['raw']['tag']}.csv"))
+        st = check(j)
+        if st not in ("ok", "missing"):
+            stale[st] = stale.get(st, 0) + 1
+        return st == "ok"
 
     if args.list:
         by_group: dict[str, list] = {}
@@ -132,11 +169,15 @@ def main() -> int:
             total += len(js)
             todo += left
         print(f"{'TOTAL':22s} runs={total} todo={todo}")
+        for why, n in stale.items():
+            print(f"  {n} existing result(s) would be re-run: {why}")
         return 0
 
     pending = [j for j in jobs if args.force or not done(j)]
     print(f"{len(jobs)} runs selected, {len(jobs) - len(pending)} already done, "
           f"{len(pending)} to run with {args.jobs} job(s)", flush=True)
+    for why, n in stale.items():
+        print(f"  {n} existing result(s) will be re-run: {why}", flush=True)
     if not pending:
         return 0
 

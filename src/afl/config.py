@@ -72,6 +72,16 @@ class SystemCfg:
                                         # 0 = off. Offline rounds do not count.
     churn_prob: float = 0.5             # share of clients with limited patience (fixed
                                         # per client at the start, same for every policy)
+    charge_actual: bool = False         # protocol fix: charge cost and battery for what a
+                                        # client actually did -- nothing if it was offline
+                                        # or could not start for lack of battery. Off =
+                                        # the original runs, where every invitation was
+                                        # charged the mode's full cost and energy
+    checkin_pool: bool = False          # protocol fix: every policy selects only from
+                                        # clients that checked in (are online) this
+                                        # round, as real FL servers do. Off = the
+                                        # original runs, where only policies that read
+                                        # the availability signal avoided offline clients
     device_trace: str = "tiers"         # tiers: the three guessed device tiers;
                                         # fedscale: real per-device speed and
                                         # bandwidth from FedScale's trace
@@ -163,6 +173,11 @@ class RewardCfg:
     lambda_cov: float = 0.5             # ARL-v3 success-credit weight
     arl_v2_ema: float = 0.1             # rate of the class-coverage moving average that
                                         # ARL-v2 uses to tell short gaps from long ones
+    batch_client_norm: bool = False     # protocol fix: per-client credit (ARL-v2/v3) is
+                                        # standardised with the statistics from before
+                                        # the round, then the statistics are updated with
+                                        # the whole round -- so a client's credit does not
+                                        # depend on the order clients are processed in
     fairness_metric: str = "cv_success"  # "cv_success" | "cv_selection" -- Task 2 ablation
 
 
@@ -170,6 +185,10 @@ class RewardCfg:
 class PolicyCfg:
     name: str = "rl"                    # random | fedcs | powerofchoice | oort | rl
     elig_threshold: float = 0.5         # e^elig_{i,t} gate (Sec. 3.10)
+    strict_gate: bool = False           # protocol fix: when fewer than K clients pass the
+                                        # gate, keep the ones that pass and fill the rest
+                                        # with the highest predicted success (instead of
+                                        # dropping the gate for everyone)
     rl_lr: float = 1e-2
     rl_hidden: int = 32
     entropy_coef: float = 0.01

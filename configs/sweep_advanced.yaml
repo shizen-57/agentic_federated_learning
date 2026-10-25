@@ -79,7 +79,10 @@ weak_random: &weak_random
 # method starts from the same model for a seed, with separate random streams;
 # the absence counter counts every round; and every RL variant gets the same
 # inputs (corrected value input, coverage inputs), so RL variants differ only
-# in reward and mode rule. Every group from here on uses all of it.
+# in reward and mode rule. Second review: charge only what a client actually
+# did, every method picks from the clients that checked in, per-client credit
+# does not depend on processing order, and the eligibility gate keeps the
+# clients that pass it. Every group from here on uses all of it.
 sim2: &sim2
   fl.compress_upload: true
   policy.oort_estimated_time: true
@@ -88,6 +91,10 @@ sim2: &sim2
   fl.absence_counter: true
   policy.value_feature: marginal
   policy.coverage_features: true
+  system.charge_actual: true
+  system.checkin_pool: true
+  reward.batch_client_norm: true
+  policy.strict_gate: true
 weak_rare_s2: &weak_rare_s2
   <<: [*weak_rare, *sim2]
 weak_churn_s2: &weak_churn_s2
