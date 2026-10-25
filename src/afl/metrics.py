@@ -61,6 +61,26 @@ def per_client_representation_value(sketch: np.ndarray, selected: list[int]) -> 
     return vals
 
 
+def expected_marginal_value(sketch: np.ndarray, k: int, n_samples: int = 200,
+                            seed: int = 0) -> np.ndarray:
+    """E[V^repr_i] over random k-client sets, scaled to [0, 1].
+
+    The policy-side counterpart of Eq. (3.26): how much class coverage client
+    i typically adds to (or would take away from) a round's selection. V^repr
+    itself depends on the set chosen this round, so it cannot be an input to
+    the choice; its expectation can, and it ranks clients the way ARL values
+    them. Computed once from the class sketches.
+    """
+    rng = np.random.default_rng(seed)
+    N = sketch.shape[0]
+    v = np.zeros(N)
+    for _ in range(n_samples):
+        S = list(rng.choice(N, size=min(k, N), replace=False))
+        v += per_client_representation_value(sketch, S)
+    v /= n_samples
+    return v / v.max() if v.max() > 0 else v
+
+
 def standalone_value(sketch: np.ndarray) -> np.ndarray:
     """Value of each client evaluated on its own, used as a cheap static prior."""
     return sketch.sum(axis=1) * (sketch > 0.05).sum(axis=1) / sketch.shape[1]

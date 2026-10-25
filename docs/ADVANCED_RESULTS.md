@@ -288,6 +288,56 @@ deadline, so it is not handicapped by a hard deadline it was never designed for)
 
 Run it with `GROUPS = "follow_cifar"` (100 runs, about 45 minutes on a T4 x2).
 
+## Why ARL showed no gain: diagnosis
+
+After both pre-specified tests came out null, the question was whether the
+simulation itself prevents ARL from mattering. Instrumented runs on the
+weak-client MNIST setting (CPU, exactly repeatable) checked each suspect:
+
+| Suspect | Measured | Verdict |
+|---|---|---|
+| The eligibility gate hides weak clients' failures from ARL (they succeed ~33% under Light, below the 0.5 threshold) | 83 of 98 and 121 of 148 weak-client failures were counted in ARL' | not the cause |
+| Clients are worth about the same, so value-weighting = counting | Weak (rare-data) clients' V^repr is 1.7-1.9x the others'; CV of failed clients' values ~0.9-1.0 | not the cause |
+| The policy does not learn | With learning switched off (`policy.rl_lr = 0`) failures rise from 0.43-0.58 to 0.58-0.62 | it learns, modestly |
+| **The policy cannot see the value ARL rewards** | The RL policy's "value" input (`metrics.standalone_value`, roughly the number of classes a client holds) has correlation **-0.71** with V^repr and does not separate weak rare-data clients from the rest (0.37 vs 0.39) | **a real flaw** |
+| **ARL' does not track the policy's own mistakes** | corr(ARL'_t, failure ratio) = 0.18; corr(ARL'_t, its invited-only part) = 0.46 -- ~90% comes from never-invited clients | **a real weakness of Eq. 3.27 as a reward** |
+
+The simulator's ingredients behave as designed (configs match the plan,
+weak clients are mode-sensitive, failures are counted, values vary). The
+problem is in how ARL is wired into the policy: ARL rewards protecting
+rare-data clients, but the policy is shown a value input that points the
+other way, and the reward term moves mostly with clients it never chose.
+No reward can teach a policy to protect clients it cannot identify, so the
+null results so far test "ARL reward + misleading value input", not ARL.
+
+Fix (opt-in, defaults unchanged): `policy.value_feature: marginal` gives the
+policy each client's expected marginal coverage, E[V^repr] over random
+K-client sets (`metrics.expected_marginal_value`) -- the same quantity ARL
+weights failures by, computed once from the class sketches.
+
+### Fair re-test, pre-specified before running (`value_cifar`)
+
+Weak-client CIFAR-10, corrected value input for every condition, **fresh
+seeds 40-59** (no overlap with any earlier group): `v2_c2` (ARL', Eq. 3.27),
+`v2_arlsel` (ARL over invited clients only), `v2_rawfail` (plain failure
+count), `v2_arl0` (no damage term).
+
+> **Pre-specified primary tests (two, Holm-corrected):** paired sign-flip,
+> one-sided (ARL better), `final_acc_worst10`, 20 seeds:
+> p1 from `python scripts/stats.py --dir results/adv/value_cifar --ref v2_c2 --vs v2_rawfail --one-sided`,
+> p2 from `python scripts/stats.py --dir results/adv/value_cifar --ref v2_arlsel --vs v2_rawfail --one-sided`
+> (the `final_acc_worst10` row of each). Holm: the smaller p must be
+> <= 0.025, then the other <= 0.05. Significant -> ARL (in that form) helps
+> once the policy can see value. Neither significant -> ARL is reported as
+> not shown to matter even with a value-aware policy. **Descriptive only:**
+> weak-client invitation share and success rate, failure ratio, accuracy,
+> and `v2_arl0` vs `v2_c2`.
+
+Remaining limitation either way: one scalar reward per round for about 20
+decisions (10 clients and their modes), and 100-200 policy updates per run,
+is a weak learning signal; a policy-gradient method with per-client credit
+or more rounds might extract more from any reward term.
+
 ## GPU runs are not bit-reproducible
 
 The same configuration and seed gives different results across the three

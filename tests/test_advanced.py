@@ -460,3 +460,23 @@ def test_follow_up_group_uses_fresh_seeds_and_the_new_conditions():
     mim = next(j for j in jobs if j["cond"] == "c2_mimic")["raw"]
     assert mim["policy"]["name"] == "rl" and mim["fl"]["aggregator"] == "mimic"
     assert mim["system"]["weak_select"] == "rarity"
+
+
+def test_marginal_value_input_matches_what_arl_rewards_and_is_opt_in():
+    from afl import metrics as M
+    sk = _sketch(60)
+    v = M.expected_marginal_value(sk, 10, n_samples=100, seed=0)
+    rng = np.random.default_rng(1)
+    V = np.mean([M.per_client_representation_value(sk, list(rng.choice(60, 10, replace=False)))
+                 for _ in range(100)], axis=0)
+    assert np.corrcoef(v, V)[0, 1] > 0.9 and v.max() == pytest.approx(1.0)
+    assert np.corrcoef(M.standalone_value(sk), V)[0, 1] < 0      # the original input points the other way
+    off = Experiment(_small())
+    on = Experiment(_small(policy={"value_feature": "marginal"}))
+    assert np.allclose(off.value_input, M.standalone_value(off.d["sketch"]))
+    assert not np.allclose(on.value_input, off.value_input)
+    from sweep import build_jobs
+    from afl.run import _load
+    jobs = build_jobs(_load(os.path.join(ROOT, "configs", "sweep_advanced.yaml")), ["value_cifar"], None, "o", [])
+    assert sorted({j["seed"] for j in jobs}) == list(range(40, 60))
+    assert all(j["raw"]["policy"]["value_feature"] == "marginal" for j in jobs)

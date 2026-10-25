@@ -29,6 +29,8 @@ sets:
         b_random_budget, b_oort_budget, b_mifa, b_mimic, b_fedcg]
   # Follow-ups to the first 1,190 runs: MimiC vs RL, RL + MimiC, FedCG with slack.
   follow: [c2_rl_fedprox, b_mimic, c2_mimic, b_fedcg, b_fedcg_m07]
+  # Fair re-test of ARL with the corrected value input.
+  value: [v2_c2, v2_rawfail, v2_arlsel, v2_arl0]
   # Reward-weight sensitivity (Sec. 3.18).
   sens: [c2_rl_fedprox, sens_arl0, sens_arl025, sens_arl1, sens_arl2,
          sens_fair0, sens_fair01, sens_fair1]
@@ -125,3 +127,14 @@ groups:
     set: *weak_rare
     conditions: follow
     seeds: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
+
+  # 11. Fair re-test of ARL (docs/ADVANCED_RESULTS.md, "Why ARL showed no
+  #     gain"): the RL policy's value input was anti-correlated with the value
+  #     ARL rewards. Same weak-client CIFAR-10 setting with the corrected input,
+  #     on FRESH seeds 40-59 (no overlap with any earlier group). Tests fixed
+  #     in advance in docs/ADVANCED_RESULTS.md.
+  value_cifar:
+    config: configs/adv/cifar10.yaml
+    set: *weak_rare
+    conditions: value
+    seeds: [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59]

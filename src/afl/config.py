@@ -133,6 +133,12 @@ class PolicyCfg:
     rl_lr: float = 1e-2
     rl_hidden: int = 32
     entropy_coef: float = 0.01
+    value_feature: str = "standalone"   # the RL policy's "value" input. standalone: the
+                                        # original static prior (number of classes a
+                                        # client holds) -- which turns out to be strongly
+                                        # anti-correlated (about -0.7) with the value ARL
+                                        # rewards; marginal: expected marginal coverage,
+                                        # i.e. E[V^repr] (metrics.expected_marginal_value)
     fedcg_margin: float = 1.0           # FedCG fits each client's compression to
                                         # margin x deadline (1.0 = the paper's exact fit;
                                         # <1 leaves slack for timing jitter)

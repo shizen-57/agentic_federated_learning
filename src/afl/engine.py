@@ -89,6 +89,13 @@ class Experiment:
         self.last_update: dict[int, torch.Tensor] = {}  # MIFA/MimiC substitution store
 
         self.norm = {k: M.Normalizer() for k in ("acc", "cost", "lat", "arl", "faildmg", "debt")}
+        if cfg.policy.value_feature == "marginal":
+            self.value_input = M.expected_marginal_value(
+                self.d["sketch"], cfg.fl.clients_per_round, seed=cfg.seed + 41)
+        elif cfg.policy.value_feature == "standalone":
+            self.value_input = M.standalone_value(self.d["sketch"])
+        else:
+            raise ValueError(f"unknown policy.value_feature {cfg.policy.value_feature}")
 
         # State for the optional pieces; all empty/unused in the original runs.
         self.late: list[tuple] = []               # semi-async updates due next round
@@ -194,7 +201,7 @@ class Experiment:
             "obs": obs, "hist": hist, "p_succ": p_succ, "eligible": eligible,
             "t_expected": t_expected, "n_i": self.d["n_i"],
             "local_loss": self.local_loss,
-            "repr_value": M.standalone_value(self.d["sketch"]),
+            "repr_value": self.value_input,
             "sketch": self.d["sketch"],
             "n_work": self.env.n_work,
             "debt": self.debt / (1.0 + self.debt.max()),

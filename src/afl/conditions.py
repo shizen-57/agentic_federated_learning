@@ -67,6 +67,15 @@ CONDITIONS: dict[str, dict] = {
     "b_fedcg_m07":           {"policy.name": "fedcg", "fl.aggregator": "fedcg",
                               "policy.fedcg_margin": 0.7},
 
+    # --- Fair re-test of ARL: the policy sees the value ARL rewards ---------
+    # The original value input is anti-correlated with ARL's value, so no ARL
+    # reward could teach the policy whom to protect. Same four rewards with
+    # the corrected input (policy.value_feature = marginal).
+    "v2_c2":                 {"policy.name": "rl", "fl.aggregator": "fedprox", "policy.value_feature": "marginal"},
+    "v2_rawfail":            {"policy.name": "rl", "fl.aggregator": "fedprox", "policy.value_feature": "marginal", "reward.damage_metric": "raw_fail"},
+    "v2_arlsel":             {"policy.name": "rl", "fl.aggregator": "fedprox", "policy.value_feature": "marginal", "reward.damage_metric": "arl_selected"},
+    "v2_arl0":               {"policy.name": "rl", "fl.aggregator": "fedprox", "policy.value_feature": "marginal", "reward.lambda_arl": 0.0},
+
     # --- Reward-weight sensitivity (Sec. 3.18); c2 uses lambda_arl 0.5, lambda_fair 0.3
     "sens_arl0":             {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_arl": 0.0},
     "sens_arl025":           {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_arl": 0.25},
