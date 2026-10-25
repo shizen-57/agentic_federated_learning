@@ -308,6 +308,19 @@ class ClientEnv:
                                 + (1 - self._draw["available"][i]) * rng.uniform(0.0, 0.3)),
         }
 
+    def availability_forecast(self, t: int) -> np.ndarray:
+        """True P(A_{i,t+1} = 1) given this round's state, for every client.
+
+        Sticky availability keeps this round's state with probability rho and
+        otherwise re-rolls from next round's diurnal probability; a departed
+        client never returns. This is the quantity a client's own availability
+        model would try to predict (REFL); the engine adds the prediction error.
+        """
+        rho = self.cfg.system.avail_persistence
+        now = self._draw["available"].astype(float)
+        p = rho * now + (1 - rho) * self.availability_prob(t + 1)
+        return np.where(self.departed, 0.0, p)
+
     def oracle_eligible(self, i: int) -> int:
         """e^oracle_{i,t} (Eq. 3.28): does *any* mode succeed for i this round?"""
         return int(any(self.outcome(i, m)["success"] == 1 for m in self.cfg.system.modes))

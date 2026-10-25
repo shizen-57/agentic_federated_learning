@@ -156,6 +156,23 @@ of every round.
   relative to the trace median. Reliability and battery still come from the
   speed tier, since the trace does not record them.
 
+After the simulator fix (`s2_*` groups; why and how in
+docs/ADVANCED_RESULTS.md, "Simulator fix"):
+
+- **Real upload compression** (`fl.compress_upload`): a client's update is
+  top-k sparsified to its mode's upload fraction with error feedback, for
+  every aggregator. **Oort** uses estimated, not true, round times
+  (`policy.oort_estimated_time`).
+- **Mode rule** (`policy.mode_rule`): `expected_work` gives each selected
+  client the mode with the most P(success) x local epochs among modes with
+  P >= 0.5; `light` puts everyone on Light. Lets selection-only baselines
+  choose modes like the RL policy (`*_ew`), and gives two RL controls
+  (`rl_ew`, `rl_light`).
+- **ARL-v3** (`reward.damage_metric: arl_v3`, `reward.lambda_cov`).
+- **FAVOR** (Wang et al., INFOCOM 2020), **DELTA** (Wang et al., NeurIPS
+  2023, practical version) and **REFL** (Abdelmoniem et al., EuroSys 2023),
+  in `src/afl/policies/published.py`.
+
 MIFA and MimiC are aggregation rules for absent clients; their papers sample
 clients without a scheduler, so they run under random selection. FedCER is
 still the simplified `b_fedcer`: its paper could not be identified from the

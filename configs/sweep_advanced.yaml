@@ -34,6 +34,14 @@ sets:
   # ARL-v2 against the plain failure count and the original ARL (all with the
   # corrected value input), plus Random for context.
   arl2: [arl2_full, arl2_shared, v2_rawfail, v2_c2, b_random]
+  # After the simulator fix: the proposed RL policy and its variants, the
+  # mode controls, every earlier baseline (plus mode-fair versions), and the
+  # published FAVOR, DELTA and REFL.
+  s2: [c2_rl_fedprox, v2_rawfail, arl2_full, arl3_full, arl3_shared, rl_light, rl_ew,
+       b_random, b_random_ew, b_oort, b_oort_ew, b_powerofchoice, b_poc_ew,
+       b_fedcs, b_fedcer, b_mimic, b_favor, b_delta, b_refl]
+  # ARL-v3 against the failure count, ARL-v2 and always-Light, for churn.
+  s2arl: [v2_rawfail, arl2_full, arl3_full, rl_light]
   # Reward-weight sensitivity (Sec. 3.18).
   sens: [c2_rl_fedprox, sens_arl0, sens_arl025, sens_arl1, sens_arl2,
          sens_fair0, sens_fair01, sens_fair1]
@@ -62,6 +70,17 @@ weak_random: &weak_random
   system.weak_frac: 0.3
   system.weak_select: random
   system.avail_persistence: 0.8
+
+# Simulator fix (docs/ADVANCED_RESULTS.md, "Simulator fix"): a mode's upload
+# fraction is what the server really receives (top-k with error feedback), and
+# Oort no longer sees the true round time. Every group from here on uses it.
+sim2: &sim2
+  fl.compress_upload: true
+  policy.oort_estimated_time: true
+weak_rare_s2: &weak_rare_s2
+  <<: [*weak_rare, *sim2]
+weak_churn_s2: &weak_churn_s2
+  <<: [*weak_churn, *sim2]
 
 groups:
   # 1. Main comparison: every condition, every dataset, at N=100 / K=10.
@@ -176,3 +195,18 @@ groups:
   arl2_churn_cifar:   {config: configs/adv/cifar10.yaml, set: *weak_churn, conditions: arl2, seeds: [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]}
   arl2_femnist:       {config: configs/adv/femnist.yaml, set: *weak_rare,  conditions: arl2, seeds: [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]}
   arl2_churn_femnist: {config: configs/adv/femnist.yaml, set: *weak_churn, conditions: arl2, seeds: [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]}
+
+  # 14. After the simulator fix (design and tests fixed in
+  #     docs/ADVANCED_RESULTS.md before these runs). Development runs on
+  #     MNIST, seeds 0-2: bug check only.
+  dev_s2_mnist: {config: configs/adv/mnist.yaml, set: *weak_rare_s2, conditions: s2, seeds: [0, 1, 2]}
+  #     Pre-specified tests: fresh seeds 100-119, weak-client regime, CIFAR-10
+  #     and FEMNIST; ARL-v3 also under churn. Listed in the order to run them.
+  s2_cifar:         {config: configs/adv/cifar10.yaml, set: *weak_rare_s2,  conditions: s2,    seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119]}
+  s2_femnist:       {config: configs/adv/femnist.yaml, set: *weak_rare_s2,  conditions: s2,    seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119]}
+  s2_churn_cifar:   {config: configs/adv/cifar10.yaml, set: *weak_churn_s2, conditions: s2arl, seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119]}
+  s2_churn_femnist: {config: configs/adv/femnist.yaml, set: *weak_churn_s2, conditions: s2arl, seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119]}
+  #     The original setting (no weak clients) with the fix, for the main
+  #     comparison table. Seeds 100-109.
+  s2_main_cifar:    {config: configs/adv/cifar10.yaml, set: *sim2, conditions: s2, seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]}
+  s2_main_femnist:  {config: configs/adv/femnist.yaml, set: *sim2, conditions: s2, seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]}

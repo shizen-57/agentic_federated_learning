@@ -117,7 +117,13 @@ class RLPolicy(Policy):
         assign = {}
         # Per-client log-probabilities (pick + mode), for per-decision credit.
         logp_client = dict(step_logp)
+        # Under a fixed mode rule (policy.mode_rule) the engine assigns the
+        # modes, so the mode head is not sampled and gets no gradient.
+        fixed_modes = self.cfg.policy.mode_rule != "own"
         for i in sel:
+            if fixed_modes:
+                assign[int(i)] = self.modes[0]
+                continue
             dist = torch.distributions.Categorical(logits=mode_logits[i])
             m = dist.sample() if self.train_mode else mode_logits[i].argmax()
             lp = dist.log_prob(m)

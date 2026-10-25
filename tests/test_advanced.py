@@ -540,3 +540,167 @@ def test_sign_flip_is_exact_for_twenty_seeds():
     from math import comb
     exact = sum(comb(20, k) for k in range(15, 21)) / 2 ** 20
     assert sign_flip_p(d, alternative="greater") == pytest.approx(exact, abs=1e-12)
+
+
+# ------------------------------------------- simulator fix and new baselines
+
+def _tiny(extra=None, rounds=4, seed=1):
+    from afl.conditions import CONDITIONS, apply
+    raw = {"seed": seed, "data": {"dataset": "synthetic", "num_clients": 20, "seed": seed},
+           "fl": {"rounds": rounds, "clients_per_round": 4, "model": "mlp"},
+           "system": {"weak_frac": 0.3, "avail_persistence": 0.8}}
+    for k, v in (extra or {}).items():
+        if k in CONDITIONS:
+            apply(raw, CONDITIONS[k])
+        else:
+            apply(raw, {k: v})
+    return Cfg.from_dict(raw)
+
+
+def test_fixes_are_off_by_default():
+    cfg = Cfg()
+    assert cfg.fl.compress_upload is False
+    assert cfg.policy.oort_estimated_time is False
+    assert cfg.policy.mode_rule == "own"
+
+
+def test_compressed_upload_sends_only_the_mode_fraction():
+    exp = Experiment(_tiny({"fl.compress_upload": True}))
+    upd = torch.randn(1000)
+    sent = exp._compress(0, upd, exp._frac("light", None))
+    assert int((sent != 0).sum()) == 250                  # Light uploads 25%
+    assert torch.allclose(sent + exp.ef_err[0], upd)      # the rest is carried over
+    full = exp._compress(1, upd, exp._frac("priority", None))
+    assert torch.equal(full, upd)                          # Priority sends everything
+
+
+def test_light_update_reaching_the_server_is_sparse_only_with_the_fix():
+    for on in (False, True):
+        cfg = _tiny({"rl_light": None, "fl.compress_upload": on}, rounds=2)
+        exp = Experiment(cfg)
+        seen = []
+        orig = exp.policy.observe_outcome
+        def spy(state, action, reward, info, orig=orig):
+            seen.extend(info["updates"].values())
+            orig(state, action, reward, info)
+        exp.policy.observe_outcome = spy
+        exp.run(verbose=False)
+        assert seen
+        dens = max(float((u != 0).float().mean()) for u in seen)
+        assert (dens <= 0.26) if on else (dens > 0.9)
+
+
+def test_oort_fix_uses_only_observed_time():
+    exp = Experiment(_tiny({"b_oort": None, "policy.oort_estimated_time": True}))
+    exp.env.new_round(1)
+    st = exp._state(1)
+    i = 0
+    assert st["t_est"][i]["standard"] == pytest.approx(exp._est_time(i, "standard", st, None))
+    # The true time uses this round's jitter, which the estimate must not.
+    exp.env._draw["compute_jitter"][:] = 50.0
+    assert exp._state(1)["t_expected"][i]["standard"] > 10
+    assert exp._est_time(i, "standard", st, None) < 10
+
+
+def test_expected_work_rule_takes_the_most_training_that_is_safe_enough():
+    from afl.policies.base import best_work_mode
+    cfg = Cfg()
+    assert best_work_mode(cfg, {"light": 0.9, "standard": 0.7, "priority": 0.55}) == "priority"
+    assert best_work_mode(cfg, {"light": 0.9, "standard": 0.7, "priority": 0.3}) == "standard"
+    assert best_work_mode(cfg, {"light": 0.4, "standard": 0.2, "priority": 0.1}) == "light"
+
+
+def test_mode_rule_overrides_every_policy_and_rl_skips_its_mode_head():
+    for cond, want in (("b_random_ew", None), ("rl_light", "light")):
+        exp = Experiment(_tiny({cond: None}, rounds=3))
+        rows = exp.run(verbose=False)
+        if want == "light":
+            assert all(r["mode_light"] == r["n_selected"] for r in rows)
+        else:
+            assert sum(r["mode_standard"] for r in rows) < sum(r["n_selected"] for r in rows)
+
+
+def test_arl_v3_loss_is_zero_for_the_best_mode_and_counts_gambles_as_lost():
+    exp = Experiment(_tiny({"arl3_full": None}, rounds=1))
+    exp.env.new_round(1)
+    st = exp._state(1)
+    from afl.policies.base import best_work_mode
+    # Follow the expected-work rule: lost work must be exactly zero.
+    exp.cfg.policy.mode_rule = "expected_work"
+    row = exp.run_round(1)
+    assert row["arl_v3_loss"] == pytest.approx(0.0)
+    assert row["arl_v3_gain"] >= 0.0
+    p = {"light": 0.9, "standard": 0.7, "priority": 0.3}
+    assert best_work_mode(exp.cfg, p) == "standard"
+
+
+def test_refl_selects_least_available_and_scales_stale_updates():
+    from afl.policies.published import REFLPolicy
+    cfg = _tiny({"b_refl": None})
+    pol = REFLPolicy(cfg)
+    N = cfg.data.num_clients
+    obs = {i: {"avail_hint": 0.9 if i < 15 else 0.1} for i in range(N)}
+    fc = np.linspace(1.0, 0.0, N)                     # client 14 least available online
+    sel, _ = pol.act({"obs": obs, "avail_forecast": fc, "n_late": 1}, 1)
+    assert len(sel) == 3                               # APT: K - late
+    assert sel == [14, 13, 12]
+    exp = Experiment(cfg)
+    a, b = torch.ones(10), torch.ones(10) * 5
+    d = exp._refl_aggregate([a, b], [1.0, 1.0], [0, 1])
+    w_s = (1 - 0.35) / 2 + 0.35 * (1 - np.exp(-1))     # the only stale update has Lambda_max
+    assert torch.allclose(d, (a + w_s * b) / (1 + w_s))
+
+
+def test_delta_redistributes_the_mass_of_the_clients_that_reported():
+    from afl.policies.published import DELTAPolicy
+    cfg = _tiny({"b_delta": None})
+    pol = DELTAPolicy(cfg)
+    N = cfg.data.num_clients
+    pol.act({}, 1)
+    u = {0: torch.zeros(5), 1: torch.ones(5) * 0.1}
+    pol.observe_outcome(None, None, 0.0, {"recv_ids": [0, 1], "stale": {}, "updates": u,
+                                          "grad_var": {0: 0.0, 1: 0.0}})
+    assert pol.p.sum() == pytest.approx(1.0)
+    assert pol.p[0] + pol.p[1] == pytest.approx(2.0 / N)  # mass of S_t kept
+    assert pol.p[0] == pytest.approx(pol.p[1])            # equal distance from their mean
+    assert pol.agg_scale(0) == pytest.approx(N)
+
+
+def test_local_gradient_variance_is_tracked_on_request():
+    cfg = _tiny()
+    x = torch.randn(64, 20)
+    y = torch.randint(0, 10, (64,))
+    model = build_model(cfg, 20, 10)
+    gs = {}
+    local_train(cfg, get_flat(model), x, y, 1, 20, 10, torch.Generator().manual_seed(0), grad_stats=gs)
+    assert gs["var"] > 0
+
+
+def test_favor_builds_its_state_from_pca_and_learns_online():
+    cfg = _tiny({"b_favor": None}, rounds=6)
+    exp = Experiment(cfg)
+    exp.run(verbose=False)
+    pol = exp.policy
+    assert exp.probed and pol.client.shape == (20, min(100, 19))
+    assert len(pol.buffer) > 0
+    assert pol.target == 0.9                              # synthetic default
+
+
+def test_new_baselines_do_not_change_the_fl_model_initialisation():
+    a = Experiment(_tiny({"b_random": None}))
+    b = Experiment(_tiny({"b_favor": None}))
+    assert torch.equal(a.global_flat, b.global_flat)
+
+
+def test_simulator_fix_groups_use_fresh_seeds_and_the_fix():
+    import yaml
+    plan = yaml.safe_load(open(os.path.join(ROOT, "configs", "sweep_advanced.yaml")))
+    used = set()
+    for name, g in plan["groups"].items():
+        if not name.startswith("s2_"):
+            used |= set(g.get("seeds", plan["seeds"]))
+    for name in ("s2_cifar", "s2_femnist", "s2_churn_cifar", "s2_churn_femnist"):
+        g = plan["groups"][name]
+        assert g["set"]["fl.compress_upload"] and g["set"]["policy.oort_estimated_time"]
+        assert set(g["seeds"]) == set(range(100, 120))
+        assert not set(g["seeds"]) & used

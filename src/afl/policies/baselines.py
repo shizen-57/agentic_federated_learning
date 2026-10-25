@@ -161,7 +161,11 @@ class OortPolicy(Policy):
         util = np.zeros(N)
         for i in range(N):
             stat = n_i[i] * state["local_loss"][i]
-            t_exp = max(state["t_expected"][i]["standard"], 1e-6)
+            # The original runs used this round's true time (a leak: a real
+            # server cannot know it before the round); the fix uses the
+            # estimate from observed speed and bandwidth.
+            times = state["t_est"] if self.cfg.policy.oort_estimated_time else state["t_expected"]
+            t_exp = max(times[i]["standard"], 1e-6)
             pen = 1.0 if t_exp <= self.cfg.system.deadline else (
                 self.cfg.system.deadline / t_exp) ** self.alpha
             util[i] = stat * pen

@@ -108,6 +108,13 @@ class FLCfg:
                                         # deadline but finishes within staleness_max
                                         # rounds delivers late instead of failing,
                                         # so the staleness rule of Eq. (3.18) applies
+    compress_upload: bool = False       # simulator fix: a mode's upload_frac is what the
+                                        # client really sends -- its update is top-k
+                                        # sparsified to that fraction (with error
+                                        # feedback) for every aggregator. Off = the
+                                        # original runs, where Light and Standard were
+                                        # charged for a partial upload but the server
+                                        # still received the full update
 
 
 @dataclass
@@ -135,6 +142,11 @@ class RewardCfg:
                                         # probability their assigned mode gave up, by
                                         # V^repr, and by how under-covered their classes
                                         # have been lately (see engine.run_round)
+                                        # | "arl_v3": ARL-v2 fixed -- expected useful
+                                        # work (success prob x local epochs) the chosen
+                                        # mode gave up, plus credit (lambda_cov) for
+                                        # useful work delivered on under-covered data
+    lambda_cov: float = 0.5             # ARL-v3 success-credit weight
     arl_v2_ema: float = 0.1             # rate of the class-coverage moving average that
                                         # ARL-v2 uses to tell short gaps from long ones
     fairness_metric: str = "cv_success"  # "cv_success" | "cv_selection" -- Task 2 ablation
@@ -162,6 +174,28 @@ class PolicyCfg:
     horizon: int = 1                    # rounds per policy update. 1 = each round's own
                                         # reward (the original runs); H > 1 = discounted
                                         # returns over H rounds with reward.gamma
+    mode_rule: str = "own"              # own: the policy picks modes itself (original);
+                                        # expected_work: every selected client gets the
+                                        # mode with the most expected training (success
+                                        # prob x local epochs) among modes with success
+                                        # prob >= elig_threshold -- gives selection-only
+                                        # baselines the same mode choice as the RL
+                                        # policy; light: always Light (control)
+    oort_estimated_time: bool = False   # simulator fix: Oort's deadline penalty uses the
+                                        # round time estimated from observed speed and
+                                        # bandwidth, not this round's true time
+    # FAVOR (Wang et al., INFOCOM 2020)
+    favor_target: float = 0.0           # target accuracy Omega; 0 = the paper's value
+                                        # for the dataset (see FAVORPolicy)
+    favor_pca: int = 100                # PCA dimensions per model
+    favor_hidden: int = 512
+    favor_gamma: float = 0.9
+    # DELTA (Wang et al., NeurIPS 2023)
+    delta_alpha: float = 0.5            # alpha_1 = alpha_2 (the paper's default)
+    # REFL (Abdelmoniem et al., EuroSys 2023)
+    refl_beta: float = 0.35             # weight of the boosting term in Eq. (5)
+    refl_hold: int = 5                  # rounds a client sits out after submitting
+    refl_pred_acc: float = 0.9          # accuracy of the availability forecast
 
 
 @dataclass

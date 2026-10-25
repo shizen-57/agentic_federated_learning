@@ -22,6 +22,7 @@ from .data import build as build_data
 from .local import accepted, local_train
 from .models import build_model, get_flat, set_flat
 from .policies import build_policy
+from .policies.base import best_work_mode, mode_by_rule
 from .predictor import SuccessPredictor
 from .sim import ClientEnv
 
@@ -30,7 +31,8 @@ LOG_FIELDS = [
     "n_selected", "n_success", "fail_ratio", "arl_online", "arl_selected", "arl_oracle",
     "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
     "mode_priority", "weak_selected", "weak_success", "late_delivered",
-    "budget_dropped", "debt_mean", "arl_v2", "departed", "wall_s",
+    "budget_dropped", "debt_mean", "arl_v2", "departed",
+    "arl_v3_loss", "arl_v3_gain", "wall_s",
 ]
 
 LIGHTER = {"priority": "standard", "standard": "light", "light": None}
@@ -88,7 +90,8 @@ class Experiment:
         self.gen = torch.Generator().manual_seed(cfg.seed + 3)
         self.last_update: dict[int, torch.Tensor] = {}  # MIFA/MimiC substitution store
 
-        self.norm = {k: M.Normalizer() for k in ("acc", "cost", "lat", "arl", "faildmg", "debt", "v2c")}
+        self.norm = {k: M.Normalizer() for k in ("acc", "cost", "lat", "arl", "faildmg", "debt", "v2c",
+                                                 "v3g", "v3c", "v3cg")}
         self.cov_ema = np.zeros(self.d["num_classes"])   # ARL-v2 class-coverage history
         if cfg.policy.value_feature == "marginal":
             self.value_input = M.expected_marginal_value(
@@ -112,6 +115,10 @@ class Experiment:
             self.sk_sign = (torch.randint(0, 2, (P,), generator=g) * 2 - 1).float().to(self.dev)
             self.hist_sketch = np.zeros((self.N, SKETCH_DIM))
             self.has_hist = np.zeros(self.N, dtype=bool)
+        # Error of the clients' availability forecasts (REFL). Its own stream,
+        # so no other random draw in the run changes.
+        self.fc_rng = np.random.default_rng(cfg.seed + 5000)
+        self.probed = False                       # FAVOR: initial all-client round done
         self.cal_probs: list[float] = []
         self.cal_out: list[int] = []
         self.rows: list[dict] = []
@@ -194,13 +201,29 @@ class Experiment:
             i: int(max(p_succ[i].values()) >= self.cfg.policy.elig_threshold)
             for i in range(self.N)
         }
+        # True round time under this round's draws -- what the original Oort
+        # baseline used (a leak) -- and the server's estimate from observed
+        # speed and bandwidth, which is all a real server has.
         t_expected = {
             i: {m: sum(self.env.workload(i, m)[:2]) for m in self.cfg.system.modes}
             for i in range(self.N)
         }
+        state = {"obs": obs}
+        t_est = {
+            i: {m: self._est_time(i, m, state, None) for m in self.cfg.system.modes}
+            for i in range(self.N)
+        }
+        # Each client's forecast of its own availability next round; right
+        # with probability refl_pred_acc, otherwise uninformative (REFL Sec. 5).
+        fc = self.env.availability_forecast(t)
+        wrong = self.fc_rng.random(self.N) > self.cfg.policy.refl_pred_acc
+        noise = self.fc_rng.random(self.N)
         state = {
             "obs": obs, "hist": hist, "p_succ": p_succ, "eligible": eligible,
-            "t_expected": t_expected, "n_i": self.d["n_i"],
+            "t_expected": t_expected, "t_est": t_est, "n_i": self.d["n_i"],
+            "avail_forecast": np.where(wrong, noise, fc),
+            "n_late": len(self.late),
+            "global_flat": self.global_flat,
             "local_loss": self.local_loss,
             "repr_value": self.value_input,
             "sketch": self.d["sketch"],
@@ -232,8 +255,29 @@ class Experiment:
             self.hist_sketch[i] = self._sketch(upd)
             self.has_hist[i] = True
 
+    def _probe_all(self) -> dict[int, torch.Tensor]:
+        """One local epoch on every client from the current model.
+
+        FAVOR's Step 2: before the first round every device trains once and
+        uploads, so the server has a model of each client to build the state
+        from. Not charged to any client and no client is marked as having
+        participated -- this is the setup phase of the paper's workflow.
+        """
+        out = {}
+        for i in range(self.N):
+            x, y = self._client_xy(i)
+            if len(y) == 0:
+                continue
+            out[i], _ = local_train(self.cfg, self.global_flat, x, y, 1,
+                                    self.d["dim"], self.d["num_classes"], self.gen)
+        return out
+
     def _compress(self, i: int, upd: torch.Tensor, frac: float) -> torch.Tensor:
-        """FedCG upload: top-k sparsification at ratio frac with error feedback."""
+        """Upload at ratio frac: top-k sparsification with error feedback.
+
+        Used by FedCG, and for every policy when fl.compress_upload is on, so a
+        mode's upload fraction is what the server actually receives.
+        """
         v = upd + self.ef_err[i] if i in self.ef_err else upd
         k = max(1, int(round(frac * v.numel())))
         if k >= v.numel():
@@ -244,6 +288,9 @@ class Experiment:
         sent[idx] = v[idx]
         self.ef_err[i] = v - sent
         return sent
+
+    def _frac(self, mode: str, frac: float | None) -> float:
+        return self.cfg.system.upload_frac[mode] if frac is None else frac
 
     def _est_time(self, i: int, mode: str, state: dict, frac: float | None) -> float:
         """Server-side estimate of a client's round time from observed descriptors."""
@@ -288,14 +335,50 @@ class Experiment:
                 dropped += 1
         return keep, {i: assign[i] for i in keep}, dropped
 
+    def _refl_aggregate(self, updates, weights, stale):
+        """REFL's staleness-aware aggregation (Abdelmoniem et al. 2023, Eq. 5).
+
+        Fresh updates get scale 1. A stale update s, tau_s rounds late, gets
+        w_s = (1 - beta) / (tau_s + 1) + beta * (1 - exp(-Lambda_s / Lambda_max)),
+        where Lambda_s = ||u_F - (u_s + n_F u_F) / (n_F + 1)||^2 / ||u_F||^2 is
+        how far it pulls the mean of the n_F fresh updates u_F. The scales are
+        multiplied into the usual data-size weights and normalised.
+        """
+        if not updates:
+            return None
+        beta = self.cfg.policy.refl_beta
+        fresh = [u for u, s in zip(updates, stale) if s == 0]
+        scales = [1.0] * len(updates)
+        st_idx = [k for k, s in enumerate(stale) if s > 0]
+        if st_idx:
+            lam = {}
+            if fresh:
+                u_f = sum(fresh) / len(fresh)
+                nf = len(fresh)
+                den = max(float(u_f @ u_f), 1e-12)
+                for k in st_idx:
+                    mixed = (updates[k] + nf * u_f) / (nf + 1)
+                    lam[k] = float(((u_f - mixed) ** 2).sum()) / den
+            lam_max = max(lam.values()) if lam else 0.0
+            for k in st_idx:
+                boost = (1 - np.exp(-lam[k] / lam_max)) if lam_max > 0 else 0.0
+                scales[k] = (1 - beta) / (stale[k] + 1) + beta * boost
+        w = [wi * sc for wi, sc in zip(weights, scales)]
+        return aggregate("fedavg", updates, w, [1] * len(updates))
+
     # --------------------------------------------------------------- round
 
     def run_round(self, t: int) -> dict:
         t0 = time.time()
         self.env.new_round(t)
         state = self._state(t)
+        if getattr(self.policy, "needs_probe", False) and not self.probed:
+            self.policy.init_probe(self._probe_all(), self.global_flat)
+            self.probed = True
 
         selected, assign = self.policy.act(state, t)
+        if self.cfg.policy.mode_rule != "own":
+            assign = {i: mode_by_rule(self.cfg, state["p_succ"][i]) for i in selected}
         fracs = dict(getattr(self.policy, "upload_frac", {}) or {})
         # A client still finishing last round's late update cannot take a new job.
         busy = {item[0] for item in self.late}
@@ -312,6 +395,10 @@ class Experiment:
         values: dict[int, float] = {i: float(rep_vals[i]) for i in range(self.N)}
 
         updates, weights, steps, succ_p, recv_ids = [], [], [], [], []
+        stale: list[int] = []                 # rounds of delay per received update (REFL)
+        grad_var: dict[int, float] = {}       # DELTA: local gradient variance
+        want_var = getattr(self.policy, "wants_grad_stats", False)
+        compress = self.cfg.fl.compress_upload or self.cfg.fl.aggregator == "fedcg"
         success: dict[int, int] = {}
         reasons: dict[int, str] = {}
 
@@ -325,6 +412,7 @@ class Experiment:
                 steps.append(n_steps)
                 succ_p.append(p)
                 recv_ids.append(i)
+                stale.append(t - issued)
                 self.x_succ[i] += 1
                 self.since_success[i] = 0
                 self.last_update[i] = upd.detach().clone()
@@ -362,18 +450,22 @@ class Experiment:
                 if len(y) == 0:
                     ok = False
                 else:
+                    gs = {} if want_var else None
                     upd, n_steps = local_train(
                         self.cfg, self.global_flat, x, y,
                         self.cfg.system.local_epochs[mode],
-                        self.d["dim"], self.d["num_classes"], self.gen)
-                    if self.cfg.fl.aggregator == "fedcg":
-                        upd = self._compress(i, upd, frac if frac is not None else 1.0)
+                        self.d["dim"], self.d["num_classes"], self.gen, grad_stats=gs)
+                    if compress:
+                        upd = self._compress(i, upd, self._frac(mode, frac))
                     if accepted(upd, self.issued_round[i], t, self.cfg):
                         updates.append(upd)
                         weights.append(self.d["n_i"][i])
                         steps.append(n_steps)
                         succ_p.append(state["p_succ"][i][mode])
                         recv_ids.append(i)
+                        stale.append(0)
+                        if gs:
+                            grad_var[i] = gs["var"]
                     else:
                         ok = False
             elif (self.cfg.fl.async_late and out["reason"] == "deadline"
@@ -386,6 +478,8 @@ class Experiment:
                         self.cfg, self.global_flat, x, y,
                         self.cfg.system.local_epochs[mode],
                         self.d["dim"], self.d["num_classes"], self.gen)
+                    if compress:
+                        upd = self._compress(i, upd, self._frac(mode, frac))
                     self.late.append((i, upd, n_steps, t, state["p_succ"][i][mode]))
 
             success[i] = int(ok)
@@ -415,7 +509,15 @@ class Experiment:
             self.cal_out.append(int(ok))
 
         agg = self.cfg.fl.aggregator
-        if agg == "mifa":
+        scale = getattr(self.policy, "agg_scale", None)
+        if scale is not None:
+            # DELTA's unbiased aggregation: each update weighted by n_i / p_i,
+            # p_i its sampling probability (self-normalised over what arrived).
+            weights = [w * scale(i) for w, i in zip(weights, recv_ids)]
+        base_flat = self.global_flat
+        if agg == "refl":
+            delta = self._refl_aggregate(updates, weights, stale)
+        elif agg == "mifa":
             # MIFA (Gu et al. 2021, Alg. 1): keep every client's latest update
             # (zero until it first reports) and step by their mean over all N.
             for i, u in zip(recv_ids, updates):
@@ -494,6 +596,40 @@ class Experiment:
             gap = max(p.values()) - p[assign[i]]
             v2[i] = float(gap * values[i] * (1.0 + sketch[i] @ deficit))
         arl_v2 = float(sum(v2.values()))
+
+        # ARL-v3 (ARL-v2 fixed, docs/ADVANCED_RESULTS.md). ARL-v2 measured the
+        # loss as success probability given up, which Light -- always the
+        # safest mode -- never gives up, so it taught the policy to put almost
+        # everyone on Light and do a third less training. ARL-v3 measures
+        # expected useful work instead,
+        #   W(m) = P(success | m) x local_epochs[m]  for modes safe enough to
+        #          plan on (P >= elig_threshold, or the safest one if none is),
+        #   W(m) = 0                                 for a gamble below that,
+        # and gives credit for getting the data in:
+        #   loss_i = m_i * (W(best mode) - W(assigned mode)) / epochs_max
+        #            (best = base.best_work_mode; zero when the policy chose it)
+        #   gain_i = m_i * Y_i
+        # with m_i = V_i * (1 + share of i's data in lately under-covered
+        # classes), so both count most for rare, recently missing data. The
+        # gain is what makes inviting such a client, and keeping it alive,
+        # pay off; the loss pushes for as much training as is safe. The loss
+        # is an expectation, not an outcome, so it grades the mode choice
+        # with low variance.
+        ep = self.cfg.system.local_epochs
+        ep_max = float(max(ep.values()))
+        thr = self.cfg.policy.elig_threshold
+        v3_loss: dict[int, float] = {}
+        v3_gain: dict[int, float] = {}
+        for i in selected:
+            p = state["p_succ"][i]
+            mult = values[i] * (1.0 + sketch[i] @ deficit)
+            best = best_work_mode(self.cfg, p)
+            safe = {m for m in p if p[m] >= thr} or {best}
+            work = {m: (p[m] * ep[m] if m in safe else 0.0) for m in p}
+            v3_loss[i] = float(mult * (work[best] - work[assign[i]]) / ep_max)
+            v3_gain[i] = float(mult * success.get(i, 0))
+        arl_v3_loss = float(sum(v3_loss.values()))
+        arl_v3_gain = float(sum(v3_gain.values()))
         ok_ids = [i for i in selected if success.get(i, 0)]
         cov = sketch[ok_ids].max(axis=0) if ok_ids else np.zeros_like(self.cov_ema)
         b = self.cfg.reward.arl_v2_ema
@@ -522,6 +658,12 @@ class Experiment:
             # With per-decision credit the damage leaves the shared reward and
             # is handed to the policy client by client instead.
             damage_term = 0.0 if self.cfg.policy.per_client_credit else self.norm["arl"](arl_v2)
+        elif r.damage_metric == "arl_v3":
+            if self.cfg.policy.per_client_credit:
+                damage_term = 0.0
+            else:
+                damage_term = (self.norm["arl"](arl_v3_loss)
+                               - r.lambda_cov / max(r.lambda_arl, 1e-9) * self.norm["v3g"](arl_v3_gain))
         else:
             raise ValueError(f"unknown reward.damage_metric {r.damage_metric}")
         fairness_term = cv_sel if r.fairness_metric == "cv_selection" else cv
@@ -536,8 +678,15 @@ class Experiment:
         client_adv = None
         if r.damage_metric == "arl_v2" and self.cfg.policy.per_client_credit:
             client_adv = {i: -r.lambda_arl * self.norm["v2c"](v2[i]) for i in selected}
-        self.policy.observe_outcome(state, (selected, assign), reward,
-                                    {"success": success, "client_adv": client_adv})
+        elif r.damage_metric == "arl_v3" and self.cfg.policy.per_client_credit:
+            client_adv = {i: -r.lambda_arl * self.norm["v3c"](v3_loss[i])
+                          + r.lambda_cov * self.norm["v3cg"](v3_gain[i]) for i in selected}
+        self.policy.observe_outcome(state, (selected, assign), reward, {
+            "success": success, "client_adv": client_adv, "t": t,
+            # For the baselines that learn from what arrived (FAVOR, DELTA, REFL).
+            "acc": acc_r, "recv_ids": list(recv_ids), "updates": dict(zip(recv_ids, updates)),
+            "stale": dict(zip(recv_ids, stale)), "grad_var": grad_var, "base_flat": base_flat,
+        })
 
         weak = self.env.weak
         row = {
@@ -559,6 +708,7 @@ class Experiment:
             "debt_mean": float(self.debt.mean()),
             "arl_v2": arl_v2,
             "departed": int(self.env.departed.sum()),
+            "arl_v3_loss": arl_v3_loss, "arl_v3_gain": arl_v3_gain,
             "wall_s": time.time() - t0,
         }
         self.rows.append(row)

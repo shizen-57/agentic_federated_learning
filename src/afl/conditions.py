@@ -84,6 +84,38 @@ CONDITIONS: dict[str, dict] = {
                               "reward.damage_metric": "arl_v2"},
     "v2_arl0":               {"policy.name": "rl", "fl.aggregator": "fedprox", "policy.value_feature": "marginal", "reward.lambda_arl": 0.0},
 
+    # --- After the simulator fix (run with fl.compress_upload and
+    #     policy.oort_estimated_time on; see docs/ADVANCED_RESULTS.md) --------
+    # ARL-v3: ARL-v2 with lost *work* instead of lost success probability,
+    # plus credit for work delivered on under-covered data.
+    "arl3_full":             {"policy.name": "rl", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3", "policy.per_client_credit": True},
+    "arl3_shared":           {"policy.name": "rl", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3"},
+    # Controls for the RL policy's mode choice: always Light (is ARL-v2's
+    # efficiency just "use Light"?) and the fixed expected-work rule (does
+    # learning modes beat a simple rule?). Both with the plain failure count.
+    "rl_light":              {"policy.name": "rl", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "raw_fail", "policy.mode_rule": "light"},
+    "rl_ew":                 {"policy.name": "rl", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "raw_fail", "policy.mode_rule": "expected_work"},
+    # Mode-fair baselines: same selection rule, but the same mode choice the
+    # RL policy could make (expected-work rule) instead of always Standard.
+    "b_random_ew":           {"policy.name": "random", "fl.aggregator": "fedprox",
+                              "policy.mode_rule": "expected_work"},
+    "b_oort_ew":             {"policy.name": "oort", "fl.aggregator": "fedprox",
+                              "policy.mode_rule": "expected_work"},
+    "b_poc_ew":              {"policy.name": "powerofchoice", "fl.aggregator": "fedprox",
+                              "policy.mode_rule": "expected_work"},
+    # Published selection algorithms (src/afl/policies/published.py).
+    "b_favor":               {"policy.name": "favor", "fl.aggregator": "fedprox"},
+    "b_delta":               {"policy.name": "delta", "fl.aggregator": "fedprox"},
+    "b_refl":                {"policy.name": "refl", "fl.aggregator": "refl", "fl.async_late": True},
+
     # --- Reward-weight sensitivity (Sec. 3.18); c2 uses lambda_arl 0.5, lambda_fair 0.3
     "sens_arl0":             {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_arl": 0.0},
     "sens_arl025":           {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_arl": 0.25},

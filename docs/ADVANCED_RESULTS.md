@@ -40,6 +40,13 @@
     and 6-10 fewer clients lost to churn (p <= 0.004 in every setting) --
     at equal accuracy on CIFAR-10 and slightly lower accuracy on FEMNIST.
 
+11. **The simulator had two flaws, now fixed** (section "Simulator fix"):
+    Light's partial upload was charged but not actually compressed, and Oort
+    saw the true round times. ARL-v2 had exploited the first by putting
+    ~93% of clients on Light. ARL-v3, mode-fair baselines and the published
+    FAVOR, DELTA and REFL are set up with pre-specified tests on fresh seeds
+    100-119 (`s2_*` groups).
+
 Groups: 1,190 runs on Kaggle 2x T4 (17 groups, 10 seeds each; `confirm_cifar`
 30 fresh seeds), plus 120 weak-client MNIST runs on this project's CPU. Every
 saved config was checked against `configs/sweep_advanced.yaml` before the
@@ -525,6 +532,119 @@ pre-specified outcome; claiming them would need a confirmation on fresh
 seeds. `arl2_shared` (same loss, no per-decision credit) sits between the
 two on every measure, so the per-decision credit is what drives the change.
 
+## Simulator fix, ARL-v3 and stronger baselines (frozen before testing)
+
+Looking at *how* ARL-v2 got its efficiency (`arl2_*`, mean per round, 10
+invitations) showed it had found a shortcut:
+
+| CIFAR-10, weak clients | Light | Standard | Priority | failures | worst-10% acc |
+|---|---|---|---|---|---|
+| ARL-v2 (full) | 9.3 | 0.5 | 0.2 | 37% | 0.175 |
+| plain failure count | 5.5 | 3.4 | 1.1 | 44% | 0.211 |
+
+ARL-v2 put almost every client on Light (same pattern in all four settings),
+because its loss -- success probability given up versus the safest mode --
+is zero for Light, always the safest mode. Fewer failures came from asking
+for about a third less training, and it invited the weak rare-data clients
+no more often than before (1.76 vs 1.70 per round). Checking that shortcut
+exposed two problems in the simulator and one in the comparison:
+
+1. **Light's small upload was free.** Light (25% upload) and Standard (50%)
+   were charged for a partial upload in time, energy and cost, but the server
+   still received the client's full, uncompressed update -- compression was
+   only applied for FedCG. Every policy that used Light, the RL policy above
+   all, got the savings without the information loss.
+   **Fix (`fl.compress_upload`):** the update a client sends is top-k
+   sparsified to its mode's upload fraction, with error feedback (what is
+   not sent is carried into the client's next upload), for every aggregator.
+2. **Oort saw the true round time** (`t_expected`: this round's hidden
+   compute jitter and channel draw). **Fix (`policy.oort_estimated_time`):**
+   Oort uses the time estimated from observed speed and bandwidth, like
+   every other policy.
+3. **The baselines could not choose modes.** Random, Oort and
+   Power-of-Choice always used Standard; only the RL policy, FedCS (always
+   Light) and FedCER-like chose. Part of RL's advantage could be "it can
+   choose modes" rather than "it chooses well".
+   **Fix (`policy.mode_rule: expected_work`):** a fixed, sensible mode rule
+   any baseline can use -- the mode with the most expected training,
+   P(success) x local epochs, among modes with P(success) >= 0.5 (else the
+   safest). `b_random_ew`, `b_oort_ew`, `b_poc_ew` are Random, Oort and
+   Power-of-Choice with it; `rl_ew` is the RL policy's selection with the
+   same rule (does *learning* modes beat a rule?); `rl_light` is the RL
+   policy with every client on Light (is ARL-v2's efficiency just "use
+   Light"?).
+
+Both fixes are off by default; with them off every earlier condition gives
+bit-identical results (checked on 7 conditions on the CPU), so all earlier
+results stay valid as results *of the original simulator*. Every group from
+here on runs with both fixes on (`sim2` in `configs/sweep_advanced.yaml`).
+
+**ARL-v3** keeps ARL-v2's three good parts (only invited clients, value x
+coverage-deficit weighting m_i = V_i (1 + sum_k c_ik u_k), per-decision
+credit) and replaces the loss that caused the shortcut:
+
+- work, not safety: W(m) = P(success | m) x local_epochs[m] for each mode
+  safe enough to plan on (P >= 0.5, or the safest mode if none is), W = 0 for
+  a gamble below that;
+  **loss_i = m_i (W(best) - W(assigned)) / 4**, zero when the scheduler chose
+  the expected-work mode. Light is no longer automatically right, and
+  gambling on Priority is not rewarded either;
+- credit for success: **gain_i = m_i Y_i**, so inviting a valuable,
+  under-covered client and getting its update in is what pays. (A first
+  draft weighted the gain by epochs too; on a 20-round synthetic smoke test
+  it swung to Priority for most clients and failed 70% of invitations, so it
+  was changed to the above before any run on real data.)
+
+Per-client advantage (`arl3_full`) = -0.5 x norm(loss_i) + 0.5 x norm(gain_i);
+`arl3_shared` puts both in the shared reward instead. Logged as
+`arl_v3_loss` and `arl_v3_gain`.
+
+**New published baselines** (`src/afl/policies/published.py`, each
+implemented from the paper; departures forced by this setting are listed in
+the class docstrings):
+
+- **FAVOR** (Wang et al., INFOCOM 2020): Double-DQN selection on
+  PCA-compressed model weights (100 dims per model, 2-layer MLP with 512
+  hidden units, reward 64^(acc - target) - 1, target 99% MNIST, 55%
+  CIFAR-10, 80% FEMNIST). The paper pre-trains its agent over ~200 FL runs;
+  here it learns online in one run, like the proposed RL policy.
+- **DELTA** (Wang et al., NeurIPS 2023), practical version: sampling
+  probabilities proportional to sqrt(alpha zeta_i^2 + alpha sigma_i^2)
+  (gradient diversity and local gradient variance, alpha = 0.5), updated for
+  the clients that reported, unbiased n_i / p_i aggregation (normalised over
+  the updates that arrived, since clients here can fail).
+- **REFL** (Abdelmoniem et al., EuroSys 2023): picks the online clients
+  *least* likely to be available next round (forecast right 90% of the time,
+  as the paper assumes), clients sit out 5 rounds after submitting, fewer
+  invitations when stragglers' late updates are due (APT), and
+  staleness-aware aggregation of late updates (Eq. 5, beta = 0.35).
+
+None of the three chooses modes, so they use Standard, as Random and Oort do.
+
+> **Pre-specified tests (fixed before any run on real data; fresh seeds
+> 100-119, never used before; exact paired sign-flip; Holm within each
+> family):**
+>
+> **A. Does ARL-v3 protect the worst-represented classes?** `arl3_full` vs
+> `v2_rawfail`, `final_acc_worst10`, one-sided (ARL-v3 better), in each of
+> `s2_cifar`, `s2_femnist`, `s2_churn_cifar`, `s2_churn_femnist`
+> (4 tests). `python scripts/stats.py --dir results/adv/<group> --ref arl3_full --vs v2_rawfail --one-sided`
+>
+> **B. Is ARL-v2's efficiency more than "always Light"?** `arl2_full` vs
+> `rl_light`, mean `fail_ratio`, one-sided (ARL-v2 fewer failures), in
+> `s2_cifar` and `s2_femnist` (2 tests). Neither passing means ARL-v2's
+> efficiency is not shown to be more than putting everyone on Light.
+>
+> **C. Does the proposed system beat the stronger baselines on accuracy?**
+> `c2_rl_fedprox` vs each of `b_favor`, `b_refl`, `b_delta`, `b_random_ew`,
+> `b_oort_ew`, `b_poc_ew`, final `accuracy`, two-sided, in `s2_cifar` and
+> `s2_femnist` (12 tests, Holm across all 12).
+> **C2.** The same 12 pairs on mean `fail_ratio`, two-sided (12 tests).
+>
+> Everything else -- `s2_main_*` (no weak clients), cost, clients lost,
+> `rl_ew` vs `c2_rl_fedprox`, `arl3_shared`, the original baselines under the
+> fixed simulator -- is descriptive.
+
 ## GPU runs are not bit-reproducible
 
 The same configuration and seed gives different results across the three
@@ -579,6 +699,8 @@ unchanged), so try one short run on Kaggle before relying on it.
   versions of the extension group do not exist (`ext_cifar` only).
 - FedCER is still the simplified "-like" version; FedCG is run without a
   deadline margin (see above).
-- Oort's system utility uses each round's true (hidden) client times
-  (`t_expected` in `engine._state`), which a real server would not know. Only
-  Oort uses it, so wins over Oort understate the proposed policy's margin.
+- In every group before the simulator fix, Oort's system utility used each
+  round's true (hidden) client times, which a real server would not know, so
+  wins over Oort there understate the proposed policy's margin; and Light and
+  Standard uploads were not really compressed, which flattered every policy
+  that used them. Both are fixed in the `s2_*` groups.

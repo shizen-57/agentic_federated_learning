@@ -116,6 +116,10 @@ reproduced exactly), and has its own experiment group in
 | Reward-weight sensitivity (Sec. 3.18) | `sens_*` conditions | `sens_cifar` |
 | MIFA, MimiC, FedCG (Table 3.5), from the papers' algorithms | `fl.aggregator: mifa / mimic`, `policy.name: fedcg` | `ext_*` |
 | Real device heterogeneity (FedScale trace) | `system.device_trace: fedscale` | `trace_*` |
+| Simulator fix: real upload compression, Oort without the time leak | `fl.compress_upload`, `policy.oort_estimated_time` | `s2_*` |
+| ARL-v3 (work-based loss + credit for delivered rare data) | `reward.damage_metric: arl_v3` | `s2_*` |
+| Mode-fair baselines (shared expected-work mode rule) | `policy.mode_rule: expected_work` | `s2_*` (`*_ew`) |
+| FAVOR, DELTA, REFL, from the papers' algorithms | `policy.name: favor / delta / refl` | `s2_*` |
 
 ## Known gaps
 
@@ -127,9 +131,11 @@ reproduced exactly), and has its own experiment group in
   contribution). Check it against the thesis's own Sec. 3.13 definition.
 - **Asynchrony** is semi-asynchronous only: a late client may deliver up to
   `staleness_max` rounds late. A fully asynchronous server is not modelled.
-- **Oort sees true round times**: `t_expected` uses each round's hidden draws,
-  which a real server would not have. Only Oort uses it, so comparisons
-  against Oort are, if anything, conservative for the proposed policy.
+- **Before the simulator fix** (every group except `s2_*`), Oort saw each
+  round's true times and Light/Standard uploads were not really compressed;
+  see "Simulator fix" in [docs/ADVANCED_RESULTS.md](docs/ADVANCED_RESULTS.md).
+- **FAVOR** learns online within one run; the paper pre-trains its agent over
+  many runs first.
 - Everything is simulated; see [docs/REALISM_CALIBRATION.md](docs/REALISM_CALIBRATION.md).
 
 ## Authors

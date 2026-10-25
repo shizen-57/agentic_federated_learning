@@ -9,13 +9,16 @@ from .models import build_model, get_flat, set_flat
 
 
 def local_train(cfg, global_flat: torch.Tensor, x, y, epochs: int, dim: int,
-                num_classes: int, gen: torch.Generator):
+                num_classes: int, gen: torch.Generator, grad_stats: dict | None = None):
     """Run `epochs` local epochs from the current global model.
 
     `x`/`y` may be numpy arrays or tensors; training runs on `global_flat`'s
     device. Returns (update, steps) where `update` is the flat parameter delta
     and `steps` is the number of SGD steps taken -- FedNova needs the step
     count, so it is tracked here rather than reconstructed by the aggregator.
+
+    If `grad_stats` is a dict, the variance of the per-batch gradients over
+    the local batches is stored in grad_stats["var"] (DELTA's sigma_L^2).
     """
     dev = global_flat.device
     model = build_model(cfg, dim, num_classes).to(dev)
@@ -29,7 +32,9 @@ def local_train(cfg, global_flat: torch.Tensor, x, y, epochs: int, dim: int,
     bs = min(cfg.fl.batch_size, n)
     steps = 0
 
-    use_prox = cfg.fl.aggregator in ("fedprox", "fedprox_fednova") and cfg.fl.mu > 0
+    # REFL changes only the server side, so it keeps the FedProx local
+    # objective every other baseline is run with.
+    use_prox = cfg.fl.aggregator in ("fedprox", "fedprox_fednova", "refl") and cfg.fl.mu > 0
     if use_prox:
         anchors, off = [], 0
         for p in model.parameters():
@@ -51,9 +56,16 @@ def local_train(cfg, global_flat: torch.Tensor, x, y, epochs: int, dim: int,
                     prox = prox + ((p - g) ** 2).sum()
                 loss = loss + 0.5 * cfg.fl.mu * prox
             loss.backward()
+            if grad_stats is not None:
+                g = torch.cat([p.grad.reshape(-1) for p in model.parameters()])
+                g_sum = g if steps == 0 else g_sum + g
+                sq_sum = float(g @ g) + (0.0 if steps == 0 else sq_sum)
             opt.step()
             steps += 1
 
+    if grad_stats is not None and steps > 0:
+        mean = g_sum / steps
+        grad_stats["var"] = max(0.0, sq_sum / steps - float(mean @ mean))
     return get_flat(model) - global_flat, steps
 
 
