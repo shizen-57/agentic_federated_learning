@@ -19,6 +19,16 @@
    RL policy on CIFAR-10 in the weak-client regime (10 of 10 seeds,
    +0.030), while failing 76% of invitations against 46%.
 5. **GPU runs are not bit-reproducible** (below). CPU runs are.
+6. **The fair re-test also failed.** With the policy shown the value ARL
+   rewards (`value_cifar`, fresh seeds), neither ARL' nor invited-only ARL
+   beat the plain failure count (p = 0.53 and 0.36).
+7. **MimiC vs RL was chance**: on fresh seeds the two are level on accuracy
+   (0.545 vs 0.529, p = 0.25), so finding 4 does not hold up.
+8. **RL selection + MimiC aggregation is the best combination tested**:
+   significantly more accurate than RL alone (0.565 vs 0.529) with the same
+   failure ratio, and faster-learning than MimiC alone with far fewer
+   failures. Found as a secondary result; a pre-specified confirmation is
+   set up below.
 
 Groups: 1,190 runs on Kaggle 2x T4 (17 groups, 10 seeds each; `confirm_cifar`
 30 fresh seeds), plus 120 weak-client MNIST runs on this project's CPU. Every
@@ -337,6 +347,73 @@ Remaining limitation either way: one scalar reward per round for about 20
 decisions (10 clients and their modes), and 100-200 policy updates per run,
 is a weak learning signal; a policy-gradient method with per-client credit
 or more rounds might extract more from any reward term.
+
+### Outcome of the fair re-test and the MimiC follow-up
+
+**`value_cifar` (pre-specified, 20 fresh seeds):** final worst-10%-class
+accuracy, one-sided, vs the plain failure count:
+
+| | ARL reward | plain failure count | diff | 95% CI | p |
+|---|---|---|---|---|---|
+| ARL' (Eq. 3.27), `v2_c2` | 0.187 | 0.189 | -0.002 | [-0.055, +0.051] | 0.53 |
+| ARL over invited clients, `v2_arlsel` | 0.198 | 0.189 | +0.009 | [-0.039, +0.061] | 0.36 |
+
+Neither passes (Holm needed p <= 0.025). Descriptively the four rewards
+behave almost identically (weak-client share of invitations 0.16-0.21,
+success when invited 0.37-0.40, failures 0.45-0.48). Per the rule written
+down in advance: **ARL is not shown to matter, even when the policy can see
+the value ARL rewards.** The diagnosis above therefore explains the
+mechanism's weakness, but fixing the input does not turn it into a gain;
+the remaining limits are ARL' being dominated by never-invited clients and
+the weak per-round learning signal.
+
+**`follow_cifar` (pre-specified primary test, 20 fresh seeds):** final
+accuracy, MimiC vs RL, two-sided: 0.545 vs 0.529, diff -0.016, 95% CI
+[-0.042, +0.010], **p = 0.25, not significant**. The `ext_cifar` result was
+chance; MimiC and the RL policy are level on accuracy, and the RL policy
+fails far less (0.48 vs 0.75).
+
+Secondary results (descriptive per the pre-specification, so to be
+confirmed before being claimed):
+
+| `follow_cifar`, 20 seeds | final acc | mean acc (speed) | worst-10% | failures | cost |
+|---|---|---|---|---|---|
+| RL (c2) | 0.529 | 0.413 | 0.197 | 0.476 | 14.2 |
+| MimiC, random selection | 0.545 | 0.420 | 0.247 | 0.753 | 15.0 |
+| **RL selection + MimiC aggregation** | **0.565** | **0.444** | 0.257 | 0.481 | 13.4 |
+| FedCG | 0.305 | 0.250 | 0.007 | 0.924 | 11.7 |
+| FedCG, 70% deadline margin | 0.296 | 0.238 | 0.002 | 0.921 | 10.8 |
+
+- RL + MimiC vs RL: significantly more accurate (+0.036, Holm-corrected)
+  at the same failure ratio. RL + MimiC vs MimiC: faster learning (mean
+  accuracy +0.024, p = 0.002) and far fewer failures (0.48 vs 0.75); final
+  accuracy +0.020, not significant. Prevention and correction are
+  complementary: the RL policy wastes fewer invitations, MimiC makes the
+  remaining absences less harmful.
+- FedCG with a deadline margin is no better. Its problem is not the
+  deadline fit: its greedy diverse selection is deterministic, so it picks
+  the same clients round after round (CV of selection counts 1.9-2.2 vs 1.0
+  for RL and 0.2 for Random), drains their batteries and loses them. That is
+  faithful to the paper, which assumes clients are always available.
+
+`ext_mnist` and `trace_mnist` (now complete, 10 seeds) agree with the
+CIFAR-10 groups: no Chapter 3 extension improves on c2 except that budgets
+cut failures (0.42 vs 0.53, significant) at equal accuracy; MIFA and FedCG
+are less accurate; with real device traces RL fails significantly less than
+Random and Oort and matches or beats their accuracy.
+
+### Confirmation of RL + MimiC, pre-specified before running (`confirm_mimic`)
+
+> **Pre-specified primary tests (two, Holm-corrected):** paired sign-flip,
+> one-sided (RL + MimiC better), `final_accuracy`, `c2_mimic` vs
+> `c2_rl_fedprox`, **fresh seeds 60-79**, weak-client regime, on CIFAR-10
+> (`confirm_mimic_cifar`) and FEMNIST (`confirm_mimic_femnist`):
+> `python scripts/stats.py --dir results/adv/confirm_mimic_<cifar|femnist> --ref c2_mimic --vs c2_rl_fedprox --one-sided`
+> (the `final_accuracy` row). The smaller p must be <= 0.025, then the
+> other <= 0.05. Passing -> the thesis can claim that combining the RL
+> scheduler with server-side correction improves accuracy over the
+> scheduler alone. **Descriptive only:** `b_mimic` in the same groups,
+> failures, cost, worst-class accuracy.
 
 ## GPU runs are not bit-reproducible
 

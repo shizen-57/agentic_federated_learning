@@ -138,3 +138,17 @@ groups:
     set: *weak_rare
     conditions: value
     seeds: [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59]
+
+  # 12. Pre-specified confirmation of RL selection + MimiC aggregation, which
+  #     beat RL alone as a secondary result in follow_cifar. Fresh seeds 60-79,
+  #     CIFAR-10 and FEMNIST, weak-client regime (docs/ADVANCED_RESULTS.md).
+  confirm_mimic_cifar:
+    config: configs/adv/cifar10.yaml
+    set: *weak_rare
+    conditions: [c2_rl_fedprox, c2_mimic, b_mimic]
+    seeds: [60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79]
+  confirm_mimic_femnist:
+    config: configs/adv/femnist.yaml
+    set: *weak_rare
+    conditions: [c2_rl_fedprox, c2_mimic, b_mimic]
+    seeds: [60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79]

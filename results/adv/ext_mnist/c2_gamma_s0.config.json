@@ -50,7 +50,8 @@
     "mu": 0.01,
     "aggregator": "fedprox",
     "model": "cnn",
-    "device": "auto",
+    "device": "cuda:1",
+    "deterministic": false,
     "eval_subset": 0,
     "impute_missing": false,
     "importance_reweight": false,
@@ -74,9 +75,11 @@
     "rl_lr": 0.01,
     "rl_hidden": 32,
     "entropy_coef": 0.01,
+    "value_feature": "standalone",
+    "fedcg_margin": 1.0,
     "horizon": 10
   },
   "seed": 0,
-  "out": "results/adv/ext_mnist",
+  "out": "/kaggle/working/adv/ext_mnist",
   "tag": "c2_gamma_s0"
 }
