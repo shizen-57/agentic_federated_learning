@@ -82,6 +82,9 @@ class FLCfg:
                                         # | mifa | mimic | fedcg (published baselines)
     model: str = "mlp"                  # mlp | cnn | cnn_femnist | cnn_cifar
     device: str = "cpu"                 # cpu | cuda | auto
+    deterministic: bool = False         # ask PyTorch for deterministic kernels so a GPU
+                                        # run repeats exactly (slower; untested on GPU
+                                        # here). CPU runs are already exactly repeatable.
     eval_subset: int = 0                # if > 0, per-round accuracy uses a fixed
                                         # random subset of this many test samples;
                                         # the final round always uses the full set
@@ -130,6 +133,9 @@ class PolicyCfg:
     rl_lr: float = 1e-2
     rl_hidden: int = 32
     entropy_coef: float = 0.01
+    fedcg_margin: float = 1.0           # FedCG fits each client's compression to
+                                        # margin x deadline (1.0 = the paper's exact fit;
+                                        # <1 leaves slack for timing jitter)
     horizon: int = 1                    # rounds per policy update. 1 = each round's own
                                         # reward (the original runs); H > 1 = discounted
                                         # returns over H rounds with reward.gamma

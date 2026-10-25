@@ -60,6 +60,12 @@ CONDITIONS: dict[str, dict] = {
     "b_mimic":               {"policy.name": "random", "fl.aggregator": "mimic"},
     # FedCG (arXiv 2212.09483): diverse selection + per-client compression.
     "b_fedcg":               {"policy.name": "fedcg", "fl.aggregator": "fedcg"},
+    # Follow-ups after the 1,190-run sweep (docs/ADVANCED_RESULTS.md):
+    # prevention AND correction together: RL selection + MimiC aggregation.
+    "c2_mimic":              {"policy.name": "rl", "fl.aggregator": "mimic"},
+    # FedCG fitted to 70% of the deadline, leaving slack for timing jitter.
+    "b_fedcg_m07":           {"policy.name": "fedcg", "fl.aggregator": "fedcg",
+                              "policy.fedcg_margin": 0.7},
 
     # --- Reward-weight sensitivity (Sec. 3.18); c2 uses lambda_arl 0.5, lambda_fair 0.3
     "sens_arl0":             {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_arl": 0.0},

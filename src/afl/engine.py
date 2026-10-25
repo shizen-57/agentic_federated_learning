@@ -49,6 +49,13 @@ class Experiment:
         torch.manual_seed(cfg.seed)
         np.random.seed(cfg.seed)
 
+        if cfg.fl.deterministic:
+            # Must be set before the first CUDA call to take effect.
+            os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+
         self.d = build_data(cfg)
         self.N = cfg.data.num_clients
         self.env = ClientEnv(cfg, self.d["n_i"], cfg.seed, sketch=self.d["sketch"])

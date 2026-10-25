@@ -265,6 +265,29 @@ Final accuracy / worst-10% / failure ratio vs c2 (0.538 / 0.203 / 0.457):
   comparison needs a safety margin on the deadline; that variant is not yet
   run.
 
+## Follow-up, pre-specified before running (`follow_cifar`)
+
+"MimiC beats RL on CIFAR-10" came from looking at ten comparisons in
+`ext_cifar`, so it needs confirming on fresh data before it goes in a thesis.
+Group `follow_cifar` reruns the weak-client CIFAR-10 setting on **fresh seeds
+10-29 only** (never pooled with seeds 0-9) with five conditions: `c2_rl_fedprox`,
+`b_mimic`, `c2_mimic` (RL selection + MimiC aggregation, i.e. prevention and
+correction together), `b_fedcg` and `b_fedcg_m07` (FedCG fitted to 70% of the
+deadline, so it is not handicapped by a hard deadline it was never designed for).
+
+> **Pre-specified primary test:** paired sign-flip, two-sided, alpha = 0.05,
+> `final_accuracy`, `b_mimic` vs `c2_rl_fedprox`, 20 seeds:
+> `python scripts/stats.py --dir results/adv/follow_cifar --ref c2_rl_fedprox --vs b_mimic`
+> (read the `final_accuracy` row only). Significant with MimiC higher -> the
+> thesis states that a correction method matches or beats the RL policy on
+> accuracy and the RL policy's advantage is efficiency. Not significant -> the
+> `ext_cifar` result is treated as chance and the two are reported as level on
+> accuracy. **Secondary, descriptive only:** `c2_mimic` vs `b_mimic` and vs
+> `c2_rl_fedprox` (does prevention add to correction?), failure ratio, cost,
+> and `b_fedcg_m07` vs `b_fedcg`.
+
+Run it with `GROUPS = "follow_cifar"` (100 runs, about 45 minutes on a T4 x2).
+
 ## GPU runs are not bit-reproducible
 
 The same configuration and seed gives different results across the three
@@ -282,6 +305,11 @@ real and is already part of every standard deviation and p-value reported;
 three copies of c2 are an independent measure of that noise, and the spread
 between them (0.07) is larger than most of the differences tested here --
 which is why small effects need many seeds.
+
+An option, `fl.deterministic: true`, asks PyTorch for deterministic GPU kernels
+so a run repeats exactly. It is not used for the results above, it is slower,
+and it has not been tested on a GPU here (only that it leaves CPU results
+unchanged), so try one short run on Kaggle before relying on it.
 
 ## What this supports for the thesis
 

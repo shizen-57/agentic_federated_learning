@@ -428,3 +428,35 @@ def test_sweep_runs_groups_in_the_order_asked():
     jobs = build_jobs(plan, ["confirm_cifar", "main_mnist"], [0], "out", [])
     order = list(dict.fromkeys(j["group"] for j in jobs))
     assert order == ["confirm_cifar", "main_mnist"]
+
+
+def test_fedcg_margin_shrinks_the_compression_ratio_and_defaults_to_the_paper():
+    base = Experiment(_small(policy={"name": "fedcg"}, fl={"aggregator": "fedcg"}))
+    slack = Experiment(_small(policy={"name": "fedcg", "fedcg_margin": 0.7}, fl={"aggregator": "fedcg"}))
+    for e in (base, slack):
+        e.env.new_round(1)
+    sb, ss = base._state(1), slack._state(1)
+    i = 0
+    assert slack.policy._theta(ss, i) <= base.policy._theta(sb, i)
+    assert Cfg().policy.fedcg_margin == 1.0
+
+
+def test_deterministic_flag_does_not_change_cpu_results_and_sets_the_flags():
+    a = Experiment(_small()).run(verbose=False)
+    b = Experiment(_small(fl={"deterministic": True})).run(verbose=False)
+    assert [r["accuracy"] for r in a] == [r["accuracy"] for r in b]
+    assert torch.are_deterministic_algorithms_enabled()
+    torch.use_deterministic_algorithms(False)
+    assert Cfg().fl.deterministic is False
+
+
+def test_follow_up_group_uses_fresh_seeds_and_the_new_conditions():
+    from sweep import build_jobs
+    from afl.run import _load
+    plan = _load(os.path.join(ROOT, "configs", "sweep_advanced.yaml"))
+    jobs = build_jobs(plan, ["follow_cifar"], None, "out", [])
+    assert sorted({j["seed"] for j in jobs}) == list(range(10, 30))
+    assert {j["cond"] for j in jobs} == {"c2_rl_fedprox", "b_mimic", "c2_mimic", "b_fedcg", "b_fedcg_m07"}
+    mim = next(j for j in jobs if j["cond"] == "c2_mimic")["raw"]
+    assert mim["policy"]["name"] == "rl" and mim["fl"]["aggregator"] == "mimic"
+    assert mim["system"]["weak_select"] == "rarity"
