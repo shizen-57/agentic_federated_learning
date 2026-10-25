@@ -108,6 +108,20 @@ class FLCfg:
                                         # deadline but finishes within staleness_max
                                         # rounds delivers late instead of failing,
                                         # so the staleness rule of Eq. (3.18) applies
+    val_frac: float = 0.0               # protocol fix: hold out this share of the test
+                                        # pool as a server validation set. The reward
+                                        # (and every learning baseline) sees only it;
+                                        # reported accuracy uses only the rest. 0 = the
+                                        # original runs, where the reward was computed
+                                        # on test images that the final score also used
+    clean_rng: bool = False             # protocol fix: the FL model is initialised from
+                                        # its own seed (identical for every method with
+                                        # the same seed), and policy init, policy
+                                        # sampling and local training each use their own
+                                        # random stream instead of sharing PyTorch's
+    absence_counter: bool = False       # protocol fix: rounds_since_success counts every
+                                        # round without a contribution, not only rounds
+                                        # in which the client was invited and failed
     compress_upload: bool = False       # simulator fix: a mode's upload_frac is what the
                                         # client really sends -- its update is top-k
                                         # sparsified to that fraction (with error
@@ -174,6 +188,11 @@ class PolicyCfg:
     horizon: int = 1                    # rounds per policy update. 1 = each round's own
                                         # reward (the original runs); H > 1 = discounted
                                         # returns over H rounds with reward.gamma
+    coverage_features: bool = False     # give the RL policy two more inputs, recomputed
+                                        # after each pick within a round: how much class
+                                        # coverage client i would add to the clients
+                                        # picked so far, plain and weighted by how
+                                        # under-covered each class has been lately
     mode_rule: str = "own"              # own: the policy picks modes itself (original);
                                         # expected_work: every selected client gets the
                                         # mode with the most expected training (success

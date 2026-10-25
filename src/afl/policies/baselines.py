@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 
 from .. import metrics as M
-from .base import Policy
+from .base import Policy, best_work_mode
 
 
 def _default_mode(cfg) -> str:
@@ -252,3 +252,42 @@ class FedCGPolicy(Policy):
             cands.remove(min(sel, key=lambda i: theta[i]))
         self.upload_frac = dict(best_theta)
         return list(best_sel), {i: "standard" for i in best_sel}
+
+
+class GreedyCoveragePolicy(Policy):
+    """A simple, non-learning rule for the whole joint decision.
+
+    Uses the same information as the RL policy: each client's predicted
+    success per mode, its class shares, and how under-covered each class has
+    been lately. Each client gets the expected-work mode (base.best_work_mode);
+    then K clients are picked greedily, each time the eligible client with the
+    largest expected coverage gain,
+        P(success | its mode) x sum_k max(0, c_ik - covered_k) x (u_k + 0.1),
+    covered_k the best share of class k among clients already picked and u_k
+    the class's recent coverage deficit (0.1 keeps covered classes from
+    counting zero). The comparison "does learning beat a rule?" is RL vs this.
+    """
+
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.rng = np.random.default_rng(cfg.seed + 31)
+
+    def act(self, state, t):
+        N = self.cfg.data.num_clients
+        K = min(self.cfg.fl.clients_per_round, N)
+        sk = state["sketch"]
+        w = state["cov_deficit"] + 0.1
+        mode = {i: best_work_mode(self.cfg, state["p_succ"][i]) for i in range(N)}
+        q = np.array([state["p_succ"][i][mode[i]] for i in range(N)])
+        pool = [i for i in range(N) if state["eligible"][i]]
+        if len(pool) < K:
+            pool = list(range(N))
+        tie = self.rng.random(N) * 1e-9                  # random order among exact ties
+        cur = np.zeros(sk.shape[1])
+        sel: list[int] = []
+        for _ in range(K):
+            gain = q * (np.maximum(sk - cur, 0.0) @ w) + tie
+            best = max((i for i in pool if i not in sel), key=lambda i: gain[i])
+            sel.append(best)
+            cur = np.maximum(cur, sk[best])
+        return sel, {i: mode[i] for i in sel}

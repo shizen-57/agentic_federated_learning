@@ -9,6 +9,8 @@ from the log rather than recomputed.
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 import os
 import time
 
@@ -32,7 +34,11 @@ LOG_FIELDS = [
     "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
     "mode_priority", "weak_selected", "weak_success", "late_delivered",
     "budget_dropped", "debt_mean", "arl_v2", "departed",
-    "arl_v3_loss", "arl_v3_gain", "wall_s",
+    "arl_v3_loss", "arl_v3_gain",
+    # protocol-fix diagnostics (docs/ADVANCED_RESULTS.md, "Protocol fix")
+    "val_accuracy", "acc_client_worst10", "acc_client_weak", "cov_lost", "cov_lost_avoid",
+    "gap_max_all", "gap_max_weak", "ece_light", "ece_standard", "ece_priority",
+    "ece_weak", "ece_strong", "wall_s",
 ]
 
 LIGHTER = {"priority": "standard", "standard": "light", "light": None}
@@ -74,13 +80,33 @@ class Experiment:
         self.y_test = torch.from_numpy(self.d["y_test"]).to(self.dev)
         n_test = len(self.d["y_test"])
         self.eval_idx = None
-        if 0 < cfg.fl.eval_subset < n_test:
-            pick = np.random.default_rng(cfg.seed + 5).choice(n_test, cfg.fl.eval_subset,
+        # Protocol fix (fl.val_frac): a server validation set, disjoint from the
+        # images the reported accuracy is measured on. Everything a policy learns
+        # from uses only it.
+        self.val_idx = self.test_idx = None
+        pool = np.arange(n_test)
+        if cfg.fl.val_frac > 0:
+            perm = np.random.default_rng(cfg.seed + 6).permutation(n_test)
+            n_val = int(round(cfg.fl.val_frac * n_test))
+            self.val_idx = torch.from_numpy(np.sort(perm[:n_val])).to(self.dev)
+            pool = np.sort(perm[n_val:])
+            self.test_idx = torch.from_numpy(pool).to(self.dev)
+        if 0 < cfg.fl.eval_subset < len(pool):
+            pick = np.random.default_rng(cfg.seed + 5).choice(len(pool), cfg.fl.eval_subset,
                                                              replace=False)
-            self.eval_idx = torch.from_numpy(np.sort(pick)).to(self.dev)
+            self.eval_idx = torch.from_numpy(np.sort(pool[pick])).to(self.dev)
 
-        self.model = build_model(cfg, self.d["dim"], self.d["num_classes"]).to(self.dev)
+        if cfg.fl.clean_rng:
+            # Same initial model for every method with this seed, whatever the
+            # policy's own construction drew from PyTorch's generator before.
+            with torch.random.fork_rng(devices=[]):
+                torch.manual_seed(cfg.seed + 101)
+                self.model = build_model(cfg, self.d["dim"], self.d["num_classes"]).to(self.dev)
+        else:
+            self.model = build_model(cfg, self.d["dim"], self.d["num_classes"]).to(self.dev)
         self.global_flat = get_flat(self.model)
+        self.init_checksum = hashlib.sha1(
+            self.global_flat.detach().cpu().numpy().tobytes()).hexdigest()[:16]
 
         self.x_succ = np.zeros(self.N)
         self.x_sel = np.zeros(self.N)
@@ -121,6 +147,11 @@ class Experiment:
         self.probed = False                       # FAVOR: initial all-client round done
         self.cal_probs: list[float] = []
         self.cal_out: list[int] = []
+        self.cal_mode: list[str] = []
+        self.cal_weak: list[bool] = []
+        self.gap_cur = np.zeros(self.N)            # rounds since last contribution
+        self.gap_max = np.zeros(self.N)
+        self._last_cls_acc = np.zeros(self.d["num_classes"])
         self.rows: list[dict] = []
         self._prev_acc_r: float | None = None
 
@@ -148,7 +179,7 @@ class Experiment:
                 out = self.model(x[:128])
                 self.local_loss[i] = float(F.cross_entropy(out, y[:128]))
 
-    def _evaluate(self, full: bool = True) -> tuple[float, float, float]:
+    def _evaluate(self, full: bool = True, idx=None) -> tuple[float, float, float]:
         """Accuracy, loss, and mean accuracy over the worst 10% of classes.
 
         The worst-classes number is what representation loss should move: if a
@@ -158,9 +189,12 @@ class Experiment:
         """
         set_flat(self.model, self.global_flat)
         self.model.eval()
-        x, y = self.x_test, self.y_test
-        if not full and self.eval_idx is not None:
-            x, y = x[self.eval_idx], y[self.eval_idx]
+        if idx is None:
+            if not full and self.eval_idx is not None:
+                idx = self.eval_idx
+            elif self.test_idx is not None:
+                idx = self.test_idx
+        x, y = (self.x_test, self.y_test) if idx is None else (self.x_test[idx], self.y_test[idx])
         C = self.d["num_classes"]
         loss_sum, correct = 0.0, 0
         per_class_ok = torch.zeros(C, device=self.dev)
@@ -178,6 +212,9 @@ class Experiment:
         n = max(len(y), 1)
         seen = per_class_n > 0
         cls_acc = (per_class_ok[seen] / per_class_n[seen]).cpu().numpy()
+        full_cls = np.full(C, np.nan)
+        full_cls[seen.cpu().numpy()] = cls_acc
+        self._last_cls_acc = full_cls
         k = max(1, int(round(0.1 * len(cls_acc))))
         worst = float(np.sort(cls_acc)[:k].mean()) if len(cls_acc) else 0.0
         return correct / n, loss_sum / n, worst
@@ -229,6 +266,7 @@ class Experiment:
             "sketch": self.d["sketch"],
             "n_work": self.env.n_work,
             "debt": self.debt / (1.0 + self.debt.max()),
+            "cov_deficit": 1.0 - self.cov_ema / max(float(self.cov_ema.max()), 1e-9),
         }
         if self.hist_sketch is not None:
             self._probe_missing_history()
@@ -335,6 +373,47 @@ class Experiment:
                 dropped += 1
         return keep, {i: assign[i] for i in keep}, dropped
 
+    def _client_metrics(self, success: dict, late_ids: set) -> dict:
+        """Who benefits: per-client accuracy, contribution gaps, calibration.
+
+        A client's accuracy is the reported per-class accuracy weighted by its
+        own label distribution (its expected accuracy on data like its own).
+        Gaps count rounds without a contribution, invited or not. Calibration
+        is over every invitation so far, by mode and by weak/other clients.
+        """
+        sk = self.d["sketch"]
+        cls = self._last_cls_acc
+        seen = ~np.isnan(cls)
+        w = sk[:, seen]
+        tot = w.sum(axis=1)
+        acc_c = np.where(tot > 0, (w @ cls[seen]) / np.maximum(tot, 1e-12), np.nan)
+        ok = acc_c[~np.isnan(acc_c)]
+        k = max(1, int(round(0.1 * len(ok)))) if len(ok) else 1
+        weak = self.env.weak
+        contributed = np.zeros(self.N, dtype=bool)
+        for i, v in success.items():
+            contributed[i] = bool(v)
+        for i in late_ids:
+            contributed[i] = True
+        self.gap_cur = np.where(contributed, 0.0, self.gap_cur + 1)
+        self.gap_max = np.maximum(self.gap_max, self.gap_cur)
+        P, O = np.asarray(self.cal_probs), np.asarray(self.cal_out)
+        modes, wk = np.asarray(self.cal_mode), np.asarray(self.cal_weak, dtype=bool)
+
+        def ece(mask):
+            return M.calibration_error(list(P[mask]), list(O[mask])) if mask.any() else 0.0
+        out = {
+            "acc_client_worst10": float(np.sort(ok)[:k].mean()) if len(ok) else 0.0,
+            "acc_client_weak": float(np.nanmean(acc_c[weak])) if weak.any() else 0.0,
+            "gap_max_all": float(self.gap_max.mean()),
+            "gap_max_weak": float(self.gap_max[weak].mean()) if weak.any() else 0.0,
+            "ece_weak": ece(wk) if len(P) else 0.0,
+            "ece_strong": ece(~wk) if len(P) else 0.0,
+        }
+        for m in self.cfg.system.modes:
+            out[f"ece_{m}"] = ece(modes == m) if len(P) else 0.0
+        return out
+
     def _refl_aggregate(self, updates, weights, stale):
         """REFL's staleness-aware aggregation (Abdelmoniem et al. 2023, Eq. 5).
 
@@ -405,8 +484,10 @@ class Experiment:
         # Semi-asynchronous deliveries from last round, now one round stale:
         # Eq. (3.18)'s staleness check decides whether they still count.
         late_delivered = 0
+        late_ids: set[int] = set()
         for i, upd, n_steps, issued, p in self.late:
             if accepted(upd, issued, t, self.cfg):
+                late_ids.add(i)
                 updates.append(upd)
                 weights.append(self.d["n_i"][i])
                 steps.append(n_steps)
@@ -507,6 +588,15 @@ class Experiment:
             self.predictor.update(state["obs"][i], state["hist"][i], mode, int(ok))
             self.cal_probs.append(state["p_succ"][i][mode])
             self.cal_out.append(int(ok))
+            self.cal_mode.append(mode)
+            self.cal_weak.append(bool(self.env.weak[i]))
+
+        if self.cfg.fl.absence_counter:
+            # A client that was not invited (or whose late update did not
+            # arrive) has also gone one more round without contributing.
+            for i in range(self.N):
+                if i not in success and i not in late_ids:
+                    self.since_success[i] += 1
 
         agg = self.cfg.fl.aggregator
         scale = getattr(self.policy, "agg_scale", None)
@@ -549,11 +639,17 @@ class Experiment:
         # The reward always sees the same evaluation set from round to round
         # (the subset, if one is configured) so dAcc never mixes two test sets;
         # only the logged accuracy of the final round switches to the full set.
-        acc_r, loss_r, worst_r = self._evaluate(full=False)
-        if t == self.cfg.fl.rounds and self.eval_idx is not None:
-            acc, test_loss, acc_worst = self._evaluate(full=True)
+        if self.val_idx is not None:
+            # Reward and learning baselines see the validation set only; the
+            # reported accuracy is computed afterwards and never fed back.
+            acc_r, _, _ = self._evaluate(idx=self.val_idx)
+            acc, test_loss, acc_worst = self._evaluate(full=(t == self.cfg.fl.rounds))
         else:
-            acc, test_loss, acc_worst = acc_r, loss_r, worst_r
+            acc_r, loss_r, worst_r = self._evaluate(full=False)
+            if t == self.cfg.fl.rounds and self.eval_idx is not None:
+                acc, test_loss, acc_worst = self._evaluate(full=True)
+            else:
+                acc, test_loss, acc_worst = acc_r, loss_r, worst_r
         d_acc = acc_r - (self._prev_acc_r if self._prev_acc_r is not None else acc_r)
         self._prev_acc_r = acc_r
 
@@ -566,6 +662,17 @@ class Experiment:
         # without the never-invited clients Eq. (3.27) also sums over.
         arl_sel = M.arl_online({i: values[i] for i in selected}, state["eligible"], success)
         arl_or = M.arl_oracle(values, self.env, success)
+        # Set-level coverage loss: what the delivered set covers vs. the invited
+        # set, and vs. what it would have covered had every invited client that
+        # could succeed in *some* mode this round been given that mode (same
+        # random draws). Unlike a sum of per-client values, this sees two
+        # failed holders of the same rare class.
+        sketch = self.d["sketch"]
+        delivered = [i for i in selected if success.get(i, 0)]
+        feasible = [i for i in selected if self.env.oracle_eligible(i)]
+        cov_d = M.coverage(sketch[delivered])
+        cov_lost = M.coverage(sketch[selected]) - cov_d if selected else 0.0
+        cov_lost_avoid = M.coverage(sketch[feasible]) - cov_d if feasible else 0.0
         cv = M.cv_fairness(self.x_succ)          # successful-contribution CV (core metric, Eq. 3.32)
         cv_sel = M.cv_fairness(self.x_sel)        # raw-selection-count CV (Task 2 ablation comparator)
         n_succ = int(sum(success.values()))
@@ -585,7 +692,6 @@ class Experiment:
         #   V_i     its representation value this round (Eq. 3.26), and
         #   a_i     1 + its data share in classes that have been under-covered
         #           lately, so a long absence costs more than a short gap.
-        sketch = self.d["sketch"]
         deficit = 1.0 - self.cov_ema / max(float(self.cov_ema.max()), 1e-9)
         v2: dict[int, float] = {}
         for i in selected:
@@ -618,11 +724,15 @@ class Experiment:
         ep = self.cfg.system.local_epochs
         ep_max = float(max(ep.values()))
         thr = self.cfg.policy.elig_threshold
+        phi = M.coverage_shapley(sketch, selected)
         v3_loss: dict[int, float] = {}
         v3_gain: dict[int, float] = {}
         for i in selected:
             p = state["p_succ"][i]
-            mult = values[i] * (1.0 + sketch[i] @ deficit)
+            # Shapley share of the invited set's coverage, not the leave-one-out
+            # value: two invited holders of the same rare class get half each,
+            # instead of zero each.
+            mult = phi[i] * (1.0 + sketch[i] @ deficit)
             best = best_work_mode(self.cfg, p)
             safe = {m for m in p if p[m] >= thr} or {best}
             work = {m: (p[m] * ep[m] if m in safe else 0.0) for m in p}
@@ -709,6 +819,8 @@ class Experiment:
             "arl_v2": arl_v2,
             "departed": int(self.env.departed.sum()),
             "arl_v3_loss": arl_v3_loss, "arl_v3_gain": arl_v3_gain,
+            "val_accuracy": acc_r, "cov_lost": cov_lost, "cov_lost_avoid": cov_lost_avoid,
+            **self._client_metrics(success, late_ids),
             "wall_s": time.time() - t0,
         }
         self.rows.append(row)
@@ -737,5 +849,8 @@ class Experiment:
             wr.writeheader()
             wr.writerows(self.rows)
         os.replace(tmp, path)
-        self.cfg.dump(os.path.join(self.cfg.out, f"{self.cfg.tag}.config.json"))
+        meta = self.cfg.to_dict()
+        meta["init_checksum"] = self.init_checksum   # same for every method under fl.clean_rng
+        with open(os.path.join(self.cfg.out, f"{self.cfg.tag}.config.json"), "w") as fh:
+            json.dump(meta, fh, indent=2, default=str)
         return path

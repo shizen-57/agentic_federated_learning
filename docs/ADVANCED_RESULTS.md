@@ -5,7 +5,7 @@
 1. **ARL is not shown to matter.** Both pre-specified tests (CIFAR-10 with 30
    fresh seeds; FEMNIST) found no effect on worst-class accuracy
    (+0.007 and +0.007, p = 0.36 each). Setting the ARL weight to **0** -- no
-   damage term at all -- is statistically indistinguishable from the thesis's
+   damage term at all -- shows no significant difference from the thesis's
    0.5 and is nominally better on every measure.
 2. **ARL's reward produces *more* failed invitations than a plain failure
    count** in 17 of 18 groups (4 points higher on average), with no accuracy
@@ -13,7 +13,8 @@
 3. **The learned joint policy's real benefit is efficiency, not accuracy:**
    about 30-45% fewer failed invitations than Random/Oort in every group,
    ~20% lower cost, and (on CIFAR-10) higher accuracy than Random. On MNIST
-   and FEMNIST its accuracy is level with Random, Oort and imputation.
+   and FEMNIST its accuracy shows no significant difference from Random, Oort
+   and imputation (which is not the same as shown equal).
 4. **Prevention does not beat a good correction on accuracy.** MimiC
    (server-side correction, random selection) ends **more accurate** than the
    RL policy on CIFAR-10 in the weak-client regime (10 of 10 seeds,
@@ -22,8 +23,8 @@
 6. **The fair re-test also failed.** With the policy shown the value ARL
    rewards (`value_cifar`, fresh seeds), neither ARL' nor invited-only ARL
    beat the plain failure count (p = 0.53 and 0.36).
-7. **MimiC vs RL was chance**: on fresh seeds the two are level on accuracy
-   (0.545 vs 0.529, p = 0.25), so finding 4 does not hold up.
+7. **MimiC vs RL was chance**: on fresh seeds the accuracy difference is not
+   significant (0.545 vs 0.529, p = 0.25), so finding 4 does not hold up.
 8. **RL selection + MimiC aggregation is the best combination tested**:
    significantly more accurate than RL alone (0.565 vs 0.529) with the same
    failure ratio, and faster-learning than MimiC alone with far fewer
@@ -38,7 +39,8 @@
     four). Exploratory but very consistent: it makes the scheduler markedly
     more economical -- 5-7 points fewer failures, 2-3.7 lower cost per round
     and 6-10 fewer clients lost to churn (p <= 0.004 in every setting) --
-    at equal accuracy on CIFAR-10 and slightly lower accuracy on FEMNIST.
+    with no significant accuracy difference on CIFAR-10 and slightly lower
+    accuracy on FEMNIST.
 
 11. **The simulator had two flaws, now fixed** (section "Simulator fix"):
     Light's partial upload was charged but not actually compressed, and Oort
@@ -46,6 +48,13 @@
     ~93% of clients on Light. ARL-v3, mode-fair baselines and the published
     FAVOR, DELTA and REFL are set up with pre-specified tests on fresh seeds
     100-119 (`s2_*` groups).
+12. **An external review found that the reward was computed on test
+    images** (the scheduler learned from data the final score also used),
+    that methods with the same seed did not start from the same model, and
+    that ARL's per-client value can hide the joint loss of two clients
+    holding the same rare class. All confirmed and fixed for the `s2_*`
+    groups ("Protocol fix"); every accuracy comparison above was made
+    before the fix and needs the `s2_*` confirmation.
 
 Groups: 1,190 runs on Kaggle 2x T4 (17 groups, 10 seeds each; `confirm_cifar`
 30 fresh seeds), plus 120 weak-client MNIST runs on this project's CPU. Every
@@ -240,8 +249,8 @@ c2 (the thesis's RL policy) vs everything else, final accuracy / failure ratio;
 - Fewer failed invitations than every selection baseline except FedCS
   (which only picks safe clients), in every dataset.
 - Accuracy: significantly better than FedCER-like, FedCS and Power-of-Choice
-  everywhere; better than Random only on CIFAR-10; level with Random, Oort and
-  imputation on MNIST and FEMNIST.
+  everywhere; better than Random only on CIFAR-10; no significant difference from Random,
+  Oort and imputation on MNIST and FEMNIST.
 - Aggregation (FedAvg, FedProx, FedNova, FedProx+FedNova): no significant
   difference in any dataset.
 - Fairness (CV, lower is fairer): RL 1.07 / 1.01 / 1.06 vs Random 1.20 /
@@ -252,7 +261,7 @@ c2 (the thesis's RL policy) vs everything else, final accuracy / failure ratio;
 Robustness: with FedScale's real device speeds (`trace_cifar`), at N=30 and
 N=200 (`scale_*`), and at Dirichlet alpha 0.1 and 0.5 (`alpha*`), RL still
 fails far less than Random and Oort (always significant) and its accuracy is
-level with or better than theirs (significantly better than Random in
+not significantly worse than theirs (significantly better than Random in
 `alpha01_mnist`, `alpha05_cifar`, `scale_n30_femnist`, `scale_n200_femnist`).
 
 ## Chapter 3 pieces and published baselines (`ext_cifar`, weak regime)
@@ -278,8 +287,8 @@ Final accuracy / worst-10% / failure ratio vs c2 (0.538 / 0.203 / 0.457):
   0.538), +0.010 averaged over all rounds, at 20% higher cost and 66% more
   failed invitations. A correction that makes absent clients harmless does as
   well as avoiding the absence. The thesis's prevention-vs-imputation claim
-  therefore has to be stated as an *efficiency* claim (same accuracy for far
-  fewer wasted invitations), not an accuracy claim. Its own simplified
+  therefore has to be stated as an *efficiency* claim (no significant accuracy
+  difference, far fewer wasted invitations), not an accuracy claim. Its own simplified
   imputation baseline (`b_mimic_impute`) did not show this (0.564 vs RL 0.572
   in `main_cifar`), so the effect needs the proper algorithm. The natural next
   test is both together (RL selection + MimiC aggregation), which the code
@@ -387,8 +396,8 @@ the weak per-round learning signal.
 **`follow_cifar` (pre-specified primary test, 20 fresh seeds):** final
 accuracy, MimiC vs RL, two-sided: 0.545 vs 0.529, diff -0.016, 95% CI
 [-0.042, +0.010], **p = 0.25, not significant**. The `ext_cifar` result was
-chance; MimiC and the RL policy are level on accuracy, and the RL policy
-fails far less (0.48 vs 0.75).
+chance; MimiC and the RL policy show no significant accuracy difference, and the
+RL policy fails far less (0.48 vs 0.75).
 
 Secondary results (descriptive per the pre-specification, so to be
 confirmed before being claimed):
@@ -402,7 +411,7 @@ confirmed before being claimed):
 | FedCG, 70% deadline margin | 0.296 | 0.238 | 0.002 | 0.921 | 10.8 |
 
 - RL + MimiC vs RL: significantly more accurate (+0.036, Holm-corrected)
-  at the same failure ratio. RL + MimiC vs MimiC: faster learning (mean
+  with no significant difference in failure ratio. RL + MimiC vs MimiC: faster learning (mean
   accuracy +0.024, p = 0.002) and far fewer failures (0.48 vs 0.75); final
   accuracy +0.020, not significant. Prevention and correction are
   complementary: the RL policy wastes fewer invitations, MimiC makes the
@@ -415,9 +424,10 @@ confirmed before being claimed):
 
 `ext_mnist` and `trace_mnist` (now complete, 10 seeds) agree with the
 CIFAR-10 groups: no Chapter 3 extension improves on c2 except that budgets
-cut failures (0.42 vs 0.53, significant) at equal accuracy; MIFA and FedCG
+cut failures (0.42 vs 0.53, significant) with no significant accuracy
+difference; MIFA and FedCG
 are less accurate; with real device traces RL fails significantly less than
-Random and Oort and matches or beats their accuracy.
+Random and Oort, and its accuracy is not significantly lower.
 
 ### Confirmation of RL + MimiC, pre-specified before running (`confirm_mimic`)
 
@@ -498,7 +508,7 @@ passed, so `stats.py` now enumerates all sign patterns up to n = 22. Taken
 with `follow_cifar` (+0.036), the CIFAR-10 direction is consistent and
 favourable but not confirmed; FEMNIST shows no effect. Descriptively RL +
 MimiC learns faster on both (mean accuracy 0.441 vs 0.417; 0.651 vs 0.645)
-at the same failure ratio. The thesis can report it as a promising, not
+with no significant difference in failure ratio. The thesis can report it as a promising, not
 established, combination.
 
 **`arl2_*` (pre-specified, fresh seeds 80-99):** final worst-10%-class
@@ -581,7 +591,8 @@ here on runs with both fixes on (`sim2` in `configs/sweep_advanced.yaml`).
 
 **ARL-v3** keeps ARL-v2's three good parts (only invited clients, value x
 coverage-deficit weighting m_i = V_i (1 + sum_k c_ik u_k), per-decision
-credit) and replaces the loss that caused the shortcut:
+credit; V_i is now the Shapley share, see "Protocol fix" item 4) and
+replaces the loss that caused the shortcut:
 
 - work, not safety: W(m) = P(success | m) x local_epochs[m] for each mode
   safe enough to plan on (P >= 0.5, or the safest mode if none is), W = 0 for
@@ -621,42 +632,117 @@ the class docstrings):
 
 None of the three chooses modes, so they use Standard, as Random and Oort do.
 
-> **Pre-specified tests (fixed before any run on real data; fresh seeds
-> 100-119, never used before; exact paired sign-flip; Holm within each
-> family):**
+### Protocol fix (after an external review, before any `s2_*` run)
+
+An outside review of the code found problems in how results were measured.
+Each was checked in the code and confirmed; all are fixed for the `s2_*`
+groups, off by default, and every earlier condition still gives
+bit-identical results with them off (re-checked on the same 7 conditions).
+
+1. **The scheduler learned from the test set.** The reward (accuracy gain
+   per round) was computed on test images, and the final score used the
+   same images (on CIFAR-10, a 2,000-image subset of the 10,000 used for the
+   final score). **Fix (`fl.val_frac: 0.3`):** 30% of the test pool becomes
+   a server validation set; the reward and every learning baseline (FAVOR's
+   reward too) see only it, and reported accuracy uses only the other 70%,
+   which nothing ever learns from. Every accuracy comparison made before
+   this fix needs confirming under it -- the `s2_*` groups are that
+   confirmation.
+2. **Same seed did not mean same starting model.** The RL policy's network
+   was built from PyTorch's global generator before the FL model, so the RL
+   policy and Random/Oort started from different weights; local training
+   and RL sampling also shared that generator (the RL policy's own
+   generator was created but never used). **Fix (`fl.clean_rng`):** the FL
+   model is initialised from its own seed, identical for every method with
+   that seed (a checksum, `init_checksum`, is saved with every run's
+   config); the RL network, RL sampling and local training each have their
+   own stream.
+3. **The absence counter only counted failed invitations.** A client that
+   was never invited for 50 rounds still showed 0 rounds since its last
+   contribution. **Fix (`fl.absence_counter`):** it counts every round
+   without a contribution.
+4. **The value of a client can hide a joint loss.** Eq. (3.26) values a
+   selected client by the coverage lost if *it alone* were removed, so two
+   selected clients holding the same rare class are each worth 0 -- and if
+   both fail, the sum of their values still says nothing was lost. This
+   follows from the formula, and the original ARL, ARL-v2 and the first
+   ARL-v3 all inherit it. **Fix:** ARL-v3 now weights each invited client by
+   its **Shapley share** of the invited set's coverage (`metrics.coverage_shapley`:
+   two holders of the same class get half each; the shares add up to the
+   set's coverage; checked against brute force), and every run logs the
+   **set-level** loss directly: `cov_lost` = Cov(invited) - Cov(delivered),
+   and `cov_lost_avoid` = Cov(invited clients that could have succeeded in
+   some mode this round, same random draws) - Cov(delivered).
+5. **The policy could not see what ARL-v3 rewards.** It saw a static value
+   and history, not the current class-coverage deficit or what it had
+   already picked this round. **Fix (`policy.coverage_features`):** two
+   more inputs, recomputed after every pick within a round -- the coverage
+   client i would add to the clients picked so far, plain and weighted by
+   each class's recent deficit -- so the policy can pick complementary
+   clients. In `s2_*` every RL variant gets the same inputs (these, plus the
+   corrected value input), so RL variants differ only in reward and mode rule.
+6. **Baseline comparisons mixed two effects.** FAVOR, DELTA and REFL ran on
+   Standard while the RL policy chose modes. **Fix:** each also runs with
+   the shared expected-work mode rule (`b_favor_ew`, `b_delta_ew`,
+   `b_refl_ew`), and a simple non-learning rule for the whole joint
+   decision with the RL policy's information is added (`b_cov_ew`:
+   expected-work modes + greedy expected coverage gain weighted by recent
+   class deficits). FAVOR remains the single-run online adaptation
+   described above, not the paper's multi-run pre-training.
+
+New per-run logs for "who benefits": `acc_client_worst10` (each client's
+expected accuracy on its own label mix -- reported per-class accuracy
+weighted by its class shares -- averaged over the worst 10% of clients),
+`acc_client_weak`, `gap_max_all` / `gap_max_weak` (longest run of rounds
+without a contribution), and predictor calibration by mode and by weak /
+other clients (`ece_light`, ..., `ece_weak`, `ece_strong`).
+
+> **Pre-specified tests (fixed before any `s2_*` run; fresh seeds 100-119,
+> never used before; exact paired sign-flip; Holm within each family; a
+> test passes when its Holm-adjusted p < 0.05). Computed by
+> `python scripts/prespec_s2.py`:**
 >
 > **A. Does ARL-v3 protect the worst-represented classes?** `arl3_full` vs
-> `v2_rawfail`, `final_acc_worst10`, one-sided (ARL-v3 better), in each of
-> `s2_cifar`, `s2_femnist`, `s2_churn_cifar`, `s2_churn_femnist`
-> (4 tests). `python scripts/stats.py --dir results/adv/<group> --ref arl3_full --vs v2_rawfail --one-sided`
+> `v2_rawfail`, final `acc_worst10`, one-sided (ARL-v3 better), in
+> `s2_cifar`, `s2_femnist`, `s2_churn_cifar`, `s2_churn_femnist` (4 tests).
+> **A2.** The same 4 pairs on final `acc_client_worst10` (the worst-off
+> clients rather than classes).
 >
 > **B. Is ARL-v2's efficiency more than "always Light"?** `arl2_full` vs
-> `rl_light`, mean `fail_ratio`, one-sided (ARL-v2 fewer failures), in
-> `s2_cifar` and `s2_femnist` (2 tests). Neither passing means ARL-v2's
-> efficiency is not shown to be more than putting everyone on Light.
+> `rl_light`, mean `fail_ratio`, one-sided (ARL-v2 fewer), in `s2_cifar`
+> and `s2_femnist` (2 tests).
 >
 > **C. Does the proposed system beat the stronger baselines on accuracy?**
-> `c2_rl_fedprox` vs each of `b_favor`, `b_refl`, `b_delta`, `b_random_ew`,
-> `b_oort_ew`, `b_poc_ew`, final `accuracy`, two-sided, in `s2_cifar` and
-> `s2_femnist` (12 tests, Holm across all 12).
-> **C2.** The same 12 pairs on mean `fail_ratio`, two-sided (12 tests).
+> `c2_rl_fedprox` vs `b_favor`, `b_favor_ew`, `b_refl`, `b_refl_ew`,
+> `b_delta`, `b_delta_ew`, `b_random_ew`, `b_oort_ew`, `b_poc_ew`, final
+> `accuracy`, two-sided, in `s2_cifar` and `s2_femnist` (18 tests).
+> **C2.** The same 18 pairs on mean `fail_ratio`.
 >
-> All four families are computed by `python scripts/prespec_s2.py`.
+> **D. Does learning the decision beat a simple rule, with the same
+> reward?** `v2_rawfail` vs `rl_ew` (learned vs rule-based modes),
+> `rl_light`, and `b_cov_ew` (no learning at all), final `accuracy`,
+> two-sided, in `s2_cifar` and `s2_femnist` (6 tests). **D2.** The same
+> 6 pairs on mean `fail_ratio`.
+>
+> Not passing a test means "not shown", never "shown equal". Everything else
+> is descriptive, including `s2_main_*` (no weak clients), `arl3_shared`,
+> the set-level coverage loss, gaps, calibration, and the **equal-spend
+> analysis** (`python scripts/budget_s2.py --dir results/adv/<group>`):
+> each method's accuracy at the cumulative cost where the cheapest method
+> of that seed stopped, and the cost to first reach 90% of Random's final
+> accuracy -- which separates better decisions from simply training less.
 
-**Development check (`dev_s2_mnist`, seeds 0-2, CPU; bug check only, nothing
-was changed afterwards):** 57 of 57 runs finished, no errors or NaNs. The
-fixes and new methods do what they are meant to: ARL-v3 uses a mix of modes
-(3.4 Light / 5.1 Standard / 1.5 Priority per round, against ARL-v2's
-9.5 / 0.3 / 0.2); the expected-work rule moves the mode-fair baselines off
-all-Standard and cuts their failures (Oort 0.80 -> 0.63, Random 0.79 ->
-0.67); REFL invites fewer clients when late updates are due (8.5 per round)
-and receives ~125 late updates per run; FAVOR and DELTA run end to end. FedCS
-is low (0.67) because it always picks the same clients -- its rule, which
-was not changed.
->
-> Everything else -- `s2_main_*` (no weak clients), cost, clients lost,
-> `rl_ew` vs `c2_rl_fedprox`, `arl3_shared`, the original baselines under the
-> fixed simulator -- is descriptive.
+**Development check (`dev_s2_mnist`, seeds 0-2, CPU; bug check only):**
+see below once it has finished.
+
+**Still open, not addressed by these runs:** generalisation to fleets,
+availability patterns and partitions the policy was not developed on; and
+the thesis must say which fairness it means -- equal participation, equal
+opportunity to contribute, or similar model quality across clients --
+because the contribution-count CV and worst-class / worst-client accuracy
+measure different things. The class histograms the scheduler uses
+(Sec. 3.5) reveal each client's label proportions to the server; they are
+not privacy-preserving by themselves.
 
 ## GPU runs are not bit-reproducible
 
@@ -688,15 +774,16 @@ unchanged), so try one short run on Kaggle before relying on it.
   invitations than Random/Oort (about 0.45 vs 0.65-0.73), costs ~20-30% less,
   protects weak and rare-data clients better, and clearly beats FedCER-like,
   FedCS and Power-of-Choice. On CIFAR-10 it is also more accurate than Random.
-  On MNIST and FEMNIST its accuracy is level with Random, Oort and imputation.
+  On MNIST and FEMNIST its accuracy shows no significant difference from
+  Random, Oort and imputation -- not shown to be equal.
 - Not supported: that ARL's value weighting adds anything measurable beyond a
   plain failure count. It did not in the independent-failure pilot, in the
   persistent-failure regime, in the 30-seed confirmation, in FEMNIST, or in
   the weight sweep (including weight 0), and it produces slightly more
   failures. The success-based fairness term showed no effect either.
 - Needs restating: "prevention beats imputation". Against a faithful
-  correction method (MimiC) the RL policy matches or loses on accuracy and
-  wins on efficiency.
+  correction method (MimiC) the RL policy is not shown to be more accurate
+  and wins on efficiency.
 - Suggested framing: the contribution is the learned joint selection and
   configuration of participation modes, evidenced by efficiency (failures,
   cost) and by beating the closest selection baselines; ARL is a proposed

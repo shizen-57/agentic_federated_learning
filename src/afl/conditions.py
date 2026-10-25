@@ -115,6 +115,18 @@ CONDITIONS: dict[str, dict] = {
     "b_favor":               {"policy.name": "favor", "fl.aggregator": "fedprox"},
     "b_delta":               {"policy.name": "delta", "fl.aggregator": "fedprox"},
     "b_refl":                {"policy.name": "refl", "fl.aggregator": "refl", "fl.async_late": True},
+    # The same three with the shared expected-work mode rule, so a comparison
+    # with the RL policy is about selection, not about access to modes.
+    "b_favor_ew":            {"policy.name": "favor", "fl.aggregator": "fedprox",
+                              "policy.mode_rule": "expected_work"},
+    "b_delta_ew":            {"policy.name": "delta", "fl.aggregator": "fedprox",
+                              "policy.mode_rule": "expected_work"},
+    "b_refl_ew":             {"policy.name": "refl", "fl.aggregator": "refl", "fl.async_late": True,
+                              "policy.mode_rule": "expected_work"},
+    # A simple non-learning rule for the whole joint decision, with the RL
+    # policy's information: expected-work modes + greedy expected coverage gain
+    # weighted by recent class deficits (baselines.GreedyCoveragePolicy).
+    "b_cov_ew":              {"policy.name": "greedycov", "fl.aggregator": "fedprox"},
 
     # --- Reward-weight sensitivity (Sec. 3.18); c2 uses lambda_arl 0.5, lambda_fair 0.3
     "sens_arl0":             {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_arl": 0.0},

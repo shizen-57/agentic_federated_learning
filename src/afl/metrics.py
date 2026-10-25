@@ -81,6 +81,34 @@ def expected_marginal_value(sketch: np.ndarray, k: int, n_samples: int = 200,
     return v / v.max() if v.max() > 0 else v
 
 
+def coverage_shapley(sketch: np.ndarray, selected: list[int]) -> dict[int, float]:
+    """Each selected client's fair share of Cov(S), the Shapley value.
+
+    The leave-one-out value of Eq. (3.26) gives two selected clients who hold
+    the same rare class zero each (removing either leaves the other), so if
+    both fail the lost coverage is invisible to a sum of per-client values.
+    The Shapley value splits Cov(S) = sum_k max_{i in S} c_ik instead: for each
+    class, sort the holders' shares x_(1) <= ... <= x_(m); the slice
+    (x_(l-1), x_(l)] is provided by the m - l + 1 clients holding at least
+    x_(l), so each gets an equal part of it (the "airport game"). Two clients
+    with the same share of a class get half of it each, and the shares always
+    add up to Cov(S).
+    """
+    sel = list(selected)
+    if not sel:
+        return {}
+    X = sketch[sel]                                   # m x C
+    m = len(sel)
+    order = np.argsort(X, axis=0, kind="stable")
+    xs = np.take_along_axis(X, order, axis=0)
+    inc = np.diff(np.vstack([np.zeros((1, X.shape[1])), xs]), axis=0)
+    share = inc / (m - np.arange(m))[:, None]         # slice l split over m - l + 1
+    cum = np.cumsum(share, axis=0)                    # value of the l-th smallest
+    phi = np.zeros_like(X)
+    np.put_along_axis(phi, order, cum, axis=0)
+    return {i: float(v) for i, v in zip(sel, phi.sum(axis=1))}
+
+
 def standalone_value(sketch: np.ndarray) -> np.ndarray:
     """Value of each client evaluated on its own, used as a cheap static prior."""
     return sketch.sum(axis=1) * (sketch > 0.05).sum(axis=1) / sketch.shape[1]

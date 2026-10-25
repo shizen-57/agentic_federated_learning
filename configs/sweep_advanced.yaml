@@ -39,7 +39,8 @@ sets:
   # published FAVOR, DELTA and REFL.
   s2: [c2_rl_fedprox, v2_rawfail, arl2_full, arl3_full, arl3_shared, rl_light, rl_ew,
        b_random, b_random_ew, b_oort, b_oort_ew, b_powerofchoice, b_poc_ew,
-       b_fedcs, b_fedcer, b_mimic, b_favor, b_delta, b_refl]
+       b_fedcs, b_fedcer, b_cov_ew, b_mimic,
+       b_favor, b_favor_ew, b_delta, b_delta_ew, b_refl, b_refl_ew]
   # ARL-v3 against the failure count, ARL-v2 and always-Light, for churn.
   s2arl: [v2_rawfail, arl2_full, arl3_full, rl_light]
   # Reward-weight sensitivity (Sec. 3.18).
@@ -73,10 +74,20 @@ weak_random: &weak_random
 
 # Simulator fix (docs/ADVANCED_RESULTS.md, "Simulator fix"): a mode's upload
 # fraction is what the server really receives (top-k with error feedback), and
-# Oort no longer sees the true round time. Every group from here on uses it.
+# Oort no longer sees the true round time. Protocol fix (same doc, "Protocol
+# fix"): rewards use a validation set kept apart from the test images; every
+# method starts from the same model for a seed, with separate random streams;
+# the absence counter counts every round; and every RL variant gets the same
+# inputs (corrected value input, coverage inputs), so RL variants differ only
+# in reward and mode rule. Every group from here on uses all of it.
 sim2: &sim2
   fl.compress_upload: true
   policy.oort_estimated_time: true
+  fl.val_frac: 0.3
+  fl.clean_rng: true
+  fl.absence_counter: true
+  policy.value_feature: marginal
+  policy.coverage_features: true
 weak_rare_s2: &weak_rare_s2
   <<: [*weak_rare, *sim2]
 weak_churn_s2: &weak_churn_s2

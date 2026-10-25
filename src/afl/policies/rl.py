@@ -60,8 +60,17 @@ class RLPolicy(Policy):
         # The fairness-debt feature exists only when the debt module is on, so
         # the original network (and its results) are unchanged otherwise.
         self.use_debt = cfg.reward.lambda_debt > 0
-        n_feat = len(FEATURES) + (1 if self.use_debt else 0)
-        self.net = ScoreNet(n_feat, cfg.policy.rl_hidden, len(self.modes))
+        self.use_cov = cfg.policy.coverage_features
+        n_feat = len(FEATURES) + (1 if self.use_debt else 0) + (2 if self.use_cov else 0)
+        self.clean = cfg.fl.clean_rng
+        if self.clean:
+            # Own seed for the network; sampling below uses self.gen. Neither
+            # touches PyTorch's global generator.
+            with torch.random.fork_rng(devices=[]):
+                torch.manual_seed(cfg.seed + 17)
+                self.net = ScoreNet(n_feat, cfg.policy.rl_hidden, len(self.modes))
+        else:
+            self.net = ScoreNet(n_feat, cfg.policy.rl_hidden, len(self.modes))
         self.opt = torch.optim.Adam(self.net.parameters(), lr=cfg.policy.rl_lr)
         self.baseline = 0.0
         self.baseline_n = 0
@@ -91,8 +100,29 @@ class RLPolicy(Policy):
                 np.tanh(hist["rounds_since_success"] / 10.0),
                 hist["selected_frac"],
                 state["local_loss"][i],
-            ] + ([state["debt"][i]] if self.use_debt else []))
+            ] + ([state["debt"][i]] if self.use_debt else [])
+              + ([0.0, 0.0] if self.use_cov else []))     # filled in per pick
         return torch.tensor(rows, dtype=torch.float32)
+
+    @staticmethod
+    def _coverage_inputs(state, picked: list[int]):
+        """Class coverage each client would add to the clients picked so far:
+        plain, and weighted by how under-covered each class has been lately."""
+        sk = state["sketch"]
+        cur = sk[picked].max(axis=0) if picked else np.zeros(sk.shape[1])
+        gain = np.maximum(sk - cur, 0.0)
+        return (torch.tensor(gain.sum(axis=1), dtype=torch.float32),
+                torch.tensor(gain @ state["cov_deficit"], dtype=torch.float32))
+
+    def _draw(self, logits: torch.Tensor):
+        """Sample one index (or take the argmax when not training)."""
+        if not self.train_mode:
+            i = int(logits.argmax())
+        elif self.clean:
+            i = int(torch.multinomial(torch.softmax(logits, dim=-1), 1, generator=self.gen))
+        else:
+            i = int(torch.distributions.Categorical(logits=logits).sample())
+        return i, torch.log_softmax(logits, dim=-1)[i]
 
     # ----------------------------------------------------------------- act
 
@@ -100,6 +130,8 @@ class RLPolicy(Policy):
         N = self.cfg.data.num_clients
         K = min(self.cfg.fl.clients_per_round, N)
         x = self._feature_matrix(state)
+        if self.use_cov:
+            return self._act_sequential(state, x, N, K)
         scores, mode_logits = self.net(x)
 
         # Eligibility gate (Sec. 3.10): a client with no feasible configuration
@@ -125,7 +157,10 @@ class RLPolicy(Policy):
                 assign[int(i)] = self.modes[0]
                 continue
             dist = torch.distributions.Categorical(logits=mode_logits[i])
-            m = dist.sample() if self.train_mode else mode_logits[i].argmax()
+            if self.clean and self.train_mode:
+                m = torch.multinomial(torch.softmax(mode_logits[i], -1), 1, generator=self.gen)[0]
+            else:
+                m = dist.sample() if self.train_mode else mode_logits[i].argmax()
             lp = dist.log_prob(m)
             logp_mode = logp_mode + lp
             logp_client[int(i)] = logp_client[int(i)] + lp
@@ -137,13 +172,54 @@ class RLPolicy(Policy):
                          "logp_client": logp_client}
         return [int(i) for i in sel], assign
 
+    def _act_sequential(self, state, x, N, K):
+        """Pick K clients one at a time, recomputing the coverage inputs (and so
+        every score) after each pick, so the policy can choose clients that
+        complement the ones already chosen. The log-probability is still the
+        exact sequential one, so REINFORCE is unchanged."""
+        elig = torch.tensor([state["eligible"][i] for i in range(N)], dtype=torch.bool)
+        if elig.sum() < K:
+            elig = torch.ones(N, dtype=torch.bool)
+        open_ = elig.clone()
+        picked, steps, mode_rows = [], {}, {}
+        logp, entropy = 0.0, 0.0
+        for k in range(K):
+            g, gu = self._coverage_inputs(state, picked)
+            xs = x.clone()
+            xs[:, -2], xs[:, -1] = g, gu
+            scores, mode_logits = self.net(xs)
+            masked = scores.masked_fill(~open_, -1e9)
+            if k == 0:
+                entropy = torch.distributions.Categorical(logits=masked).entropy()
+            i, lp = self._draw(masked)
+            logp = logp + lp
+            steps[i] = lp
+            mode_rows[i] = mode_logits[i]
+            picked.append(i)
+            open_[i] = False
+        assign, logp_client = {}, dict(steps)
+        fixed_modes = self.cfg.policy.mode_rule != "own"
+        for i in picked:
+            if fixed_modes:
+                assign[i] = self.modes[0]
+                continue
+            m, lp = self._draw(mode_rows[i])
+            logp = logp + lp
+            logp_client[i] = logp_client[i] + lp
+            entropy = entropy + torch.distributions.Categorical(logits=mode_rows[i]).entropy()
+            assign[i] = self.modes[m]
+        self._pending = {"logp": logp, "entropy": entropy, "logp_client": logp_client}
+        return picked, assign
+
     def _sample_topk(self, logits: torch.Tensor, K: int):
         """Sequential softmax sampling without replacement (Plackett-Luce)."""
         avail = logits.clone()
         chosen, logp, steps = [], 0.0, {}
         for _ in range(K):
             dist = torch.distributions.Categorical(logits=avail)
-            if self.train_mode:
+            if self.train_mode and self.clean:
+                i = torch.multinomial(torch.softmax(avail, -1), 1, generator=self.gen)[0]
+            elif self.train_mode:
                 i = dist.sample()
             else:
                 i = avail.argmax()

@@ -320,9 +320,11 @@ def dirichlet_partition(y: np.ndarray, num_clients: int, alpha: float, seed: int
 
 
 def class_sketch(y: np.ndarray, parts: list[np.ndarray], num_classes: int) -> np.ndarray:
-    """c_{i,k}: the privacy-preserving class-distribution sketch of Sec. 3.5.
+    """c_{i,k}: the class-distribution sketch of Sec. 3.5.
 
-    Only normalised class proportions leave the client, never raw data.
+    Only normalised class proportions leave the client, never raw data -- but
+    the proportions themselves reveal the client's label mix to the server,
+    so the sketch is not privacy-preserving on its own.
     """
     sk = np.zeros((len(parts), num_classes), dtype=np.float64)
     for i, idx in enumerate(parts):

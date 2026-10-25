@@ -8,9 +8,15 @@ before any of those runs.
 
 Families (exact paired sign-flip on seeds 100-119, Holm within each family):
   A   arl3_full vs v2_rawfail, final acc_worst10, one-sided, 4 settings
+  A2  the same 4 pairs, final acc_client_worst10 (worst 10% of clients)
   B   arl2_full vs rl_light, mean fail_ratio, one-sided (fewer), 2 settings
-  C   c2_rl_fedprox vs 6 baselines, final accuracy, two-sided, 2 settings
-  C2  the same 12 pairs, mean fail_ratio, two-sided
+  C   c2_rl_fedprox vs 9 baselines (FAVOR, REFL, DELTA as published and with
+      the shared mode rule; Random, Oort, Power-of-Choice with it), final
+      accuracy, two-sided, 2 settings
+  C2  the same 18 pairs, mean fail_ratio, two-sided
+  D   learning vs a rule, same reward: v2_rawfail vs rl_ew, rl_light,
+      b_cov_ew, final accuracy, two-sided, 2 settings
+  D2  the same 6 pairs, mean fail_ratio, two-sided
 A family member passes when its Holm-adjusted p is below 0.05.
 """
 from __future__ import annotations
@@ -28,17 +34,21 @@ from report import load  # noqa: E402
 from stats import holm, reduce, sign_flip_p  # noqa: E402
 
 SEEDS = set(range(100, 120))
-BASELINES = ["b_favor", "b_refl", "b_delta", "b_random_ew", "b_oort_ew", "b_poc_ew"]
+BASELINES = ["b_favor", "b_favor_ew", "b_refl", "b_refl_ew", "b_delta", "b_delta_ew",
+             "b_random_ew", "b_oort_ew", "b_poc_ew"]
+RULES = ["rl_ew", "rl_light", "b_cov_ew"]
+ARL_GROUPS = ("s2_cifar", "s2_femnist", "s2_churn_cifar", "s2_churn_femnist")
+MAIN = ("s2_cifar", "s2_femnist")
 
 FAMILIES = {
-    "A": [(g, "arl3_full", "v2_rawfail", "acc_worst10", "final", "greater")
-          for g in ("s2_cifar", "s2_femnist", "s2_churn_cifar", "s2_churn_femnist")],
-    "B": [(g, "arl2_full", "rl_light", "fail_ratio", "mean", "less")
-          for g in ("s2_cifar", "s2_femnist")],
-    "C": [(g, "c2_rl_fedprox", b, "accuracy", "final", "two-sided")
-          for g in ("s2_cifar", "s2_femnist") for b in BASELINES],
-    "C2": [(g, "c2_rl_fedprox", b, "fail_ratio", "mean", "two-sided")
-           for g in ("s2_cifar", "s2_femnist") for b in BASELINES],
+    "A": [(g, "arl3_full", "v2_rawfail", "acc_worst10", "final", "greater") for g in ARL_GROUPS],
+    "A2": [(g, "arl3_full", "v2_rawfail", "acc_client_worst10", "final", "greater")
+           for g in ARL_GROUPS],
+    "B": [(g, "arl2_full", "rl_light", "fail_ratio", "mean", "less") for g in MAIN],
+    "C": [(g, "c2_rl_fedprox", b, "accuracy", "final", "two-sided") for g in MAIN for b in BASELINES],
+    "C2": [(g, "c2_rl_fedprox", b, "fail_ratio", "mean", "two-sided") for g in MAIN for b in BASELINES],
+    "D": [(g, "v2_rawfail", b, "accuracy", "final", "two-sided") for g in MAIN for b in RULES],
+    "D2": [(g, "v2_rawfail", b, "fail_ratio", "mean", "two-sided") for g in MAIN for b in RULES],
 }
 
 

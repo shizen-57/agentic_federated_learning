@@ -704,3 +704,140 @@ def test_simulator_fix_groups_use_fresh_seeds_and_the_fix():
         assert g["set"]["fl.compress_upload"] and g["set"]["policy.oort_estimated_time"]
         assert set(g["seeds"]) == set(range(100, 120))
         assert not set(g["seeds"]) & used
+
+
+# ------------------------------------------------------------ protocol fix
+
+def test_protocol_fixes_are_off_by_default():
+    cfg = Cfg()
+    assert cfg.fl.val_frac == 0.0 and not cfg.fl.clean_rng and not cfg.fl.absence_counter
+    assert not cfg.policy.coverage_features
+
+
+def test_reward_uses_a_validation_set_disjoint_from_the_reported_test_set():
+    exp = Experiment(_tiny({"b_favor": None, "fl.val_frac": 0.3, "fl.eval_subset": 50}, rounds=2))
+    val = set(exp.val_idx.cpu().tolist())
+    test = set(exp.test_idx.cpu().tolist())
+    assert val and test and not val & test
+    assert len(val) + len(test) == len(exp.d["y_test"])
+    assert set(exp.eval_idx.cpu().tolist()) <= test
+    seen = []
+    orig = exp.policy.observe_outcome
+    def spy(state, action, reward, info, orig=orig):
+        seen.append(info["acc"])
+        orig(state, action, reward, info)
+    exp.policy.observe_outcome = spy
+    rows = exp.run(verbose=False)
+    for r, a in zip(rows, seen):
+        assert r["val_accuracy"] == a                 # learners see validation only
+    a_val, _, _ = exp._evaluate(idx=exp.val_idx)
+    assert a_val == pytest.approx(rows[-1]["val_accuracy"])
+
+
+def test_clean_rng_gives_every_method_the_same_initial_model():
+    sums = {c: Experiment(_tiny({c: None, "fl.clean_rng": True})).init_checksum
+            for c in ("b_random", "c2_rl_fedprox", "b_favor", "b_oort")}
+    assert len(set(sums.values())) == 1
+    other = Experiment(_tiny({"b_random": None, "fl.clean_rng": True}, seed=2)).init_checksum
+    assert other != sums["b_random"]
+    # Without the fix the RL policy's own network shifts the FL model's init.
+    a = Experiment(_tiny({"b_random": None})).init_checksum
+    b = Experiment(_tiny({"c2_rl_fedprox": None})).init_checksum
+    assert a != b
+
+
+def test_checksum_is_saved_with_the_config(tmp_path):
+    import json
+    cfg = _tiny({"b_random": None, "fl.clean_rng": True}, rounds=1)
+    cfg.out = str(tmp_path)
+    exp = Experiment(cfg)
+    exp.run(verbose=False)
+    exp.save()
+    meta = json.load(open(os.path.join(str(tmp_path), f"{cfg.tag}.config.json")))
+    assert meta["init_checksum"] == exp.init_checksum
+
+
+def test_absence_counter_counts_rounds_without_an_invitation():
+    for on in (False, True):
+        exp = Experiment(_tiny({"b_random": None, "fl.absence_counter": on}, rounds=5))
+        exp.run(verbose=False)
+        never = [i for i in range(exp.N) if exp.x_sel[i] == 0]
+        if never:
+            assert all(exp.since_success[i] == (5 if on else 0) for i in never)
+
+
+def test_shapley_share_does_not_hide_duplicate_holders():
+    from afl import metrics as M
+    sk = np.array([[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    loo = M.per_client_representation_value(sk, [0, 1, 2])
+    assert loo[0] == 0 and loo[1] == 0                 # the flaw: both look worthless
+    phi = M.coverage_shapley(sk, [0, 1, 2])
+    assert phi[0] == pytest.approx(0.5) and phi[1] == pytest.approx(0.5)
+    assert sum(phi.values()) == pytest.approx(M.coverage(sk))
+
+
+def test_shapley_matches_brute_force():
+    import itertools, math
+    from afl import metrics as M
+    rng = np.random.default_rng(0)
+    sk = rng.dirichlet(np.ones(4) * 0.5, size=5)
+    S = [0, 1, 2, 3, 4]
+    phi = M.coverage_shapley(sk, S)
+    v = lambda T: M.coverage(sk[list(T)]) if T else 0.0
+    for i in S:
+        rest = [j for j in S if j != i]
+        val = sum(math.factorial(r) * math.factorial(len(S) - r - 1) / math.factorial(len(S))
+                  * (v(T + (i,)) - v(T))
+                  for r in range(len(rest) + 1) for T in itertools.combinations(rest, r))
+        assert phi[i] == pytest.approx(val)
+
+
+def test_set_level_coverage_loss_is_logged_and_bounded():
+    exp = Experiment(_tiny({"b_random": None}, rounds=4))
+    rows = exp.run(verbose=False)
+    for r in rows:
+        assert 0.0 <= r["cov_lost_avoid"] <= r["cov_lost"] + 1e-9 or r["cov_lost"] >= 0
+        assert r["cov_lost"] >= -1e-9
+
+
+def test_rl_with_coverage_inputs_picks_k_distinct_clients_and_learns():
+    cfg = _tiny({"c2_rl_fedprox": None, "policy.coverage_features": True,
+                 "fl.clean_rng": True}, rounds=4)
+    exp = Experiment(cfg)
+    before = [p.detach().clone() for p in exp.policy.net.parameters()]
+    rows = exp.run(verbose=False)
+    assert all(r["n_selected"] == 4 for r in rows)
+    moved = sum(float((p - q).abs().sum()) for p, q in zip(exp.policy.net.parameters(), before))
+    assert moved > 0
+    st = exp._state(5)
+    picked, _ = exp.policy.act(st, 5)
+    assert len(set(picked)) == 4
+
+
+def test_greedy_coverage_rule_complements_its_picks():
+    from afl.policies.baselines import GreedyCoveragePolicy
+    cfg = _tiny({"b_cov_ew": None})
+    cfg.fl.clients_per_round = 2
+    pol = GreedyCoveragePolicy(cfg)
+    N = cfg.data.num_clients
+    sk = np.zeros((N, 10))
+    sk[:, 0] = 1.0                      # everyone holds class 0 ...
+    sk[7] = 0.0
+    sk[7, 3] = 1.0                      # ... except client 7, the only holder of class 3
+    p = {i: {"light": 0.9, "standard": 0.8, "priority": 0.6} for i in range(N)}
+    st = {"sketch": sk, "cov_deficit": np.ones(10), "p_succ": p,
+          "eligible": {i: 1 for i in range(N)}}
+    sel, assign = pol.act(st, 1)
+    assert 7 in sel and len(sel) == 2
+    assert all(m == "priority" for m in assign.values())   # 0.6 x 4 is the most work
+
+
+def test_prespecified_families_use_conditions_that_are_run():
+    import yaml
+    import prespec_s2
+    plan = yaml.safe_load(open(os.path.join(ROOT, "configs", "sweep_advanced.yaml")))
+    for fam, tests in prespec_s2.FAMILIES.items():
+        for g, ref, other, *_ in tests:
+            conds = plan["groups"][g]["conditions"]
+            conds = plan["sets"][conds] if isinstance(conds, str) else conds
+            assert ref in conds and other in conds, (fam, g, ref, other)

@@ -21,7 +21,13 @@ def local_train(cfg, global_flat: torch.Tensor, x, y, epochs: int, dim: int,
     the local batches is stored in grad_stats["var"] (DELTA's sigma_L^2).
     """
     dev = global_flat.device
-    model = build_model(cfg, dim, num_classes).to(dev)
+    if cfg.fl.clean_rng:
+        # The fresh model's random init is overwritten below; building it must
+        # not move PyTorch's global generator, which other parts of the run use.
+        with torch.random.fork_rng(devices=[]):
+            model = build_model(cfg, dim, num_classes).to(dev)
+    else:
+        model = build_model(cfg, dim, num_classes).to(dev)
     set_flat(model, global_flat)
     model.train()
     opt = torch.optim.SGD(model.parameters(), lr=cfg.fl.lr)

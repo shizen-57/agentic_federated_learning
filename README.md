@@ -120,6 +120,8 @@ reproduced exactly), and has its own experiment group in
 | ARL-v3 (work-based loss + credit for delivered rare data) | `reward.damage_metric: arl_v3` | `s2_*` |
 | Mode-fair baselines (shared expected-work mode rule) | `policy.mode_rule: expected_work` | `s2_*` (`*_ew`) |
 | FAVOR, DELTA, REFL, from the papers' algorithms | `policy.name: favor / delta / refl` | `s2_*` |
+| Protocol fix: validation set for rewards, same start model, absence counter | `fl.val_frac`, `fl.clean_rng`, `fl.absence_counter` | `s2_*` |
+| Coverage inputs for the RL policy, Shapley client value, set-level coverage loss | `policy.coverage_features`, `metrics.coverage_shapley`, `cov_lost` | `s2_*` |
 
 ## Known gaps
 
@@ -136,6 +138,13 @@ reproduced exactly), and has its own experiment group in
   see "Simulator fix" in [docs/ADVANCED_RESULTS.md](docs/ADVANCED_RESULTS.md).
 - **FAVOR** learns online within one run; the paper pre-trains its agent over
   many runs first.
+- **Before the protocol fix** (every group except `s2_*`), the RL reward was
+  computed on test images that the final score also used, and methods with
+  the same seed did not start from the same model. Accuracy comparisons from
+  those groups need the `s2_*` confirmation ("Protocol fix" in
+  [docs/ADVANCED_RESULTS.md](docs/ADVANCED_RESULTS.md)).
+- **Class histograms** reveal each client's label proportions to the server;
+  they are not privacy-preserving by themselves.
 - Everything is simulated; see [docs/REALISM_CALIBRATION.md](docs/REALISM_CALIBRATION.md).
 
 ## Authors
