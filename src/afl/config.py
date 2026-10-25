@@ -173,6 +173,10 @@ class RewardCfg:
     lambda_cov: float = 0.5             # ARL-v3 success-credit weight
     arl_v2_ema: float = 0.1             # rate of the class-coverage moving average that
                                         # ARL-v2 uses to tell short gaps from long ones
+    robust_norm: bool = False           # protocol fix: every reward normaliser uses a
+                                        # spread of at least 0.001, clips standardised
+                                        # values to +-3, and gives 0 until it has seen
+                                        # 10 values (Normalizer). Off = the original runs
     batch_client_norm: bool = False     # protocol fix: per-client credit (ARL-v2/v3) is
                                         # standardised with the statistics from before
                                         # the round, then the statistics are updated with

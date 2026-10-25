@@ -72,6 +72,51 @@ def build_jobs(plan: dict, groups: list[str] | None, seeds: list[int] | None,
     return jobs
 
 
+PROVENANCE_KEYS = ("init_checksum", "code_hash", "code_changed_during_run")
+
+
+def expected_config(raw: dict) -> dict:
+    """The full config a run of this job must have saved (device excluded:
+    the GPU a run landed on is not part of the experiment)."""
+    from afl.config import Cfg
+    want = json.loads(json.dumps(Cfg.from_dict(_deepcopy(raw)).to_dict(), default=str))
+    want.get("fl", {}).pop("device", None)
+    return want
+
+
+def run_status(raw: dict, current_code: str | None = None) -> str:
+    """'ok' if this job's run exists, was made with exactly this config (and,
+    if current_code is given, by this code), has every round in order and was
+    not affected by a source change mid-run; 'missing'; otherwise why the
+    existing result cannot be used."""
+    base = os.path.join(raw["out"], raw["tag"])
+    if not os.path.exists(base + ".csv"):
+        return "missing"
+    if not os.path.exists(base + ".config.json"):
+        return "no saved config"
+    with open(base + ".config.json") as fh:
+        meta = json.load(fh)
+    if meta.get("code_changed_during_run"):
+        return "source changed while it ran"
+    want = expected_config(raw)
+    got = {k: v for k, v in meta.items() if k not in PROVENANCE_KEYS}
+    got.get("fl", {}).pop("device", None)
+    if got != want:
+        return "different config"
+    if current_code is not None and meta.get("code_hash") != current_code:
+        return "made by different code"
+    import csv as _csv
+    with open(base + ".csv") as fh:
+        rounds = [r.get("round") for r in _csv.DictReader(fh)]
+    try:
+        seq = [int(float(r)) for r in rounds]
+    except (TypeError, ValueError):
+        return "unreadable rounds"
+    if seq != list(range(1, want["fl"]["rounds"] + 1)):
+        return "incomplete"
+    return "ok"
+
+
 def _deepcopy(d):
     return {k: _deepcopy(v) if isinstance(v, dict) else v for k, v in d.items()}
 
@@ -120,35 +165,12 @@ def main() -> int:
     i, n = (int(v) for v in args.shard.split("/"))
     jobs = [j for k, j in enumerate(jobs) if k % n == i]
 
-    from afl.config import Cfg
     from afl.provenance import code_hash
     current = code_hash()
     stale: dict[str, int] = {}
 
     def check(j) -> str:
-        """'ok' if this run exists and was made by this config and this code;
-        'missing'; or why an existing result cannot be reused."""
-        base = os.path.join(j["raw"]["out"], j["raw"]["tag"])
-        if not os.path.exists(base + ".csv"):
-            return "missing"
-        if not os.path.exists(base + ".config.json"):
-            return "no saved config"
-        with open(base + ".config.json") as fh:
-            meta = json.load(fh)
-        want = json.loads(json.dumps(Cfg.from_dict(_deepcopy(j["raw"])).to_dict(), default=str))
-        got = {k: v for k, v in meta.items() if k not in ("init_checksum", "code_hash")}
-        # The GPU a run landed on is not part of the experiment.
-        for d in (want, got):
-            d.get("fl", {}).pop("device", None)
-        if got != want:
-            return "different config"
-        if not args.ignore_code and meta.get("code_hash") != current:
-            return "made by different code"
-        with open(base + ".csv") as fh:
-            n_rows = sum(1 for _ in fh) - 1
-        if n_rows != want["fl"]["rounds"]:
-            return "incomplete"
-        return "ok"
+        return run_status(j["raw"], None if args.ignore_code else current)
 
     def done(j):
         st = check(j)

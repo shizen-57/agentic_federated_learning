@@ -182,13 +182,30 @@ class Normalizer:
 
     Accuracy gain, cost, latency and ARL live on wildly different scales, so the
     reward coefficients would be uninterpretable without this.
+
+    The defaults are the original runs' behaviour. The robust settings
+    (reward.robust_norm) guard against a near-constant history: after ten
+    zeros, a loss of 0.2 would otherwise be 0.2 / 1e-6 = 200,000 standard
+    deviations. `floor` is the smallest spread used, `clip` bounds the result,
+    and nothing is returned until `warmup` values have been seen.
     """
 
-    def __init__(self, eps: float = 1e-6):
+    def __init__(self, eps: float = 1e-6, floor: float = 0.0, clip: float | None = None,
+                 warmup: int = 2):
         self.n = 0
         self.mean = 0.0
         self.m2 = 0.0
         self.eps = eps
+        self.floor = floor
+        self.clip = clip
+        self.warmup = warmup
+
+    def _z(self, x: float) -> float:
+        std = max((self.m2 / (self.n - 1)) ** 0.5, self.floor)
+        z = float((x - self.mean) / (std + self.eps))
+        if self.clip is not None:
+            z = max(-self.clip, min(self.clip, z))
+        return z
 
     def batch(self, xs: list[float]) -> list[float]:
         """Standardise a batch with the statistics from before it, then add it.
@@ -196,11 +213,10 @@ class Normalizer:
         Every value in the batch is judged against the same mean and spread,
         so the result does not depend on the order of the batch.
         """
-        if self.n < 2:
+        if self.n < max(self.warmup, 2):
             out = [0.0] * len(xs)
         else:
-            std = (self.m2 / (self.n - 1)) ** 0.5
-            out = [float((x - self.mean) / (std + self.eps)) for x in xs]
+            out = [self._z(x) for x in xs]
         for x in xs:
             self.n += 1
             d = x - self.mean
@@ -213,7 +229,6 @@ class Normalizer:
         d = x - self.mean
         self.mean += d / self.n
         self.m2 += d * (x - self.mean)
-        if self.n < 2:
+        if self.n < max(self.warmup, 2):
             return 0.0
-        std = (self.m2 / (self.n - 1)) ** 0.5
-        return float((x - self.mean) / (std + self.eps))
+        return self._z(x)

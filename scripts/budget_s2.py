@@ -4,9 +4,11 @@
 Descriptive (not pre-specified), fixed before the s2_* runs. For one group:
 
 - accuracy at equal spend: for each seed, B = the smallest total cost any
-  condition spent over the run; each condition's accuracy at the first round
-  its cumulative cost reaches B. A policy that is cheap only because it
-  trains less gains nothing here.
+  condition spent over the run; each condition's accuracy at the *last*
+  round whose cumulative cost is still at or below B, so no method is given
+  more than B (the share of B actually used is shown; a run with no round
+  within B counts as missing). A policy that is cheap only because it trains
+  less gains nothing here.
 - cost to a target: cumulative cost until accuracy first reaches
   T = 0.9 x the mean final accuracy of b_random in the group (share of seeds
   that reach it, and the median cost among those that do).
@@ -48,16 +50,20 @@ def main() -> int:
         return 1
     target = 0.9 * np.mean([runs["b_random"][s][-1]["accuracy"] for s in seeds])
     at_budget: dict[str, dict[int, float]] = defaultdict(dict)
+    used: dict[str, list[float]] = defaultdict(list)
     to_target: dict[str, list[float]] = defaultdict(list)
     for s in seeds:
         B = min(sum(r["cost"] for r in runs[c][s]) for c in runs)
         for c in runs:
-            cum, hit = 0.0, None
+            cum, last, spent = 0.0, None, 0.0
             for r in runs[c][s]:
                 cum += r["cost"]
-                if hit is None and cum >= B - 1e-9:
-                    at_budget[c][s] = r["accuracy"]
-                    hit = True
+                if cum > B + 1e-9:
+                    break
+                last, spent = r["accuracy"], cum
+            if last is not None:
+                at_budget[c][s] = last
+                used[c].append(spent / B if B > 0 else 1.0)
             cum = 0.0
             for r in runs[c][s]:
                 cum += r["cost"]
@@ -65,19 +71,24 @@ def main() -> int:
                     to_target[c].append(cum)
                     break
     print(f"# {args.dir}: {len(seeds)} seeds; target accuracy {target:.3f}\n")
-    print(f"| condition | acc at equal spend | diff vs {args.ref} | p | reach target | median cost to target |")
-    print("|---|---|---|---|---|---|")
-    order = sorted(runs, key=lambda c: -np.mean(list(at_budget[c].values())))
+    print(f"| condition | acc at equal spend | seeds | share of budget used | diff vs {args.ref} "
+          "| p | reach target | median cost to target |")
+    print("|---|---|---|---|---|---|---|---|")
+    order = sorted(runs, key=lambda c: -np.mean(list(at_budget[c].values()) or [0.0]))
     for c in order:
-        a = np.array([at_budget[c][s] for s in seeds])
-        if c != args.ref and args.ref in at_budget:
-            d = np.array([at_budget[args.ref][s] for s in seeds]) - a
+        have = sorted(at_budget[c])
+        a = np.array([at_budget[c][s] for s in have])
+        both = [s for s in have if s in at_budget.get(args.ref, {})]
+        if c != args.ref and both:
+            d = np.array([at_budget[args.ref][s] - at_budget[c][s] for s in both])
             cmp = f"{d.mean():+.4f} | {sign_flip_p(d):.4f}"
         else:
             cmp = "-- | --"
         reach = len(to_target[c]) / len(seeds)
         med = f"{np.median(to_target[c]):.0f}" if to_target[c] else "--"
-        print(f"| {c} | {a.mean():.4f} | {cmp} | {reach:.0%} | {med} |")
+        share = f"{np.mean(used[c]):.0%}" if used[c] else "--"
+        mean = f"{a.mean():.4f}" if len(a) else "--"
+        print(f"| {c} | {mean} | {len(have)}/{len(seeds)} | {share} | {cmp} | {reach:.0%} | {med} |")
     return 0
 
 

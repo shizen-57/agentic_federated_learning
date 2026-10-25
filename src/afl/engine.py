@@ -26,7 +26,7 @@ from .models import build_model, get_flat, set_flat
 from .policies import build_policy
 from .policies.base import best_work_mode, mode_by_rule
 from .predictor import SuccessPredictor
-from .provenance import code_hash
+from .provenance import LOADED as CODE_LOADED, code_hash
 from .sim import ClientEnv
 
 LOG_FIELDS = [
@@ -39,7 +39,8 @@ LOG_FIELDS = [
     # protocol-fix diagnostics (docs/ADVANCED_RESULTS.md, "Protocol fix")
     "val_accuracy", "acc_client_worst10", "acc_client_weak", "cov_lost", "cov_lost_avoid",
     "gap_max_all", "gap_max_weak", "ece_light", "ece_standard", "ece_priority",
-    "ece_weak", "ece_strong", "gate_filled", "wall_s",
+    "ece_weak", "ece_strong", "gate_filled", "acc_labelmix_worst10", "acc_client_measured",
+    "wall_s",
 ]
 
 LIGHTER = {"priority": "standard", "standard": "light", "light": None}
@@ -117,8 +118,9 @@ class Experiment:
         self.gen = torch.Generator().manual_seed(cfg.seed + 3)
         self.last_update: dict[int, torch.Tensor] = {}  # MIFA/MimiC substitution store
 
-        self.norm = {k: M.Normalizer() for k in ("acc", "cost", "lat", "arl", "faildmg", "debt", "v2c",
-                                                 "v3g", "v3c", "v3cg")}
+        nkw = dict(floor=1e-3, clip=3.0, warmup=10) if cfg.reward.robust_norm else {}
+        self.norm = {k: M.Normalizer(**nkw) for k in ("acc", "cost", "lat", "arl", "faildmg", "debt",
+                                                      "v2c", "v3g", "v3c", "v3cg")}
         self.cov_ema = np.zeros(self.d["num_classes"])   # ARL-v2 class-coverage history
         if cfg.policy.value_feature == "marginal":
             self.value_input = M.expected_marginal_value(
@@ -153,6 +155,9 @@ class Experiment:
         self.gap_cur = np.zeros(self.N)            # rounds since last contribution
         self.gap_max = np.zeros(self.N)
         self._last_cls_acc = np.zeros(self.d["num_classes"])
+        self._last_ok = None                       # per-example correctness of the last
+        self._last_idx = None                      # reported evaluation, and its indices
+        self.test_owner = torch.from_numpy(self.d["test_owner"]).to(self.dev)
         self.rows: list[dict] = []
         self._prev_acc_r: float | None = None
 
@@ -198,6 +203,7 @@ class Experiment:
         x, y = (self.x_test, self.y_test) if idx is None else (self.x_test[idx], self.y_test[idx])
         C = self.d["num_classes"]
         loss_sum, correct = 0.0, 0
+        oks = []
         per_class_ok = torch.zeros(C, device=self.dev)
         per_class_n = torch.zeros(C, device=self.dev)
         with torch.no_grad():
@@ -207,6 +213,7 @@ class Experiment:
                 yb = y[s:s + 2048]
                 loss_sum += float(F.cross_entropy(out, yb, reduction="sum"))
                 ok = (out.argmax(1) == yb).float()
+                oks.append(ok)
                 correct += int(ok.sum())
                 per_class_ok.index_add_(0, yb, ok)
                 per_class_n.index_add_(0, yb, torch.ones_like(ok))
@@ -216,6 +223,8 @@ class Experiment:
         full_cls = np.full(C, np.nan)
         full_cls[seen.cpu().numpy()] = cls_acc
         self._last_cls_acc = full_cls
+        self._last_ok = torch.cat(oks) if oks else None
+        self._last_idx = idx
         k = max(1, int(round(0.1 * len(cls_acc))))
         worst = float(np.sort(cls_acc)[:k].mean()) if len(cls_acc) else 0.0
         return correct / n, loss_sum / n, worst
@@ -391,9 +400,20 @@ class Experiment:
         seen = ~np.isnan(cls)
         w = sk[:, seen]
         tot = w.sum(axis=1)
-        acc_c = np.where(tot > 0, (w @ cls[seen]) / np.maximum(tot, 1e-12), np.nan)
-        ok = acc_c[~np.isnan(acc_c)]
-        k = max(1, int(round(0.1 * len(ok)))) if len(ok) else 1
+        mix = np.where(tot > 0, (w @ cls[seen]) / np.maximum(tot, 1e-12), np.nan)
+        measured = self._measured_client_acc()
+        # Measured on each client's own held-out examples where they exist
+        # (FEMNIST: the writer's own handwriting). On a Dirichlet split the
+        # clients' data are draws from the same class-conditional pool, so the
+        # label-mixture value is exactly the expected accuracy on a client's
+        # own data, and is used there.
+        acc_c = measured if measured is not None else mix
+
+        def worst10(v):
+            v = v[~np.isnan(v)]
+            if not len(v):
+                return 0.0
+            return float(np.sort(v)[:max(1, int(round(0.1 * len(v))))].mean())
         weak = self.env.weak
         contributed = np.zeros(self.N, dtype=bool)
         for i, v in success.items():
@@ -408,7 +428,9 @@ class Experiment:
         def ece(mask):
             return M.calibration_error(list(P[mask]), list(O[mask])) if mask.any() else 0.0
         out = {
-            "acc_client_worst10": float(np.sort(ok)[:k].mean()) if len(ok) else 0.0,
+            "acc_client_worst10": worst10(acc_c),
+            "acc_labelmix_worst10": worst10(mix),
+            "acc_client_measured": int(measured is not None),
             "acc_client_weak": float(np.nanmean(acc_c[weak])) if weak.any() else 0.0,
             "gap_max_all": float(self.gap_max.mean()),
             "gap_max_weak": float(self.gap_max[weak].mean()) if weak.any() else 0.0,
@@ -418,6 +440,23 @@ class Experiment:
         for m in self.cfg.system.modes:
             out[f"ece_{m}"] = ece(modes == m) if len(P) else 0.0
         return out
+
+    def _measured_client_acc(self):
+        """Each client's accuracy on its own held-out test examples, from the
+        last reported evaluation; None if the test set has no owners or that
+        evaluation did not cover them (a subset round)."""
+        if self._last_ok is None or not bool((self.test_owner >= 0).any()):
+            return None
+        idx = self._last_idx
+        own = self.test_owner if idx is None else self.test_owner[idx]
+        if not bool((own >= 0).any()):
+            return None
+        hits = torch.zeros(self.N, device=self.dev).index_add_(0, own.clamp(min=0),
+                                                              self._last_ok * (own >= 0))
+        cnt = torch.zeros(self.N, device=self.dev).index_add_(0, own.clamp(min=0),
+                                                             (own >= 0).float())
+        cnt, hits = cnt.cpu().numpy(), hits.cpu().numpy()
+        return np.where(cnt > 0, hits / np.maximum(cnt, 1), np.nan)
 
     def _refl_aggregate(self, updates, weights, stale):
         """REFL's staleness-aware aggregation (Abdelmoniem et al. 2023, Eq. 5).
@@ -873,7 +912,14 @@ class Experiment:
         os.replace(tmp, path)
         meta = self.cfg.to_dict()
         meta["init_checksum"] = self.init_checksum   # same for every method under fl.clean_rng
-        meta["code_hash"] = code_hash()              # which version of the simulator made it
+        # Which version of the simulator made this run: the code loaded at
+        # start-up. If the files changed while it ran, say so -- the sweep and
+        # the confirmatory report then refuse to use the result.
+        meta["code_hash"] = CODE_LOADED
+        if code_hash() != CODE_LOADED:
+            meta["code_changed_during_run"] = True
+            print(f"[{self.cfg.tag}] WARNING: simulator source changed during the run; "
+                  "result is flagged and will not be reused", flush=True)
         with open(os.path.join(self.cfg.out, f"{self.cfg.tag}.config.json"), "w") as fh:
             json.dump(meta, fh, indent=2, default=str)
         return path

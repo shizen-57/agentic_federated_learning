@@ -754,6 +754,63 @@ selects only from the clients online this round. The hint remains as it was
 stays uncertain is whether an online client finishes (deadline, battery,
 link).
 
+#### Third review (also before any `s2_*` run)
+
+1. **Normalised credit could explode after a quiet period.** After ten
+   zero losses, a loss of 0.2 was standardised to 200,000. **Fix
+   (`reward.robust_norm`):** every reward normaliser uses a spread of at
+   least 0.001, clips to +-3, and returns 0 until it has seen 10 values.
+2. **The confirmatory report checked too little.** It trusted each run's own
+   metadata, so one-round runs, missing code fingerprints, runs with the
+   fixes off and NaN values could all produce "passes: yes". **Fix:** each
+   run is checked against the frozen plan (`configs/sweep_advanced.yaml` via
+   `sweep.run_status`): exact config, every round 1..T in order, a non-empty
+   code fingerprint equal to the frozen one (`FROZEN_CODE_HASH` in
+   `scripts/prespec_s2.py`), no source change during the run, and finite
+   values of the tested measurement in every round. Anything else means no
+   verdict.
+3. **"Worst-client accuracy" was a label-mixture value**, so two clients with
+   the same label mix always looked the same. **Fix:** on FEMNIST each
+   client's accuracy is now measured on that writer's own held-out images
+   (`acc_client_measured = 1` in the log). On the Dirichlet splits (CIFAR-10,
+   MNIST) clients have no data of their own beyond their label mix -- their
+   images are draws from the same pool -- so the label-mixture value is
+   exactly a client's expected accuracy on its own data and is kept; it is
+   always also logged as `acc_labelmix_worst10`. Test A2 is read that way:
+   on FEMNIST it is about the worst-off writers, on CIFAR-10 about the
+   clients with the worst label mixes. With ~16 held-out images per writer
+   the FEMNIST value is noisy, and the worst 10% are partly the unluckiest
+   samples.
+4. **"Equal spend" let expensive methods overshoot** (the first round at or
+   above the budget, e.g. 18 against a budget of 10). **Fix:** the last
+   round at or below the budget, with the share of the budget actually used
+   shown.
+5. **The code fingerprint was read at save time,** so editing files during a
+   run could label an old-code result as new. **Fix:** the fingerprint is
+   taken when the simulator is loaded (`provenance.LOADED`), and a run whose
+   source files changed while it ran is flagged (`code_changed_during_run`)
+   and never reused or tested. On Kaggle each session runs a fresh clone, so
+   nobody edits the code under a running sweep.
+
+#### ARL-v3 as frozen for the `s2_*` runs
+
+For each invited client i in round t (S_t = the invited set):
+
+- m_i = phi_i(S_t) x (1 + sum_k c_ik u_k), where phi_i(S_t) is i's Shapley
+  share of Cov(S_t) = sum_k max_{j in S_t} c_jk, c_ik its class shares, and
+  u_k = 1 - q_k / max(q) the recent coverage deficit of class k (q = moving
+  average, rate 0.1, of the classes covered by successful clients);
+- W(m) = P(success | m) x local_epochs[m] for modes with P >= 0.5 (or the
+  safest mode if none), else 0; best = the mode maximising W;
+- loss_i = m_i (W(best) - W(assigned)) / 4, gain_i = m_i Y_i;
+- per-client advantage = -0.5 z(loss_i) + 0.5 z(gain_i), z = the robust,
+  order-free normaliser above, credited to the log-probability of i's pick
+  and mode (`arl3_full`); `arl3_shared` puts -0.5 z(sum loss) + 0.5 z(sum
+  gain) in the shared reward instead.
+- The policy's inputs: the 12 original features with the corrected value
+  input, plus the coverage client i adds to the clients already picked this
+  round, plain and deficit-weighted, recomputed after each pick.
+
 New per-run logs for "who benefits": `acc_client_worst10` (each client's
 expected accuracy on its own label mix -- reported per-class accuracy
 weighted by its class shares -- averaged over the worst 10% of clients),
@@ -763,14 +820,16 @@ other clients (`ece_light`, ..., `ece_weak`, `ece_strong`).
 
 > **Pre-specified tests (fixed before any `s2_*` run; fresh seeds 100-119,
 > never used before; exact paired sign-flip; Holm within each family; a
-> test passes when its Holm-adjusted p < 0.05). Computed by
+> test passes when its Holm-adjusted p < 0.05; no verdict unless every run
+> passes the validation in "Third review" item 2). Computed by
 > `python scripts/prespec_s2.py`:**
 >
 > **A. Does ARL-v3 protect the worst-represented classes?** `arl3_full` vs
 > `v2_rawfail`, final `acc_worst10`, one-sided (ARL-v3 better), in
 > `s2_cifar`, `s2_femnist`, `s2_churn_cifar`, `s2_churn_femnist` (4 tests).
-> **A2.** The same 4 pairs on final `acc_client_worst10` (the worst-off
-> clients rather than classes).
+> **A2.** The same 4 pairs on final `acc_client_worst10` (FEMNIST: measured
+> on the worst-off writers' own held-out images; CIFAR-10: the clients with
+> the worst label mixes -- see "Third review" item 3).
 >
 > **B. Is ARL-v2's efficiency more than "always Light"?** `arl2_full` vs
 > `rl_light`, mean `fail_ratio`, one-sided (ARL-v2 fewer), in `s2_cifar`

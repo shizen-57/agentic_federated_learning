@@ -198,7 +198,7 @@ def load_cifar10(root: str = "data"):
 
 
 def load_femnist(root: str, num_clients: int, seed: int, min_samples: int,
-                 max_samples: int, test_frac: float = 0.1):
+                 max_samples: int, test_frac: float = 0.1, return_owner: bool = False):
     """Natural per-writer partition of FEMNIST (LEAF).
 
     Picks ``num_clients`` writers with at least ``min_samples`` images, caps each
@@ -224,13 +224,14 @@ def load_femnist(root: str, num_clients: int, seed: int, min_samples: int,
     rng = np.random.default_rng(seed)
     writers = rng.choice(eligible, size=num_clients, replace=False)
 
-    train_idx, test_idx, parts, off = [], [], [], 0
-    for w in writers:
+    train_idx, test_idx, parts, owner, off = [], [], [], [], 0
+    for k, w in enumerate(writers):
         idx = order[starts[w]:starts[w] + counts[w]].copy()
         rng.shuffle(idx)
         idx = idx[:max_samples]
         n_test = max(1, int(round(test_frac * len(idx))))
         test_idx.append(idx[:n_test])
+        owner.append(np.full(n_test, k, dtype=np.int64))
         tr = idx[n_test:]
         train_idx.append(tr)
         parts.append(np.arange(off, off + len(tr), dtype=np.int64))
@@ -246,8 +247,10 @@ def load_femnist(root: str, num_clients: int, seed: int, min_samples: int,
         return out
     xtr, xte = gather(tr_all), gather(te_all)
     mu, sd = float(xtr.mean()), float(xtr.std()) + 1e-6
-    return ((xtr - mu) / sd, y_all[tr_all].astype(np.int64),
-            (xte - mu) / sd, y_all[te_all].astype(np.int64), parts)
+    out = ((xtr - mu) / sd, y_all[tr_all].astype(np.int64),
+           (xte - mu) / sd, y_all[te_all].astype(np.int64), parts)
+    # owner[j] = the client whose held-out writing test example j is.
+    return out + (np.concatenate(owner),) if return_owner else out
 
 
 def ensure(dataset: str, root: str = "data") -> None:
@@ -338,6 +341,7 @@ def class_sketch(y: np.ndarray, parts: list[np.ndarray], num_classes: int) -> np
 def build(cfg) -> dict:
     d = cfg.data
     parts = None
+    owner = None
     if d.dataset == "mnist":
         xtr, ytr, xte, yte = load_mnist()
         num_classes = 10
@@ -345,8 +349,8 @@ def build(cfg) -> dict:
         xtr, ytr, xte, yte = load_cifar10()
         num_classes = 10
     elif d.dataset == "femnist":
-        xtr, ytr, xte, yte, parts = load_femnist(
-            "data", d.num_clients, d.seed, d.min_samples, d.max_samples)
+        xtr, ytr, xte, yte, parts, owner = load_femnist(
+            "data", d.num_clients, d.seed, d.min_samples, d.max_samples, return_owner=True)
         num_classes = 62
     elif d.dataset == "synthetic":
         xtr, ytr, xte, yte = load_synthetic(d.num_classes, d.seed)
@@ -360,6 +364,9 @@ def build(cfg) -> dict:
     return {
         "x_train": xtr, "y_train": ytr, "x_test": xte, "y_test": yte,
         "parts": parts,
+        # Which client each test example belongs to (FEMNIST: the writer's own
+        # held-out images); -1 everywhere for a pooled test set.
+        "test_owner": owner if owner is not None else np.full(len(yte), -1, dtype=np.int64),
         "sketch": class_sketch(ytr, parts, num_classes),
         "n_i": np.array([len(p) for p in parts], dtype=np.float64),
         "num_classes": num_classes,

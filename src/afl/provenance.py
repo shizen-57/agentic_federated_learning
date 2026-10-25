@@ -23,3 +23,10 @@ def code_hash() -> str:
                 with open(path, "rb") as fh:
                     h.update(fh.read())
     return h.hexdigest()[:16]
+
+
+# The code this process actually runs is the code on disk when the simulator
+# was imported (the engine imports this module, and with it every other
+# module, at start-up). A run records this, not the files at save time, and
+# notes if the files changed while it ran.
+LOADED = code_hash()

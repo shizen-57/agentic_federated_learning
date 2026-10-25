@@ -1004,3 +1004,112 @@ def test_confirmatory_report_gives_no_verdict_on_partial_data(tmp_path):
                           "--root", str(tmp_path)], capture_output=True, text=True).stdout
     fam_a = out.split("## Family A ")[1].split("## Family")[0]
     assert "INCOMPLETE" in fam_a and "| yes |" not in fam_a
+
+
+# ------------------------------------------------------ third review fixes
+
+def test_robust_normaliser_survives_a_constant_history():
+    from afl import metrics as M
+    plain = M.Normalizer()
+    plain.batch([0.0] * 10)
+    assert plain.batch([0.2])[0] > 1e5                     # the problem
+    robust = M.Normalizer(floor=1e-3, clip=3.0, warmup=10)
+    robust.batch([0.0] * 10)
+    assert robust.batch([0.2]) == [3.0]
+    early = M.Normalizer(floor=1e-3, clip=3.0, warmup=10)
+    assert early.batch([5.0, -5.0]) == [0.0, 0.0] and early(7.0) == 0.0
+    # Defaults are the original behaviour.
+    a, b = M.Normalizer(), M.Normalizer(floor=0.0, clip=None, warmup=2)
+    xs = [0.3, 1.0, -2.0, 0.5, 4.0]
+    assert [a(x) for x in xs] == [b(x) for x in xs]
+
+
+def test_equal_spend_never_gives_a_method_more_than_the_budget(tmp_path):
+    import csv, subprocess
+    def write(name, costs, accs):
+        with open(tmp_path / f"{name}.csv", "w", newline="") as fh:
+            wr = csv.DictWriter(fh, fieldnames=["round", "cost", "accuracy"])
+            wr.writeheader()
+            for t, (c, a) in enumerate(zip(costs, accs), 1):
+                wr.writerow({"round": t, "cost": c, "accuracy": a})
+    write("b_random_s0", [5, 5], [0.3, 0.4])               # spends 10 in total
+    write("c2_rl_fedprox_s0", [9, 9, 9], [0.5, 0.9, 0.95])  # 9 <= 10 < 18
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "budget_s2.py"),
+                          "--dir", str(tmp_path)], capture_output=True, text=True).stdout
+    line = next(l for l in out.splitlines() if l.startswith("| c2_rl_fedprox "))
+    assert "| 0.5000 |" in line and "90%" in line             # round 1, cost 9 -- not round 2
+
+
+def test_code_fingerprint_is_taken_at_load_and_mid_run_edits_are_flagged(tmp_path, monkeypatch):
+    import json
+    from afl import engine as E
+    cfg = _tiny({"b_random": None}, rounds=1)
+    cfg.out = str(tmp_path)
+    exp = Experiment(cfg)
+    exp.run(verbose=False)
+    monkeypatch.setattr(E, "code_hash", lambda: "edited")
+    exp.save()
+    meta = json.load(open(os.path.join(str(tmp_path), f"{cfg.tag}.config.json")))
+    assert meta["code_hash"] == E.CODE_LOADED and meta["code_changed_during_run"]
+
+
+def test_measured_client_accuracy_uses_each_clients_own_examples():
+    exp = Experiment(_tiny({"b_random": None}, rounds=1))
+    n = len(exp.d["y_test"])
+    owner = torch.arange(n, device=exp.dev) % exp.N
+    exp.test_owner = owner
+    exp._evaluate(full=True)
+    acc = exp._measured_client_acc()
+    ok = exp._last_ok.cpu().numpy()
+    for i in (0, 3, 7):
+        assert acc[i] == pytest.approx(ok[owner.cpu().numpy() == i].mean())
+    exp.test_owner = torch.full((n,), -1, device=exp.dev)
+    assert exp._measured_client_acc() is None             # pooled test set: label-mix instead
+
+
+def _fake_s2_runs(root, plan_jobs, family_tests, value, bad=None):
+    """Write valid-looking runs (exact planned config, all rounds) for a family."""
+    import json, csv
+    from sweep import expected_config
+    for (g, cond, seed), raw in plan_jobs.items():
+        if not any(g == t[0] and cond in (t[1], t[2]) for t in family_tests):
+            continue
+        os.makedirs(raw["out"], exist_ok=True)
+        meta = expected_config(raw)
+        meta["code_hash"] = "abc"
+        T = meta["fl"]["rounds"]
+        col = family_tests[0][3]
+        v = value(cond)
+        rows = [{"round": t, col: v} for t in range(1, T + 1)]
+        if bad == "nan" and cond == family_tests[0][1]:
+            rows[-1][col] = float("nan")
+        if bad == "short":
+            rows = rows[:1]
+            meta["fl"]["rounds"] = 1
+        if bad == "nohash":
+            meta.pop("code_hash")
+        if bad == "protocol_off":
+            meta["fl"]["val_frac"] = 0.0
+        with open(os.path.join(raw["out"], raw["tag"] + ".csv"), "w", newline="") as fh:
+            wr = csv.DictWriter(fh, fieldnames=["round", col])
+            wr.writeheader()
+            wr.writerows(rows)
+        with open(os.path.join(raw["out"], raw["tag"] + ".config.json"), "w") as fh:
+            json.dump(meta, fh)
+
+
+@pytest.mark.parametrize("bad", [None, "nan", "short", "nohash", "protocol_off"])
+def test_confirmatory_report_accepts_only_valid_complete_runs(tmp_path, bad):
+    import subprocess
+    import prespec_s2
+    jobs = prespec_s2.load_plan(str(tmp_path))
+    tests = prespec_s2.FAMILIES["A"]
+    _fake_s2_runs(tmp_path, jobs, tests,
+                  value=lambda c: 0.5 if c == "arl3_full" else 0.1, bad=bad)
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "prespec_s2.py"),
+                          "--root", str(tmp_path)], capture_output=True, text=True, cwd=ROOT).stdout
+    fam_a = out.split("## Family A ")[1].split("## Family")[0]
+    if bad is None:
+        assert "INCOMPLETE" not in fam_a and fam_a.count("| yes |") == 4
+    else:
+        assert "INCOMPLETE" in fam_a and "| yes |" not in fam_a
