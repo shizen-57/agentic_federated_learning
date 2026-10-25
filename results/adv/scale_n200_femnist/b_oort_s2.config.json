@@ -1,0 +1,82 @@
+{
+  "data": {
+    "dataset": "femnist",
+    "num_clients": 200,
+    "dirichlet_alpha": 0.3,
+    "min_samples": 150,
+    "max_samples": 400,
+    "num_classes": 10,
+    "seed": 2
+  },
+  "system": {
+    "modes": [
+      "light",
+      "standard",
+      "priority"
+    ],
+    "local_epochs": {
+      "light": 1,
+      "standard": 2,
+      "priority": 4
+    },
+    "upload_frac": {
+      "light": 0.25,
+      "standard": 0.5,
+      "priority": 1.0
+    },
+    "deadline": 1.0,
+    "cost_max": 1000000000.0,
+    "latency_max": 1000000000.0,
+    "availability_p": 0.85,
+    "diurnal_amplitude": 0.35,
+    "rounds_per_day": 96,
+    "staleness_max": 1,
+    "norm_clip": 10.0,
+    "work_ref_samples": 500,
+    "weak_frac": 0.0,
+    "weak_select": "rarity",
+    "weak_speed": 0.8,
+    "weak_bandwidth": 0.6,
+    "weak_reliability": 0.6,
+    "weak_avail_drop": 0.1,
+    "avail_persistence": 0.0,
+    "device_trace": "tiers"
+  },
+  "fl": {
+    "rounds": 200,
+    "clients_per_round": 20,
+    "lr": 0.05,
+    "batch_size": 32,
+    "mu": 0.01,
+    "aggregator": "fedprox",
+    "model": "cnn_femnist",
+    "device": "cuda:0",
+    "eval_subset": 0,
+    "impute_missing": false,
+    "importance_reweight": false,
+    "reweight_floor": 0.1,
+    "async_late": false
+  },
+  "reward": {
+    "alpha": 1.0,
+    "beta": 0.1,
+    "delta": 0.1,
+    "lambda_arl": 0.5,
+    "lambda_fair": 0.3,
+    "lambda_debt": 0.0,
+    "gamma": 0.95,
+    "damage_metric": "arl",
+    "fairness_metric": "cv_success"
+  },
+  "policy": {
+    "name": "oort",
+    "elig_threshold": 0.5,
+    "rl_lr": 0.01,
+    "rl_hidden": 32,
+    "entropy_coef": 0.01,
+    "horizon": 1
+  },
+  "seed": 2,
+  "out": "/kaggle/working/adv/scale_n200_femnist",
+  "tag": "b_oort_s2"
+}
