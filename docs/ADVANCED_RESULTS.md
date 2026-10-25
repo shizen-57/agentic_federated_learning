@@ -642,6 +642,17 @@ None of the three chooses modes, so they use Standard, as Random and Oort do.
 > **C2.** The same 12 pairs on mean `fail_ratio`, two-sided (12 tests).
 >
 > All four families are computed by `python scripts/prespec_s2.py`.
+
+**Development check (`dev_s2_mnist`, seeds 0-2, CPU; bug check only, nothing
+was changed afterwards):** 57 of 57 runs finished, no errors or NaNs. The
+fixes and new methods do what they are meant to: ARL-v3 uses a mix of modes
+(3.4 Light / 5.1 Standard / 1.5 Priority per round, against ARL-v2's
+9.5 / 0.3 / 0.2); the expected-work rule moves the mode-fair baselines off
+all-Standard and cuts their failures (Oort 0.80 -> 0.63, Random 0.79 ->
+0.67); REFL invites fewer clients when late updates are due (8.5 per round)
+and receives ~125 late updates per run; FAVOR and DELTA run end to end. FedCS
+is low (0.67) because it always picks the same clients -- its rule, which
+was not changed.
 >
 > Everything else -- `s2_main_*` (no weak clients), cost, clients lost,
 > `rl_ew` vs `c2_rl_fedprox`, `arl3_shared`, the original baselines under the
