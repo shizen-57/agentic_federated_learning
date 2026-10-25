@@ -8,10 +8,10 @@
    damage term at all -- is statistically indistinguishable from the thesis's
    0.5 and is nominally better on every measure.
 2. **ARL's reward produces *more* failed invitations than a plain failure
-   count** in 17 of 18 groups (about 4-5 points higher), with no accuracy
+   count** in 17 of 18 groups (4 points higher on average), with no accuracy
    gain. Exploratory, but very consistent.
 3. **The learned joint policy's real benefit is efficiency, not accuracy:**
-   about 30-40% fewer failed invitations than Random/Oort in every group,
+   about 30-45% fewer failed invitations than Random/Oort in every group,
    ~20% lower cost, and (on CIFAR-10) higher accuracy than Random. On MNIST
    and FEMNIST its accuracy is level with Random, Oort and imputation.
 4. **Prevention does not beat a good correction on accuracy.** MimiC
@@ -130,8 +130,9 @@ Final accuracy / worst-10%-class accuracy / failure ratio, weak-client regime,
 No setting differs significantly from the thesis's on any measure. Dropping
 the ARL term entirely is nominally better on all three outcomes, so "the
 weight was too low" is not the explanation: the term simply does not help.
-Raising it moves the policy towards lower CV (fairer) and *more* failures --
-consistent with the finding below that ARL rewards coverage over safety.
+Raising it nudges the policy towards lower CV (fairer) and *more* failures
+(none of this is significant) -- in line with the finding below that ARL
+rewards coverage over safety.
 
 ### ARL vs the plain failure count, in every group (exploratory)
 
@@ -245,7 +246,7 @@ Final accuracy / worst-10% / failure ratio vs c2 (0.538 / 0.203 / 0.457):
 | FedCG | 0.269\* | 0.002\* | 0.941\* |
 
 - None of the five Chapter 3 pieces changes the picture significantly
-  (budgets cut failures slightly and cost ~35%).
+  (budgets cut cost by 31%, 12.5 to 8.6 per round, and failures slightly).
 - **MimiC beats RL on accuracy**: 10 of 10 seeds, +0.030 final (0.568 vs
   0.538), +0.010 averaged over all rounds, at 20% higher cost and 66% more
   failed invitations. A correction that makes absent clients harmless does as
