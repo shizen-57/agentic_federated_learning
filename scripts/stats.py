@@ -6,7 +6,7 @@ random draws, so conditions are compared seed-by-seed (paired), not as two
 independent samples. For each metric and each condition vs. the reference:
 
 - mean paired difference (reference - other) and a 95% bootstrap CI;
-- an exact sign-flip permutation p-value (all 2^n sign patterns when n <= 16,
+- an exact sign-flip permutation p-value (all 2^n sign patterns when n <= 22,
   so no distributional assumption and no scipy needed);
 - Holm-corrected p-values across the comparisons made for that metric.
 
@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import csv
 import glob
-import itertools
 import os
 import re
 import sys
@@ -51,26 +50,38 @@ def reduce(rows: list[dict], col: str, how: str) -> float:
     return float(np.mean([r[col] for r in rows]))
 
 
-def sign_flip_p(d: np.ndarray, n_random: int = 100_000, seed: int = 0,
-                alternative: str = "two-sided") -> float:
+def sign_flip_p(d: np.ndarray, n_random: int = 1_000_000, seed: int = 0,
+                alternative: str = "two-sided", exact_max: int = 22) -> float:
     """p-value for H0: the paired differences are symmetric about 0.
 
     alternative: "two-sided", "greater" (mean difference > 0) or "less".
+    Exact (all 2^n sign patterns, enumerated in chunks) up to n = exact_max;
+    beyond that, n_random random patterns. Exact matters: with 20 seeds a
+    Monte Carlo estimate of 0.0249 was in fact 0.0252, on the other side of a
+    pre-specified 0.025 threshold.
     """
     n = len(d)
     obs = d.mean()
     if n == 0:
         return float("nan")
-    if n <= 16:
-        signs = np.array(list(itertools.product([1.0, -1.0], repeat=n)))
-    else:
-        signs = np.random.default_rng(seed).choice([1.0, -1.0], size=(n_random, n))
-    null = (signs * d).mean(axis=1)
-    if alternative == "greater":
-        return float((null >= obs - 1e-12).mean())
-    if alternative == "less":
-        return float((null <= obs + 1e-12).mean())
-    return float((np.abs(null) >= abs(obs) - 1e-12).mean())
+
+    def count(null):
+        if alternative == "greater":
+            return int((null >= obs - 1e-12).sum())
+        if alternative == "less":
+            return int((null <= obs + 1e-12).sum())
+        return int((np.abs(null) >= abs(obs) - 1e-12).sum())
+
+    if n <= exact_max:
+        bits = np.arange(n, dtype=np.int64)
+        hits, total, chunk = 0, 2 ** n, 1 << 18
+        for start in range(0, total, chunk):
+            idx = np.arange(start, min(start + chunk, total), dtype=np.int64)
+            signs = ((idx[:, None] >> bits) & 1) * 2.0 - 1.0
+            hits += count((signs * d).mean(axis=1))
+        return hits / total
+    signs = np.random.default_rng(seed).choice([1.0, -1.0], size=(n_random, n))
+    return count((signs * d).mean(axis=1)) / n_random
 
 
 def bootstrap_ci(d: np.ndarray, n_boot: int = 10_000, seed: int = 0) -> tuple[float, float]:

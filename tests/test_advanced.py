@@ -531,3 +531,12 @@ def test_per_client_credit_changes_learning_only_when_switched_on():
     pb = torch.cat([p.detach().flatten() for p in b.policy.net.parameters()])
     assert not torch.allclose(pa, pb)
     assert all("arl_v2" in r and "departed" in r for r in rb)
+
+
+def test_sign_flip_is_exact_for_twenty_seeds():
+    from stats import sign_flip_p
+    d = np.array([1.0] * 15 + [-1.0] * 5)
+    # Exact: P(mean of random signs >= 0.5) = P(#plus >= 15) = sum_{k>=15} C(20,k) / 2^20
+    from math import comb
+    exact = sum(comb(20, k) for k in range(15, 21)) / 2 ** 20
+    assert sign_flip_p(d, alternative="greater") == pytest.approx(exact, abs=1e-12)

@@ -29,6 +29,16 @@
    failure ratio, and faster-learning than MimiC alone with far fewer
    failures. Found as a secondary result; a pre-specified confirmation is
    set up below.
+9. **That confirmation narrowly failed.** RL + MimiC beat RL alone on
+   CIFAR-10 again (+0.016, exact one-sided p = 0.0252) but missed the
+   pre-specified Holm threshold of 0.025, and showed nothing on FEMNIST
+   (p = 0.49). It is suggestive on CIFAR-10, not confirmed.
+10. **ARL-v2 (the redesign) failed its pre-specified test** in all four
+    settings (worst-class accuracy, p = 0.50-0.98; nominally worse in all
+    four). Exploratory but very consistent: it makes the scheduler markedly
+    more economical -- 5-7 points fewer failures, 2-3.7 lower cost per round
+    and 6-10 fewer clients lost to churn (p <= 0.004 in every setting) --
+    at equal accuracy on CIFAR-10 and slightly lower accuracy on FEMNIST.
 
 Groups: 1,190 runs on Kaggle 2x T4 (17 groups, 10 seeds each; `confirm_cifar`
 30 fresh seeds), plus 120 weak-client MNIST runs on this project's CPU. Every
@@ -464,6 +474,56 @@ down (mean ARL-v2 0.012 vs 0.058 for the plain failure count and 0.285 for
 Random), so the per-decision credit is wired correctly; without churn no
 client leaves, with churn 9-40 of 100 leave (Random 32-40, RL variants
 9-30), so the scenario is neither trivial nor degenerate.
+
+### Outcome of the RL + MimiC confirmation and the ARL-v2 test
+
+**`confirm_mimic_*` (pre-specified, fresh seeds 60-79):** final accuracy,
+RL + MimiC vs RL alone, one-sided, exact sign-flip:
+
+| | RL + MimiC | RL | diff | 95% CI | exact p | Holm threshold |
+|---|---|---|---|---|---|---|
+| CIFAR-10 | 0.564 | 0.548 | +0.016 | [+0.002, +0.031] | 0.0252 | 0.025 |
+| FEMNIST | 0.751 | 0.748 | +0.003 | [-0.041, +0.030] | 0.485 | 0.05 |
+
+Neither passes under the rule fixed in advance. CIFAR-10 misses by 0.0002 --
+the Monte Carlo estimate the script used for n > 16 (0.0249) would have
+passed, so `stats.py` now enumerates all sign patterns up to n = 22. Taken
+with `follow_cifar` (+0.036), the CIFAR-10 direction is consistent and
+favourable but not confirmed; FEMNIST shows no effect. Descriptively RL +
+MimiC learns faster on both (mean accuracy 0.441 vs 0.417; 0.651 vs 0.645)
+at the same failure ratio. The thesis can report it as a promising, not
+established, combination.
+
+**`arl2_*` (pre-specified, fresh seeds 80-99):** final worst-10%-class
+accuracy, ARL-v2 (full) vs the plain failure count, one-sided, exact:
+
+| setting | ARL-v2 | plain count | diff | exact p |
+|---|---|---|---|---|
+| CIFAR-10 | 0.175 | 0.211 | -0.036 | 0.900 |
+| CIFAR-10 + churn | 0.147 | 0.148 | -0.000 | 0.501 |
+| FEMNIST | 0.083 | 0.093 | -0.010 | 0.753 |
+| FEMNIST + churn | 0.077 | 0.096 | -0.019 | 0.979 |
+
+None passes; ARL-v2 is not shown to protect the worst-represented classes,
+even where losses are permanent. **Exploratory** (not pre-specified, two-sided
+exact tests vs the plain failure count, 20 seeds each):
+
+| setting | failures | cost / round | clients lost | final accuracy |
+|---|---|---|---|---|
+| CIFAR-10 | -0.068 (p < 0.001) | -3.7 (p < 0.001) | -- | -0.006 (p = 0.60) |
+| CIFAR-10 + churn | -0.072 (p = 0.001) | -3.5 (p < 0.001) | -5.9 (p = 0.004) | +0.025 (p = 0.08) |
+| FEMNIST | -0.051 (p < 0.001) | -3.2 (p = 0.001) | -- | -0.019 (p = 0.12) |
+| FEMNIST + churn | -0.067 (p < 0.001) | -2.0 (p < 0.001) | -9.7 (p < 0.001) | -0.031 (p = 0.001) |
+
+The per-decision credit works -- ARL-v2 learns to avoid exactly the
+failures it penalises, choosing lighter modes and fewer risky invitations --
+but avoiding failures does not translate into better class coverage: it
+trains less per round, which costs accuracy on FEMNIST. ARL-v2 is therefore
+an *efficiency and retention* mechanism, not a representation mechanism.
+Those efficiency effects are large and consistent but were not the
+pre-specified outcome; claiming them would need a confirmation on fresh
+seeds. `arl2_shared` (same loss, no per-decision credit) sits between the
+two on every measure, so the per-decision credit is what drives the change.
 
 ## GPU runs are not bit-reproducible
 
