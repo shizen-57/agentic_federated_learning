@@ -832,7 +832,13 @@ historical evidence, but cannot be used for this confirmatory protocol.
 5. **Acceptance rejection counts toward churn.** An update rejected by the
    norm/staleness acceptance rule records `rejected`, so it increments the
    failure streak instead of resetting it. A successful accepted update still
-   resets the streak.
+   resets the streak. This fix is not behind a switch, so it is the one change
+   that alters an earlier condition: runs with client churn
+   (`system.churn_after > 0`: `dev_churn_mnist`, `arl2_churn_cifar`,
+   `arl2_churn_femnist`) would now lose slightly more clients if re-run (on a
+   synthetic check, one more departure). Their saved results stay valid as
+   results of the code that made them. Without churn, every earlier
+   condition is still bit-identical (re-checked on 5 conditions).
 
 The robust normaliser warms up over **10 observations, not 10 rounds**.
 Per-client batches can reach that count earlier than round-level signals.
