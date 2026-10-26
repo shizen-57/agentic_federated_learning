@@ -855,6 +855,64 @@ input digests, and update both pins together in one commit. Re-run the
 regression suite before starting new confirmatory runs. Do not re-freeze a
 protocol to admit existing results after inspecting their outcomes.
 
+#### Fifth review (before any `s2_*` run)
+
+1. **Per-client ARL credit was not a valid gradient of the round's total.**
+   A client's loss and gain depend on which other clients were picked (its
+   Shapley share, the coverage of the set), but its credit updated only its
+   own pick. Example: with 3 clients and all 3 always picked, the total
+   coverage cannot change, so the correct pick gradient is zero -- the old
+   update gave a non-zero one. **Fix (`policy.credit_split`):** the picks get
+   the round's *total* ARL term, standardised with the statistics from
+   before the round; each client's own term goes to its *mode* only. That
+   part is valid: given the picked set, client i's mode changes only its own
+   loss and gain. The shared reward (accuracy, cost, latency, fairness)
+   still goes to picks and modes as before. Clipping the standardised terms
+   at +-3 (robust normaliser) makes the update a bounded, slightly biased
+   version of that gradient; this is stated rather than hidden. Applied to
+   both ARL-v2 (`arl2_full`) and ARL-v3 (`arl3_full`).
+2. **FAVOR learned from clients it could not have picked.** Its Double-DQN
+   target took the best next action over all clients, including offline
+   ones. **Fix:** each stored transition keeps which clients were selectable
+   in the next state, the target chooses only among them, and with none
+   there is no bootstrap term.
+3. **FedCER-like's time estimate left out the client's data volume**, so it
+   chose lighter modes than needed (120 work units, unit speed: Priority
+   takes 0.65 of the deadline, but it chose Light). **Fix
+   (`policy.shared_time_estimate`):** the same workload-scaled estimate as
+   the engine (`base.est_time`).
+4. `scripts/run_experiments.py` (the older runner) now reuses a result only
+   if `sweep.run_status` accepts it, like `sweep.py`.
+5. With `policy.horizon > 1`, the last unfinished window is now learned
+   from at the end of the run (no effect on anything logged; `s2_*` uses
+   horizon 1).
+6. `stats.py`'s curve average and `plot.py`'s accuracy curves use
+   `accuracy_fixed` when the CSV has it; final results still use full-test
+   `accuracy`.
+
+The protocol was re-frozen with `scripts/freeze_s2.py`, which writes the
+manifest and both pins in one step. **GPU smoke groups** (`smoke_s2_*`: every
+`s2` condition, 5 rounds, seed 900, which no test uses) are run first on
+Kaggle to check the code end to end on a GPU before the long runs.
+
+**Checks of the re-frozen code (commit `434fe22`, fingerprint
+`c4c4c85c373f99b1`), each run from a frozen snapshot of that commit:**
+
+- *Real-data smoke, CPU* (`smoke_s2_*`: CIFAR-10 and FEMNIST, all 23 `s2`
+  conditions plus the 4 churn ones, 5 rounds, seed 900): 50 of 50 runs
+  finished, every logged number finite, one code fingerprint, one initial
+  model per group, FEMNIST client accuracy measured on each writer's own
+  images. Not yet run on a GPU: that is the first Kaggle step.
+- *MNIST bug check* (`dev_s2_mnist`, seeds 0-2, 100 rounds): 69 of 69 runs
+  finished, no errors or NaNs, one fingerprint, the same initial model for
+  every method within a seed, no mid-run source change. One behaviour to
+  note, not a bug and not tuned away: with the credit split, ARL-v3's modes
+  went back to mostly Light (9.0 Light / 0.6 Standard / 0.4 Priority per
+  round, against 6.3 / 1.2 / 2.4 before the split) -- the per-client gain
+  for a delivered update outweighs the lost-work term. ARL-v3 was not
+  changed after seeing this; the pre-specified tests decide whether it
+  helps.
+
 #### ARL-v3 as frozen for the `s2_*` runs
 
 For each invited client i in round t (S_t = the invited set):
@@ -866,10 +924,11 @@ For each invited client i in round t (S_t = the invited set):
 - W(m) = P(success | m) x local_epochs[m] for modes with P >= 0.5 (or the
   safest mode if none), else 0; best = the mode maximising W;
 - loss_i = m_i (W(best) - W(assigned)) / 4, gain_i = m_i Y_i;
-- per-client advantage = -0.5 z(loss_i) + 0.5 z(gain_i), z = the robust,
-  order-free normaliser above, credited to the log-probability of i's pick
-  and mode (`arl3_full`); `arl3_shared` puts -0.5 z(sum loss) + 0.5 z(sum
-  gain) in the shared reward instead.
+- `arl3_full`: the picks are credited with -0.5 z(sum loss) + 0.5 z(sum gain)
+  (the round's totals) and client i's mode with -0.5 z(loss_i) + 0.5 z(gain_i),
+  z = the robust, order-free normaliser above (fifth review, item 1);
+  `arl3_shared` puts -0.5 z(sum loss) + 0.5 z(sum gain) in the shared reward
+  instead.
 - The policy's inputs: the 12 original features with the corrected value
   input, plus the coverage client i adds to the clients already picked this
   round, plain and deficit-weighted, recomputed after each pick.
