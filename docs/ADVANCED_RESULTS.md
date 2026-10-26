@@ -936,6 +936,20 @@ The fifth-review fixes were kept, with one change and stricter tests:
    `accuracy`. Tested with a final full-test score deliberately different
    from the fixed-set curve.
 
+**Checks of the current frozen code (commit `1349d2a`, fingerprint
+`fd90310c1b7c34e9`), each run from a frozen snapshot of that commit:**
+
+- *Real-data smoke, CPU* (`smoke_s2_*`, 50 runs, 5 rounds, seed 900): 50 of
+  50 finished, every logged number finite (including `accuracy_fixed`), one
+  fingerprint, one initial model per group, FEMNIST client accuracy measured.
+- *MNIST bug check* (`dev_s2_mnist`, 69 runs, seeds 0-2, 100 rounds): 69 of
+  69 finished, no errors, NaNs or mid-run source changes, one fingerprint,
+  the same initial model for every method within a seed. With the single
+  round objective, ARL-v3 mixes modes again (4.2 Light / 4.7 Standard / 1.1
+  Priority per round). Nothing was changed after these checks.
+- *GPU:* not checkable here; the `smoke_s2_*` groups are the first Kaggle
+  step. The freeze is final once that run is clean.
+
 **Checks of the code frozen before the sixth review (commit `434fe22`,
 fingerprint `c4c4c85c373f99b1`; superseded), each run from a frozen snapshot:**
 
