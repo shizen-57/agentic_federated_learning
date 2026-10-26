@@ -24,7 +24,7 @@ from .data import build as build_data
 from .local import accepted, local_train
 from .models import build_model, get_flat, set_flat
 from .policies import build_policy
-from .policies.base import best_work_mode, mode_by_rule
+from .policies.base import best_work_mode, est_time, mode_by_rule
 from .predictor import SuccessPredictor
 from .provenance import LOADED as CODE_LOADED, code_hash
 from .sim import ClientEnv
@@ -120,7 +120,8 @@ class Experiment:
 
         nkw = dict(floor=1e-3, clip=3.0, warmup=10) if cfg.reward.robust_norm else {}
         self.norm = {k: M.Normalizer(**nkw) for k in ("acc", "cost", "lat", "arl", "faildmg", "debt",
-                                                      "v2c", "v3g", "v3c", "v3cg")}
+                                                      "v2c", "v3g", "v3c", "v3cg",
+                                                      "v2s", "v3s", "v3sg")}
         self.cov_ema = np.zeros(self.d["num_classes"])   # ARL-v2 class-coverage history
         if cfg.policy.value_feature == "marginal":
             self.value_input = M.expected_marginal_value(
@@ -346,11 +347,7 @@ class Experiment:
 
     def _est_time(self, i: int, mode: str, state: dict, frac: float | None) -> float:
         """Server-side estimate of a client's round time from observed descriptors."""
-        sysc = self.cfg.system
-        obs = state["obs"][i]
-        frac = sysc.upload_frac[mode] if frac is None else frac
-        return (sysc.local_epochs[mode] * (self.env.n_work[i] / 1200.0) / max(obs["speed_hat"], 1e-3)
-                + 0.25 * frac / max(obs["bw_hat"], 1e-3))
+        return est_time(self.cfg, {"obs": state["obs"], "n_work": self.env.n_work}, i, mode, frac)
 
     def _enforce_budget(self, selected, assign, state, fracs):
         """Eq. (3.64)-(3.65): per-round cost budget C_max and time limit L_max.
@@ -850,14 +847,23 @@ class Experiment:
         else:
             def norm(key, vals):
                 return {i: self.norm[key](vals[i]) for i in selected}
+        set_adv = None
         if r.damage_metric == "arl_v2" and self.cfg.policy.per_client_credit:
             z = norm("v2c", v2)
             client_adv = {i: -r.lambda_arl * z[i] for i in selected}
+            if self.cfg.policy.credit_split:
+                set_adv = -r.lambda_arl * self.norm["v2s"].batch([arl_v2])[0]
         elif r.damage_metric == "arl_v3" and self.cfg.policy.per_client_credit:
             zl, zg = norm("v3c", v3_loss), norm("v3cg", v3_gain)
             client_adv = {i: -r.lambda_arl * zl[i] + r.lambda_cov * zg[i] for i in selected}
+            if self.cfg.policy.credit_split:
+                # The round's totals, standardised with the statistics from
+                # before the round (a baseline that does not depend on this
+                # round's action).
+                set_adv = (-r.lambda_arl * self.norm["v3s"].batch([arl_v3_loss])[0]
+                           + r.lambda_cov * self.norm["v3sg"].batch([arl_v3_gain])[0])
         self.policy.observe_outcome(state, (selected, assign), reward, {
-            "success": success, "client_adv": client_adv, "t": t,
+            "success": success, "client_adv": client_adv, "set_adv": set_adv, "t": t,
             # For the baselines that learn from what arrived (FAVOR, DELTA, REFL).
             "acc": acc_r, "recv_ids": list(recv_ids), "updates": dict(zip(recv_ids, updates)),
             "stale": dict(zip(recv_ids, stale)), "grad_var": grad_var, "base_flat": base_flat,
@@ -903,6 +909,7 @@ class Experiment:
                       f"succ={row['n_success']}/{row['n_selected']} "
                       f"ARL'={row['arl_online']:.3f} ARL*={row['arl_oracle']:.3f} "
                       f"CV={row['cv']:.3f} R={row['reward']:.3f}", flush=True)
+        self.policy.finish_run()
         return self.rows
 
     def save(self) -> str:

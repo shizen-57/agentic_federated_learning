@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np               # noqa: E402
 
 PANELS = [
-    ("accuracy", "Global validation accuracy", "accuracy"),
+    ("accuracy", "Global test accuracy (same held-out examples every round)", "accuracy"),
     ("cv", "Successful-contribution fairness (CV, lower is better)", "CV_t"),
     ("arl_online", "Avoidable representation loss (ARL', lower is better)", "ARL'_t"),
     ("fail_ratio", "Failed-participation ratio", "D^fail_t"),
@@ -64,8 +64,13 @@ def main() -> int:
     for ax, (key, title, ylab) in zip(axes.flat, PANELS):
         for tag in sorted(groups):
             runs = groups[tag]
-            n = min(len(r[key]) for r in runs)
-            stack = np.stack([r[key][:n] for r in runs])
+            col = key
+            # Curves need one test population in every round; "accuracy"
+            # switches to the full test set at the final round in newer runs.
+            if key == "accuracy" and all("accuracy_fixed" in r for r in runs):
+                col = "accuracy_fixed"
+            n = min(len(r[col]) for r in runs)
+            stack = np.stack([r[col][:n] for r in runs])
             x = runs[0]["round"][:n]
             mu, sd = stack.mean(0), stack.std(0)
             ax.plot(x, mu, label=tag, linewidth=1.4)

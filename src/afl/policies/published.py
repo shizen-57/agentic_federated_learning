@@ -67,7 +67,8 @@ class FAVORPolicy(Policy):
                                      nn.Linear(h, self.N))
         self.tgt = copy.deepcopy(self.net)
         self.opt = torch.optim.Adam(self.net.parameters(), lr=1e-3)
-        self.buffer: list[tuple] = []       # (state, action, reward, next_state)
+        self.buffer: list[tuple] = []       # (state, action, reward, next_state,
+                                            #  clients selectable in next_state)
         self.pending = None                 # (state, actions, reward) awaiting s'
         self.n_steps = 0
         self.V = None
@@ -100,10 +101,15 @@ class FAVORPolicy(Policy):
     def act(self, state, t):
         K = min(self.cfg.fl.clients_per_round, self.N)
         s = self._state_vec(state["global_flat"])
+        cands = pool(state, self.N)
+        # The bootstrap target may only use actions that were possible in the
+        # next state (the clients online then); with none, there is no bootstrap.
+        mask = torch.zeros(self.N, dtype=torch.bool, device=s.device)
+        mask[cands] = True
         if self.pending is not None:
             s_prev, acts, r = self.pending
             for a in acts:
-                self.buffer.append((s_prev, a, r, s))
+                self.buffer.append((s_prev, a, r, s, mask))
             self._train()
             self.pending = None
 
@@ -111,7 +117,6 @@ class FAVORPolicy(Policy):
         eps = max(0.05, 1.0 - t / (0.3 * T))
         with torch.no_grad():
             q = self.net(s).cpu().numpy()
-        cands = pool(state, self.N)
         cs = set(cands)
         order = [i for i in np.argsort(-q) if i in cs]
         sel: list[int] = []
@@ -133,6 +138,14 @@ class FAVORPolicy(Policy):
         for i, u in info["updates"].items():
             self.client[i] = self._proj(base + u)
 
+    def _targets(self, r: torch.Tensor, s2: torch.Tensor, m2: torch.Tensor, g: float) -> torch.Tensor:
+        """Double-DQN targets, choosing the next action only among the clients
+        that were selectable in the next state; no bootstrap if there were none."""
+        with torch.no_grad():
+            a2 = self.net(s2).masked_fill(~m2, -float("inf")).argmax(dim=1, keepdim=True)
+            boot = self.tgt(s2).gather(1, a2).squeeze(1)
+            return r + g * torch.where(m2.any(dim=1), boot, torch.zeros_like(boot))
+
     def _train(self, steps: int = 4, batch: int = 32, sync: int = 10) -> None:
         if len(self.buffer) < batch:
             return
@@ -143,9 +156,8 @@ class FAVORPolicy(Policy):
             a = torch.tensor([self.buffer[k][1] for k in idx], device=s.device)
             r = torch.tensor([self.buffer[k][2] for k in idx], dtype=torch.float32, device=s.device)
             s2 = torch.stack([self.buffer[k][3] for k in idx])
-            with torch.no_grad():
-                a2 = self.net(s2).argmax(dim=1, keepdim=True)
-                y = r + g * self.tgt(s2).gather(1, a2).squeeze(1)
+            m2 = torch.stack([self.buffer[k][4] for k in idx])
+            y = self._targets(r, s2, m2, g)
             qsa = self.net(s).gather(1, a[:, None]).squeeze(1)
             loss = ((y - qsa) ** 2).mean()
             self.opt.zero_grad()

@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 
 from .. import metrics as M
-from .base import Policy, best_work_mode, gate, pool
+from .base import Policy, best_work_mode, est_time, gate, pool
 
 
 def _default_mode(cfg) -> str:
@@ -57,8 +57,12 @@ class FedCERPolicy(Policy):
             for mode in ("priority", "standard", "light"):
                 epochs = self.cfg.system.local_epochs[mode]
                 frac = self.cfg.system.upload_frac[mode]
-                t_est = (epochs / max(obs["speed_hat"], 1e-3)
-                        + 0.25 * frac / max(obs["bw_hat"], 1e-3))
+                if self.cfg.policy.shared_time_estimate:
+                    t_est = est_time(self.cfg, state, i, mode)
+                else:
+                    # Original formula: leaves out the client's workload.
+                    t_est = (epochs / max(obs["speed_hat"], 1e-3)
+                             + 0.25 * frac / max(obs["bw_hat"], 1e-3))
                 if t_est <= self.cfg.system.deadline:
                     assign[i] = mode
                     break

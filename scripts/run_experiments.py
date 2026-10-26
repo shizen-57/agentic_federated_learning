@@ -6,8 +6,10 @@ the heuristic control), the Table 3.5 baselines, and the Task 1/2 ablations.
 For the multi-dataset sweep of docs/ADVANCED_EXPERIMENTS.md use scripts/sweep.py.
 
 Runs are sequential and each one is independent, so this script is safe to stop
-and restart: it skips any run whose CSV already exists. That matters on free
-compute, where a session can be reclaimed mid-sweep.
+and restart: it skips a run only if its saved result was made with exactly this
+config, by this code, and has every round (the same check as scripts/sweep.py);
+anything else is re-run. That matters on free compute, where a session can be
+reclaimed mid-sweep.
 
     python scripts/run_experiments.py --config configs/mnist.yaml --seeds 0 1 2
 """
@@ -23,7 +25,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from afl.conditions import CONDITIONS, apply  # noqa: E402
 from afl.config import Cfg            # noqa: E402
 from afl.engine import Experiment     # noqa: E402
+from afl.provenance import code_hash  # noqa: E402
 from afl.run import _load             # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sweep import run_status          # noqa: E402
 
 # Every condition in the shared registry, in its declared order. Earlier
 # versions of this script listed only Table 3.4 and four of the Table 3.5
@@ -39,6 +45,8 @@ def main() -> int:
     ap.add_argument("--out", default="results")
     ap.add_argument("--only", nargs="*", help="restrict to these run tags")
     ap.add_argument("--force", action="store_true", help="re-run even if the CSV exists")
+    ap.add_argument("--ignore-code", action="store_true",
+                    help="reuse finished runs made by other code versions")
     ap.add_argument("--tag-prefix", default="",
                     help="prefix every run tag with this, e.g. 'n100_' for a "
                          "different client population -- RUNS tags are shared "
@@ -48,21 +56,24 @@ def main() -> int:
 
     base = _load(args.config)
     todo = [r for r in RUNS if not args.only or r in args.only]
+    current = None if args.ignore_code else code_hash()
 
     for seed in args.seeds:
         for tag in todo:
             full = f"{args.tag_prefix}{tag}_s{seed}"
-            path = os.path.join(args.out, f"{full}.csv")
-            if os.path.exists(path) and not args.force:
-                print(f"skip {full} (exists)")
-                continue
-
             raw = {k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}
             raw["tag"] = full
             raw["seed"] = seed
             raw["out"] = args.out
             raw.setdefault("data", {})["seed"] = seed
             apply(raw, CONDITIONS[tag])
+            if not args.force:
+                st = run_status(raw, current)
+                if st == "ok":
+                    print(f"skip {full} (done)")
+                    continue
+                if st != "missing":
+                    print(f"re-run {full}: {st}")
 
             t0 = time.time()
             exp = Experiment(Cfg.from_dict(raw))

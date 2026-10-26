@@ -155,6 +155,7 @@ class RLPolicy(Policy):
         logp_mode = 0.0
         entropy = 0.0
         assign = {}
+        mode_lp: dict[int, torch.Tensor] = {}
         # Per-client log-probabilities (pick + mode), for per-decision credit.
         logp_client = dict(step_logp)
         # Under a fixed mode rule (policy.mode_rule) the engine assigns the
@@ -172,12 +173,13 @@ class RLPolicy(Policy):
             lp = dist.log_prob(m)
             logp_mode = logp_mode + lp
             logp_client[int(i)] = logp_client.get(int(i), 0.0) + lp
+            mode_lp[int(i)] = lp
             entropy = entropy + dist.entropy()
             assign[int(i)] = self.modes[int(m)]
 
         sel_entropy = torch.distributions.Categorical(logits=masked).entropy()
         self._pending = {"logp": logp_sel + logp_mode, "entropy": entropy + sel_entropy,
-                         "logp_client": logp_client}
+                         "logp_client": logp_client, "logp_sel": logp_sel, "logp_mode": mode_lp}
         return [int(i) for i in sel], assign
 
     def _allowed(self, state, N: int, K: int):
@@ -226,6 +228,7 @@ class RLPolicy(Policy):
             mode_rows[i] = mode_logits[i]
         picked = picked + list(fill)
         assign, logp_client = {}, dict(steps)
+        logp_sel, mode_lp = logp, {}
         fixed_modes = self.cfg.policy.mode_rule != "own"
         for i in picked:
             if fixed_modes:
@@ -234,9 +237,11 @@ class RLPolicy(Policy):
             m, lp = self._draw(mode_rows[i])
             logp = logp + lp
             logp_client[i] = logp_client.get(i, 0.0) + lp
+            mode_lp[i] = lp
             entropy = entropy + torch.distributions.Categorical(logits=mode_rows[i]).entropy()
             assign[i] = self.modes[m]
-        self._pending = {"logp": logp, "entropy": entropy, "logp_client": logp_client}
+        self._pending = {"logp": logp, "entropy": entropy, "logp_client": logp_client,
+                         "logp_sel": logp_sel, "logp_mode": mode_lp}
         return picked, assign
 
     def _sample_topk(self, logits: torch.Tensor, K: int):
@@ -282,7 +287,16 @@ class RLPolicy(Policy):
         # Per-decision credit (ARL-v2): each invited client's own advantage
         # goes only to the log-probability of that client's pick and mode.
         client_adv = (info or {}).get("client_adv")
-        if client_adv:
+        set_adv = (info or {}).get("set_adv")
+        if set_adv is not None:
+            # policy.credit_split: the round's total ARL term on the picks, each
+            # client's own term on its mode only (see config.PolicyCfg).
+            if torch.is_tensor(self._pending["logp_sel"]):
+                loss = loss - self._pending["logp_sel"] * set_adv
+            for i, a in (client_adv or {}).items():
+                if i in self._pending["logp_mode"]:
+                    loss = loss - self._pending["logp_mode"][i] * a
+        elif client_adv:
             for i, a in client_adv.items():
                 if i in self._pending["logp_client"]:
                     loss = loss - self._pending["logp_client"][i] * a
@@ -291,6 +305,11 @@ class RLPolicy(Policy):
         nn.utils.clip_grad_norm_(self.net.parameters(), 5.0)
         self.opt.step()
         self._pending = None
+
+    def finish_run(self) -> None:
+        """Learn from a last, unfinished multi-round window instead of dropping it."""
+        if self.train_mode and self.cfg.policy.horizon > 1 and self._window:
+            self._update_window()
 
     def _update_window(self):
         """REINFORCE on discounted returns within the window (horizon > 1)."""

@@ -124,8 +124,14 @@ def main() -> int:
     others = args.vs or [c for c in sorted(runs) if c != args.ref]
 
     out_rows = []
+    first = next(iter(runs[args.ref].values()))[0]
     for col, how, higher in METRICS:
-        if col not in next(iter(runs[args.ref].values()))[0]:
+        # A curve average must use one test population in every round: newer
+        # CSVs log accuracy_fixed for that; "accuracy" switches to the full
+        # test set at the final round.
+        if col == "accuracy" and how == "mean" and "accuracy_fixed" in first:
+            col = "accuracy_fixed"
+        if col not in first:
             continue  # older CSVs predate acc_worst10
         label = f"{how}_{col}" if how == "mean" else f"final_{col}"
         recs = []

@@ -16,6 +16,17 @@ def best_work_mode(cfg, p_succ: dict) -> str:
     return max(ok, key=lambda m: p_succ[m] * cfg.system.local_epochs[m])
 
 
+def est_time(cfg, state, i: int, mode: str, frac: float | None = None) -> float:
+    """Server-side round-time estimate from observed speed and bandwidth, with
+    the client's workload (the same formula as the simulator, without its
+    hidden per-round jitter)."""
+    sysc = cfg.system
+    obs = state["obs"][i]
+    frac = sysc.upload_frac[mode] if frac is None else frac
+    return (sysc.local_epochs[mode] * (state["n_work"][i] / 1200.0) / max(obs["speed_hat"], 1e-3)
+            + 0.25 * frac / max(obs["bw_hat"], 1e-3))
+
+
 def pool(state, N: int) -> list[int]:
     """Clients a policy may pick this round: those that checked in when
     system.checkin_pool is on, otherwise everyone."""
@@ -68,3 +79,6 @@ class Policy:
 
     def finish_round(self) -> dict:
         return {}
+
+    def finish_run(self) -> None:
+        """Called once after the last round (e.g. to flush a learning window)."""

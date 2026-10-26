@@ -83,7 +83,9 @@ weak_random: &weak_random
 # did, every method picks from the clients that checked in, per-client credit
 # does not depend on processing order, and the eligibility gate keeps the
 # clients that pass it. Third review: normalised reward terms have a minimum
-# spread, a warm-up and a +-3 cap. Every group from here on uses all of it.
+# spread, a warm-up and a +-3 cap. Fifth review: per-client ARL credit goes to
+# the mode only (the pick gets the round's total), and FedCER-like estimates
+# round time with the workload. Every group from here on uses all of it.
 sim2: &sim2
   fl.compress_upload: true
   policy.oort_estimated_time: true
@@ -97,10 +99,20 @@ sim2: &sim2
   reward.batch_client_norm: true
   reward.robust_norm: true
   policy.strict_gate: true
+  policy.credit_split: true
+  policy.shared_time_estimate: true
 weak_rare_s2: &weak_rare_s2
   <<: [*weak_rare, *sim2]
 weak_churn_s2: &weak_churn_s2
   <<: [*weak_churn, *sim2]
+# Five-round versions, to check on the GPU that every condition runs end to
+# end before the long runs. Seed 900 is never used for any test.
+smoke_rare_s2: &smoke_rare_s2
+  <<: *weak_rare_s2
+  fl.rounds: 5
+smoke_churn_s2: &smoke_churn_s2
+  <<: *weak_churn_s2
+  fl.rounds: 5
 
 groups:
   # 1. Main comparison: every condition, every dataset, at N=100 / K=10.
@@ -230,3 +242,7 @@ groups:
   #     comparison table. Seeds 100-109.
   s2_main_cifar:    {config: configs/adv/cifar10.yaml, set: *sim2, conditions: s2, seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]}
   s2_main_femnist:  {config: configs/adv/femnist.yaml, set: *sim2, conditions: s2, seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]}
+  #     GPU smoke check (5 rounds, seed 900): run first, before the groups above.
+  smoke_s2_cifar:       {config: configs/adv/cifar10.yaml, set: *smoke_rare_s2,  conditions: s2,    seeds: [900]}
+  smoke_s2_femnist:     {config: configs/adv/femnist.yaml, set: *smoke_rare_s2,  conditions: s2,    seeds: [900]}
+  smoke_s2_churn_cifar: {config: configs/adv/cifar10.yaml, set: *smoke_churn_s2, conditions: s2arl, seeds: [900]}

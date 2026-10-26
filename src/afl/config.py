@@ -208,6 +208,19 @@ class PolicyCfg:
     per_client_credit: bool = False     # ARL-v2: each invited client's own loss is
                                         # credited to that client's pick and mode only,
                                         # instead of the shared round reward
+    credit_split: bool = False          # protocol fix for per_client_credit: a client's
+                                        # ARL loss depends on which other clients were
+                                        # picked, so crediting it to that client's pick
+                                        # alone is not a valid gradient of the round's
+                                        # total. With this on, the pick gets the round's
+                                        # total ARL term and only the mode gets the
+                                        # client's own term -- valid because, given the
+                                        # picked set, client i's mode moves only its own
+                                        # term
+    shared_time_estimate: bool = False  # protocol fix: FedCER-like estimates a client's
+                                        # round time with the same workload-scaled
+                                        # formula as the engine (base.est_time); its own
+                                        # formula left out the client's data volume
     horizon: int = 1                    # rounds per policy update. 1 = each round's own
                                         # reward (the original runs); H > 1 = discounted
                                         # returns over H rounds with reward.gamma
