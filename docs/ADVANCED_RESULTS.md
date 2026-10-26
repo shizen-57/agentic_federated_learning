@@ -895,8 +895,49 @@ manifest and both pins in one step. **GPU smoke groups** (`smoke_s2_*`: every
 `s2` condition, 5 rounds, seed 900, which no test uses) are run first on
 Kaggle to check the code end to end on a GPU before the long runs.
 
-**Checks of the re-frozen code (commit `434fe22`, fingerprint
-`c4c4c85c373f99b1`), each run from a frozen snapshot of that commit:**
+#### Sixth review (before any `s2_*` run)
+
+The fifth-review fixes were kept, with one change and stricter tests:
+
+1. **One round objective for ARL credit.** The fifth-review credit split is
+   valid but harder to justify. It is replaced in the `s2_*` runs by the
+   simplest consistent rule (`policy.credit_total`): the policy learns from
+   one round reward,
+   R_t = shared reward + sum over invited clients of client credit_i,
+   client credit_i = -0.5 z(loss_i) + 0.5 z(gain_i),
+   applied to the log-probability of the *whole* joint action (all picks and
+   modes), with a REINFORCE baseline equal to the mean of *previous* rounds'
+   rewards, updated after the round (`policy.prior_baseline`; originally the
+   current reward was folded in first). This is plain REINFORCE on R_t, so
+   it accounts for how one pick changes the value of the others. A test
+   enumerates every pick order and mode for 3 clients (2 picked) and checks
+   that the expected update equals the exact gradient of E[R]; the
+   constant-coverage case (3 of 3 picked) gives zero. The objective is
+   non-stationary in one respect, stated rather than hidden: z standardises
+   with running statistics and clips at +-3.
+2. **FAVOR and availability.** Besides the next-state mask, a round with
+   nobody online is now handled explicitly: no decision is made, and the
+   last decision's transition skips forward to the next round with a choice,
+   collecting the rewards in between discounted (r_1 + g r_2 + g^2 r_3 ...)
+   and bootstrapping with g^k after k rounds. Test: an offline client with
+   Q = 10^6 does not enter the target.
+3. **One timing helper** (`base.est_time`) is used by the engine,
+   FedCER-like and FedCG. Tests: workloads of 120 / 400 / 900 give Priority /
+   Standard / Light, with estimates ordered by mode.
+4. **Resume validation** in the older runner: truncated CSV, missing config,
+   changed setting and changed code each trigger a re-run (tested).
+5. **Last window:** a 23-round run with horizon 10 learns from 10 + 10 + 3
+   rounds; a 3-round run from 3 (tested).
+6. **Curves vs final scores:** curves, curve averages and rounds-to-target
+   all use one helper (`report.accuracy_curve`): `accuracy_fixed` when
+   logged; for older files the per-round accuracy without a final round that
+   switched test sets (when `fl.eval_subset > 0`); refused when that cannot
+   be checked (no saved config). Final headline scores keep full-test
+   `accuracy`. Tested with a final full-test score deliberately different
+   from the fixed-set curve.
+
+**Checks of the code frozen before the sixth review (commit `434fe22`,
+fingerprint `c4c4c85c373f99b1`; superseded), each run from a frozen snapshot:**
 
 - *Real-data smoke, CPU* (`smoke_s2_*`: CIFAR-10 and FEMNIST, all 23 `s2`
   conditions plus the 4 churn ones, 5 rounds, seed 900): 50 of 50 runs
@@ -924,11 +965,12 @@ For each invited client i in round t (S_t = the invited set):
 - W(m) = P(success | m) x local_epochs[m] for modes with P >= 0.5 (or the
   safest mode if none), else 0; best = the mode maximising W;
 - loss_i = m_i (W(best) - W(assigned)) / 4, gain_i = m_i Y_i;
-- `arl3_full`: the picks are credited with -0.5 z(sum loss) + 0.5 z(sum gain)
-  (the round's totals) and client i's mode with -0.5 z(loss_i) + 0.5 z(gain_i),
-  z = the robust, order-free normaliser above (fifth review, item 1);
-  `arl3_shared` puts -0.5 z(sum loss) + 0.5 z(sum gain) in the shared reward
-  instead.
+- `arl3_full`: the policy learns from R_t = shared reward + sum_i
+  (-0.5 z(loss_i) + 0.5 z(gain_i)), z = the robust, order-free normaliser
+  above, on the whole joint action, with a previous-rounds baseline (sixth
+  review, item 1); `arl3_shared` instead puts -0.5 z(sum loss) + 0.5 z(sum
+  gain) -- the round totals standardised once -- in the shared reward. The
+  two are different objectives and are reported as such.
 - The policy's inputs: the 12 original features with the corrected value
   input, plus the coverage client i adds to the clients already picked this
   round, plain and deficit-weighted, recomputed after each pick.

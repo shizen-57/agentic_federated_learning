@@ -946,12 +946,12 @@ def test_report_shows_how_many_runs_reach_the_target(tmp_path):
         with open(tmp_path / f"{name}.csv", "w", newline="") as fh:
             wr = csv.DictWriter(fh, fieldnames=["round", "accuracy", "cv", "jain", "fail_ratio",
                                                 "arl_online", "arl_oracle", "cost", "latency", "ece",
-                                                "reward"])
+                                                "reward", "accuracy_fixed"])
             wr.writeheader()
             for t, a in enumerate(accs, 1):
                 wr.writerow({"round": t, "accuracy": a, "cv": 0, "jain": 1, "fail_ratio": 0,
                              "arl_online": 0, "arl_oracle": 0, "cost": 0, "latency": 0, "ece": 0,
-                             "reward": 0})
+                             "reward": 0, "accuracy_fixed": a})
     write("A_s0", [0.1, 0.9])
     for s in range(1, 10):
         write(f"A_s{s}", [0.1, 0.2])

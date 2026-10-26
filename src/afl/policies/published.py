@@ -67,9 +67,10 @@ class FAVORPolicy(Policy):
                                      nn.Linear(h, self.N))
         self.tgt = copy.deepcopy(self.net)
         self.opt = torch.optim.Adam(self.net.parameters(), lr=1e-3)
-        self.buffer: list[tuple] = []       # (state, action, reward, next_state,
-                                            #  clients selectable in next_state)
-        self.pending = None                 # (state, actions, reward) awaiting s'
+        self.buffer: list[tuple] = []       # (state, action, discounted reward, next
+                                            #  state, clients selectable there, discount)
+        self.pending = None                 # last decision awaiting its next state:
+                                            # {s, acts, R (discounted reward so far), k}
         self.n_steps = 0
         self.V = None
 
@@ -102,14 +103,19 @@ class FAVORPolicy(Policy):
         K = min(self.cfg.fl.clients_per_round, self.N)
         s = self._state_vec(state["global_flat"])
         cands = pool(state, self.N)
-        # The bootstrap target may only use actions that were possible in the
-        # next state (the clients online then); with none, there is no bootstrap.
+        if not cands:
+            # No client is online: no decision is made this round. The last
+            # decision's transition skips forward to the next round with a
+            # choice, collecting (discounted) the rewards of the rounds between.
+            return [], {}
+        # The bootstrap target may only use actions possible in the next state.
         mask = torch.zeros(self.N, dtype=torch.bool, device=s.device)
         mask[cands] = True
         if self.pending is not None:
-            s_prev, acts, r = self.pending
-            for a in acts:
-                self.buffer.append((s_prev, a, r, s, mask))
+            p = self.pending
+            disc = self.cfg.policy.favor_gamma ** p["k"]
+            for a in p["acts"]:
+                self.buffer.append((p["s"], a, p["R"], s, mask, disc))
             self._train()
             self.pending = None
 
@@ -126,21 +132,24 @@ class FAVORPolicy(Policy):
                 sel.append(int(self.rng.choice(rest)))
             else:
                 sel.append(int(next(i for i in order if i not in sel)))
-        self.pending = (s, sel, None)
+        self.pending = {"s": s, "acts": sel, "R": 0.0, "k": 0}
         return sel, {i: "standard" for i in sel}
 
     def observe_outcome(self, state, action, reward, info):
         r = 64.0 ** (info["acc"] - self.target) - 1.0
         if self.pending is not None:
-            s, acts, _ = self.pending
-            self.pending = (s, acts, r)
+            # Reward of every round since the decision, discounted by how many
+            # rounds ago it was (k = 0 for the decision's own round).
+            self.pending["R"] += self.cfg.policy.favor_gamma ** self.pending["k"] * r
+            self.pending["k"] += 1
         base = info["base_flat"]
         for i, u in info["updates"].items():
             self.client[i] = self._proj(base + u)
 
-    def _targets(self, r: torch.Tensor, s2: torch.Tensor, m2: torch.Tensor, g: float) -> torch.Tensor:
+    def _targets(self, r: torch.Tensor, s2: torch.Tensor, m2: torch.Tensor, g) -> torch.Tensor:
         """Double-DQN targets, choosing the next action only among the clients
-        that were selectable in the next state; no bootstrap if there were none."""
+        that were selectable in the next state; no bootstrap if there were none.
+        g is the discount to the next state: gamma^k after k rounds."""
         with torch.no_grad():
             a2 = self.net(s2).masked_fill(~m2, -float("inf")).argmax(dim=1, keepdim=True)
             boot = self.tgt(s2).gather(1, a2).squeeze(1)
@@ -149,7 +158,6 @@ class FAVORPolicy(Policy):
     def _train(self, steps: int = 4, batch: int = 32, sync: int = 10) -> None:
         if len(self.buffer) < batch:
             return
-        g = self.cfg.policy.favor_gamma
         for _ in range(steps):
             idx = self.rng.choice(len(self.buffer), size=batch, replace=False)
             s = torch.stack([self.buffer[k][0] for k in idx])
@@ -157,7 +165,8 @@ class FAVORPolicy(Policy):
             r = torch.tensor([self.buffer[k][2] for k in idx], dtype=torch.float32, device=s.device)
             s2 = torch.stack([self.buffer[k][3] for k in idx])
             m2 = torch.stack([self.buffer[k][4] for k in idx])
-            y = self._targets(r, s2, m2, g)
+            disc = torch.tensor([self.buffer[k][5] for k in idx], dtype=torch.float32, device=s.device)
+            y = self._targets(r, s2, m2, disc)
             qsa = self.net(s).gather(1, a[:, None]).squeeze(1)
             loss = ((y - qsa) ** 2).mean()
             self.opt.zero_grad()

@@ -83,9 +83,11 @@ weak_random: &weak_random
 # did, every method picks from the clients that checked in, per-client credit
 # does not depend on processing order, and the eligibility gate keeps the
 # clients that pass it. Third review: normalised reward terms have a minimum
-# spread, a warm-up and a +-3 cap. Fifth review: per-client ARL credit goes to
-# the mode only (the pick gets the round's total), and FedCER-like estimates
-# round time with the workload. Every group from here on uses all of it.
+# spread, a warm-up and a +-3 cap. Fifth/sixth review: with per-client ARL
+# credit the policy learns from one round reward (shared reward + the sum of
+# the clients' credits) on the whole joint action, with a baseline from
+# previous rounds only; FedCER-like estimates round time with the workload.
+# Every group from here on uses all of it.
 sim2: &sim2
   fl.compress_upload: true
   policy.oort_estimated_time: true
@@ -99,7 +101,8 @@ sim2: &sim2
   reward.batch_client_norm: true
   reward.robust_norm: true
   policy.strict_gate: true
-  policy.credit_split: true
+  policy.credit_total: true
+  policy.prior_baseline: true
   policy.shared_time_estimate: true
 weak_rare_s2: &weak_rare_s2
   <<: [*weak_rare, *sim2]

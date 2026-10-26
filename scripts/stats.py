@@ -29,7 +29,7 @@ from collections import defaultdict
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from report import load  # noqa: E402
+from report import accuracy_curve, load, load_meta  # noqa: E402
 
 # (column, how to reduce a run to one number, higher is better)
 METRICS = [
@@ -114,10 +114,12 @@ def main() -> int:
     args = ap.parse_args()
 
     runs: dict[str, dict[int, list[dict]]] = defaultdict(dict)
+    metas: dict[str, dict[int, dict | None]] = defaultdict(dict)
     for path in sorted(glob.glob(os.path.join(args.dir, "*.csv"))):
         m = re.match(r"(.+)_s(\d+)$", os.path.basename(path)[:-4])
         if m:
             runs[m.group(1)][int(m.group(2))] = load(path)
+            metas[m.group(1)][int(m.group(2))] = load_meta(path)
     if args.ref not in runs:
         print(f"reference {args.ref} not found in {args.dir}/ (have {sorted(runs)})")
         return 1
@@ -125,12 +127,23 @@ def main() -> int:
 
     out_rows = []
     first = next(iter(runs[args.ref].values()))[0]
+    curve_mean: dict[tuple[str, int], float] = {}
     for col, how, higher in METRICS:
-        # A curve average must use one test population in every round: newer
-        # CSVs log accuracy_fixed for that; "accuracy" switches to the full
-        # test set at the final round.
-        if col == "accuracy" and how == "mean" and "accuracy_fixed" in first:
-            col = "accuracy_fixed"
+        if col == "accuracy" and how == "mean":
+            # A curve average must use one test population in every round
+            # (report.accuracy_curve); refuse it for runs that cannot show one.
+            ok = True
+            for c, by_seed in runs.items():
+                for sd, rows in by_seed.items():
+                    curve = accuracy_curve(rows, metas[c].get(sd))
+                    if curve is None:
+                        ok = False
+                    else:
+                        curve_mean[(c, sd)] = float(np.mean([a for _, a in curve]))
+            if not ok:
+                print("note: curve average skipped -- some runs have no fixed-test-set series\n")
+                continue
+            col = "accuracy_fixed" if "accuracy_fixed" in first else "accuracy"
         if col not in first:
             continue  # older CSVs predate acc_worst10
         label = f"{how}_{col}" if how == "mean" else f"final_{col}"
@@ -139,8 +152,12 @@ def main() -> int:
             seeds = sorted(set(runs[args.ref]) & set(runs.get(other, {})))
             if not seeds:
                 continue
-            a = np.array([reduce(runs[args.ref][s], col, how) for s in seeds])
-            b = np.array([reduce(runs[other][s], col, how) for s in seeds])
+            if how == "mean" and col in ("accuracy", "accuracy_fixed"):
+                a = np.array([curve_mean[(args.ref, s)] for s in seeds])
+                b = np.array([curve_mean[(other, s)] for s in seeds])
+            else:
+                a = np.array([reduce(runs[args.ref][s], col, how) for s in seeds])
+                b = np.array([reduce(runs[other][s], col, how) for s in seeds])
             d = a - b
             lo, hi = bootstrap_ci(d)
             recs.append({"metric": label, "other": other, "n": len(seeds),

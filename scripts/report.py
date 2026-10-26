@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import csv
 import glob
+import json
 import math
 import os
 import re
@@ -29,11 +30,46 @@ def load(path: str) -> list[dict]:
         return [{k: float(v) for k, v in row.items()} for row in csv.DictReader(fh)]
 
 
-def rounds_to_target(rows: list[dict], target: float) -> float:
-    col = "accuracy_fixed" if all("accuracy_fixed" in r for r in rows) else "accuracy"
-    for r in rows:
-        if r[col] >= target:
-            return r["round"]
+def load_meta(path: str) -> dict | None:
+    """The run's saved config (with provenance), or None if there is none."""
+    meta = path[:-4] + ".config.json"
+    if not os.path.exists(meta):
+        return None
+    with open(meta) as fh:
+        return json.load(fh)
+
+
+def accuracy_curve(rows: list[dict], meta: dict | None = None) -> list[tuple[float, float]] | None:
+    """(round, accuracy) pairs measured on one fixed test population, for curves,
+    curve averages and rounds-to-target -- or None if the file cannot provide one.
+
+    Newer CSVs log accuracy_fixed. In older ones, "accuracy" is the same test set
+    in every round unless a per-round subset was used (fl.eval_subset > 0), in
+    which case the final round switched to the full set and is left out; with
+    no saved config that cannot be checked, so the curve is refused.
+    """
+    if rows and all("accuracy_fixed" in r for r in rows):
+        return [(r["round"], r["accuracy_fixed"]) for r in rows]
+    if meta is None:
+        return None
+    fl = meta.get("fl", {})
+    if fl.get("val_frac", 0) > 0:
+        return None
+    pts = [(r["round"], r["accuracy"]) for r in rows]
+    if fl.get("eval_subset", 0) > 0 and rows and rows[-1]["round"] == fl.get("rounds"):
+        pts = pts[:-1]
+    return pts
+
+
+def rounds_to_target(rows: list[dict], target: float, meta: dict | None = None) -> float | None:
+    """First round whose fixed-population accuracy reaches target; NaN if never;
+    None if the file has no fixed-population series (see accuracy_curve)."""
+    curve = accuracy_curve(rows, meta)
+    if curve is None:
+        return None
+    for rnd, acc in curve:
+        if acc >= target:
+            return rnd
     return float("nan")
 
 
@@ -52,11 +88,13 @@ def main() -> int:
     args = ap.parse_args()
 
     groups: dict[str, list[list[dict]]] = defaultdict(list)
+    metas: dict[str, list[dict | None]] = defaultdict(list)
     for path in sorted(glob.glob(os.path.join(args.dir, "*.csv"))):
         name = os.path.basename(path)[:-4]
         if name == "summary" or name.startswith("stats_"):
             continue
         groups[re.sub(r"_s\d+$", "", name)].append(load(path))
+        metas[re.sub(r"_s\d+$", "", name)].append(load_meta(path))
 
     if not groups:
         print(f"no run CSVs found in {args.dir}/")
@@ -86,11 +124,16 @@ def main() -> int:
         # Rounds to target is only defined for runs that reach it, so always
         # report how many did: otherwise one lucky run out of ten would look
         # faster than ten runs that all get there a little later.
-        vals = [rounds_to_target(r, args.target) for r in runs]
-        good = [v for v in vals if not math.isnan(v)]
-        rec[f"reached_{args.target:g}"] = f"{len(good)}/{len(vals)}"
-        rec[f"rounds_to_{args.target:g}"] = (
-            (st.mean(good), st.stdev(good) if len(good) > 1 else 0.0) if good else (float("nan"), 0.0))
+        vals = [rounds_to_target(r, args.target, m) for r, m in zip(runs, metas[tag])]
+        if any(v is None for v in vals):
+            # No fixed test population in some run: refuse rather than mix sets.
+            rec[f"reached_{args.target:g}"] = "unsupported"
+            rec[f"rounds_to_{args.target:g}"] = (float("nan"), 0.0)
+        else:
+            good = [v for v in vals if not math.isnan(v)]
+            rec[f"reached_{args.target:g}"] = f"{len(good)}/{len(vals)}"
+            rec[f"rounds_to_{args.target:g}"] = (
+                (st.mean(good), st.stdev(good) if len(good) > 1 else 0.0) if good else (float("nan"), 0.0))
         if counts:
             rates = [invitation_failure_rate(r) for r in runs]
             defined = [v for v in rates if math.isfinite(v)]
@@ -108,8 +151,9 @@ def main() -> int:
         return str(v)
 
     if any("accuracy_fixed" not in row for runs in groups.values() for run in runs for row in run):
-        print("Legacy target times use accuracy, which may switch test sets at the last round; "
-              "new runs use accuracy_fixed.\n")
+        print("Older runs without accuracy_fixed: rounds to target use their per-round "
+              "accuracy minus any final round that switched test sets, and are marked "
+              "unsupported where that cannot be checked.\n")
     print("| " + " | ".join(cols) + " |")
     print("|" + "|".join(["---"] * len(cols)) + "|")
     for rec in out_rows:

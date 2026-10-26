@@ -63,7 +63,9 @@ class RLPolicy(Policy):
         self.use_cov = cfg.policy.coverage_features
         n_feat = len(FEATURES) + (1 if self.use_debt else 0) + (2 if self.use_cov else 0)
         self.clean = cfg.fl.clean_rng
-        if cfg.policy.horizon > 1 and cfg.policy.per_client_credit:
+        if cfg.policy.credit_total and cfg.policy.credit_split:
+            raise ValueError("policy.credit_total and policy.credit_split are alternatives")
+        if cfg.policy.horizon > 1 and cfg.policy.per_client_credit and not cfg.policy.credit_total:
             # The multi-round update only sees the shared reward, and with
             # per-client credit the damage term has been moved out of it, so
             # this combination would silently drop the ARL signal.
@@ -278,9 +280,16 @@ class RLPolicy(Policy):
             if len(self._window) >= self.cfg.policy.horizon:
                 self._update_window()
             return
-        self.baseline_n += 1
-        self.baseline += (reward - self.baseline) / self.baseline_n
-        advantage = reward - self.baseline
+        if self.cfg.policy.prior_baseline:
+            # Baseline from previous rounds only, so it does not depend on this
+            # round's action; then fold this round in.
+            advantage = reward - self.baseline
+            self.baseline_n += 1
+            self.baseline += (reward - self.baseline) / self.baseline_n
+        else:
+            self.baseline_n += 1
+            self.baseline += (reward - self.baseline) / self.baseline_n
+            advantage = reward - self.baseline
 
         loss = -(self._pending["logp"] * advantage) \
                - self.cfg.policy.entropy_coef * self._pending["entropy"]
@@ -322,9 +331,15 @@ class RLPolicy(Policy):
         returns.reverse()
         loss = 0.0
         for (logp, ent, _), g in zip(self._window, returns):
-            self.baseline_n += 1
-            self.baseline += (g - self.baseline) / self.baseline_n
-            loss = loss - logp * (g - self.baseline) - self.cfg.policy.entropy_coef * ent
+            if self.cfg.policy.prior_baseline:
+                adv = g - self.baseline
+                self.baseline_n += 1
+                self.baseline += (g - self.baseline) / self.baseline_n
+            else:
+                self.baseline_n += 1
+                self.baseline += (g - self.baseline) / self.baseline_n
+                adv = g - self.baseline
+            loss = loss - logp * adv - self.cfg.policy.entropy_coef * ent
         self.opt.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(self.net.parameters(), 5.0)

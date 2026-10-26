@@ -217,6 +217,17 @@ class PolicyCfg:
                                         # client's own term -- valid because, given the
                                         # picked set, client i's mode moves only its own
                                         # term
+    credit_total: bool = False          # protocol fix for per_client_credit (replaces
+                                        # credit_split in the s2 runs): the policy learns
+                                        # from one round reward, R = shared reward +
+                                        # sum_i client credit_i, applied to the whole
+                                        # joint pick-and-mode log-probability -- plain
+                                        # REINFORCE on that total, so it accounts for how
+                                        # one pick changes the value of the others
+    prior_baseline: bool = False        # protocol fix: the REINFORCE baseline is the mean
+                                        # of *previous* rounds' rewards, updated after the
+                                        # round; originally the current reward was folded
+                                        # into the baseline before it was subtracted
     shared_time_estimate: bool = False  # protocol fix: FedCER-like estimates a client's
                                         # round time with the same workload-scaled
                                         # formula as the engine (base.est_time); its own

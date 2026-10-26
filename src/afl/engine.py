@@ -862,6 +862,11 @@ class Experiment:
                 # round's action).
                 set_adv = (-r.lambda_arl * self.norm["v3s"].batch([arl_v3_loss])[0]
                            + r.lambda_cov * self.norm["v3sg"].batch([arl_v3_gain])[0])
+        if client_adv is not None and self.cfg.policy.credit_total:
+            # One round objective, R = shared reward + sum of the clients'
+            # standardised ARL credits, for the whole joint action.
+            reward = reward + float(sum(client_adv.values()))
+            client_adv, set_adv = None, None
         self.policy.observe_outcome(state, (selected, assign), reward, {
             "success": success, "client_adv": client_adv, "set_adv": set_adv, "t": t,
             # For the baselines that learn from what arrived (FAVOR, DELTA, REFL).

@@ -253,7 +253,7 @@ class FedCGPolicy(Policy):
     def _theta(self, state, i):
         sysc = self.cfg.system
         obs = state["obs"][i]
-        t_cmp = sysc.local_epochs["standard"] * (state["n_work"][i] / 1200.0) / max(obs["speed_hat"], 1e-3)
+        t_cmp = est_time(self.cfg, state, i, "standard", frac=0.0)   # compute part only
         budget = sysc.deadline * self.cfg.policy.fedcg_margin
         theta = (budget - t_cmp) * max(obs["bw_hat"], 1e-3) / 0.25
         return float(np.clip(theta, self.THETA_MIN, 1.0))

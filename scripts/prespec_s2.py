@@ -44,8 +44,8 @@ from sweep import ROOT, build_jobs, run_status  # noqa: E402
 
 # Fingerprint (afl.provenance.code_hash) of the simulator code the s2 runs
 # must have been made with, fixed when the design was frozen.
-FROZEN_CODE_HASH = "c4c4c85c373f99b1"
-FROZEN_MANIFEST_SHA256 = "a76f023352d068e40ec523014a95d3e617bfa07d896241bb2460888105cc2664"
+FROZEN_CODE_HASH = "fd90310c1b7c34e9"
+FROZEN_MANIFEST_SHA256 = "8d04e337909babbad5e61cf319a1a66384cd993922ef40be34a38ab9d7640ffe"
 MANIFEST_PATH = os.path.join(ROOT, "configs", "s2_frozen.json")
 MANIFEST_INPUTS = (
     "configs/sweep_advanced.yaml", "configs/adv/cifar10.yaml", "configs/adv/femnist.yaml",
