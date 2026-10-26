@@ -775,7 +775,8 @@ link).
    (`acc_client_measured = 1` in the log). On the Dirichlet splits (CIFAR-10,
    MNIST) clients have no data of their own beyond their label mix -- their
    images are draws from the same pool -- so the label-mixture value is
-   exactly a client's expected accuracy on its own data and is kept; it is
+   an estimate of a client's expected accuracy under the shared
+   class-conditional distribution assumption and is kept; it is
    always also logged as `acc_labelmix_worst10`. Test A2 is read that way:
    on FEMNIST it is about the worst-off writers, on CIFAR-10 about the
    clients with the worst label mixes. With ~16 held-out images per writer
@@ -791,6 +792,62 @@ link).
    source files changed while it ran is flagged (`code_changed_during_run`)
    and never reused or tested. On Kaggle each session runs a fresh clone, so
    nobody edits the code under a running sweep.
+
+#### Fourth review: direction, frozen inputs and consistent measurements
+
+The corrected protocol supersedes the `c8a91ef` simulator used by the MNIST
+development check below. The new simulator fingerprint and experiment inputs
+are recorded in `configs/s2_frozen.json`; `scripts/prespec_s2.py` pins that
+manifest's SHA-256 and the simulator fingerprint. Old CSVs are retained as
+historical evidence, but cannot be used for this confirmatory protocol.
+
+1. **A significant difference is not necessarily a win.** The existing
+   one-/two-sided alternatives and Holm families are unchanged. Reports now
+   distinguish **significantly better**, **significantly worse** (two-sided
+   tests only), **inconclusive**, and **no verdict**. Higher accuracy is better;
+   lower failure rate is better. A significantly losing method cannot pass.
+2. **The freeze includes the experiment inputs.** The manifest pins the
+   simulator, sweep YAML, referenced dataset configs, config-expansion and
+   reporting code, seeds, comparisons and metric directions. Missing or
+   mismatched pins, changed inputs, an unknown run fingerprint, or a different
+   simulator checkout produce no verdict. The valid-data fixture uses the
+   actual frozen hash; a consistent but incorrect hash is a negative test.
+3. **Budget and target comparisons use one fixed test population.** Each new
+   CSV logs `accuracy_fixed` on the same held-out examples in every round,
+   including the last, and `eval_fixed_n` records its size. `accuracy` retains
+   full-test-set final evaluation, as do final client metrics. The budget
+   script uses `accuracy_fixed` both for equal-spend comparisons and for
+   setting/reaching the Random-derived target. It refuses legacy CSVs missing
+   that series. The general report uses the fixed series for new runs and
+   labels the legacy fallback explicitly. No reported test score enters
+   learning when the validation split is enabled.
+4. **No invitations means no failed invitations.** An empty round has
+   `fail_ratio = 0` and `empty_round = 1`. Mean round-level failure remains the
+   specified endpoint in B/C2/D2; it must not be described as the fraction of
+   all invitations that failed. The descriptive report additionally computes
+   that fraction from total failures / total invitations within each seed,
+   reports empty-round counts, and marks zero-invitation seeds as undefined.
+   These counts concern on-time completion; late REFL deliveries remain
+   separately logged.
+5. **Acceptance rejection counts toward churn.** An update rejected by the
+   norm/staleness acceptance rule records `rejected`, so it increments the
+   failure streak instead of resetting it. A successful accepted update still
+   resets the streak.
+
+The robust normaliser warms up over **10 observations, not 10 rounds**.
+Per-client batches can reach that count earlier than round-level signals.
+
+Validation of this revision: **127 tests pass on CPU**, including complete
+20-seed fixtures where the reference loses on accuracy or failure rate,
+incorrect/unset fingerprints, changed manifest inputs, fixed-set evaluation
+through the final round, empty online pools and rejected-update churn. This
+does not replace a new MNIST development check or the full confirmatory sweep.
+
+When deliberately revising this protocol, first finish and review the code
+and config changes, recompute the simulator fingerprint and all manifest
+input digests, and update both pins together in one commit. Re-run the
+regression suite before starting new confirmatory runs. Do not re-freeze a
+protocol to admit existing results after inspecting their outcomes.
 
 #### ARL-v3 as frozen for the `s2_*` runs
 
@@ -811,16 +868,18 @@ For each invited client i in round t (S_t = the invited set):
   input, plus the coverage client i adds to the clients already picked this
   round, plain and deficit-weighted, recomputed after each pick.
 
-New per-run logs for "who benefits": `acc_client_worst10` (each client's
-expected accuracy on its own label mix -- reported per-class accuracy
-weighted by its class shares -- averaged over the worst 10% of clients),
+New per-run logs for "who benefits": `acc_client_worst10` (own held-out writer
+accuracy on FEMNIST; on CIFAR/MNIST, estimated expected accuracy from
+per-class held-out accuracy weighted by each client's label shares;
+averaged over the worst 10% of clients),
 `acc_client_weak`, `gap_max_all` / `gap_max_weak` (longest run of rounds
 without a contribution), and predictor calibration by mode and by weak /
 other clients (`ece_light`, ..., `ece_weak`, `ece_strong`).
 
 > **Pre-specified tests (fixed before any `s2_*` run; fresh seeds 100-119,
 > never used before; exact paired sign-flip; Holm within each family; a
-> test passes when its Holm-adjusted p < 0.05; no verdict unless every run
+> superiority requires Holm-adjusted p < 0.05 and a favourable difference;
+> two-sided significant adverse differences establish inferiority; no verdict unless every run
 > passes the validation in "Third review" item 2). Computed by
 > `python scripts/prespec_s2.py`:**
 >
@@ -847,16 +906,18 @@ other clients (`ece_light`, ..., `ece_weak`, `ece_strong`).
 > two-sided, in `s2_cifar` and `s2_femnist` (6 tests). **D2.** The same
 > 6 pairs on mean `fail_ratio`.
 >
-> Not passing a test means "not shown", never "shown equal". Everything else
+> An inconclusive test means "not shown", never "shown equal". A significantly
+> worse result is reported as such. Everything else
 > is descriptive, including `s2_main_*` (no weak clients), `arl3_shared`,
 > the set-level coverage loss, gaps, calibration, and the **equal-spend
 > analysis** (`python scripts/budget_s2.py --dir results/adv/<group>`):
-> each method's accuracy at the cumulative cost where the cheapest method
-> of that seed stopped, and the cost to first reach 90% of Random's final
-> accuracy -- which separates better decisions from simply training less.
+> each method's fixed-set accuracy at its last checkpoint within the cheapest
+> method's total spend for that seed, with actual budget use shown; and the
+> cost to first reach 90% of Random's final fixed-set accuracy. Both comparisons
+> use `accuracy_fixed`, including at the final round.
 
-**Development check (`dev_s2_mnist`, seeds 0-2, CPU, all fixes on; bug
-check only, nothing was changed afterwards):** run from a frozen snapshot of
+**Historical development check (`dev_s2_mnist`, seeds 0-2, CPU, fixes through
+the third review; bug check only, predating the fourth-review changes):** run from a frozen snapshot of
 commit `c8a91ef`; 69 of 69 runs finished, no errors or NaNs, one code
 fingerprint (`cf531573f0858241`), every method started from the same model
 within each seed (3 distinct initial models for 3 seeds), no mid-run source

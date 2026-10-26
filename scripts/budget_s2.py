@@ -10,11 +10,14 @@ Descriptive (not pre-specified), fixed before the s2_* runs. For one group:
   within B counts as missing). A policy that is cheap only because it trains
   less gains nothing here.
 - cost to a target: cumulative cost until accuracy first reaches
-  T = 0.9 x the mean final accuracy of b_random in the group (share of seeds
+  T = 0.9 x the mean final fixed-set accuracy of b_random in the group (share of seeds
   that reach it, and the median cost among those that do).
 
 Paired sign-flip p-values against --ref are shown for the equal-spend
 accuracy only, and are exploratory.
+Both analyses require accuracy_fixed, evaluated on the same examples every
+round including the last. Legacy CSVs without this series must be re-run;
+the mixed subset/full-set accuracy column is deliberately not substituted.
 
     python scripts/budget_s2.py --dir results/adv/s2_cifar
 """
@@ -43,12 +46,22 @@ def main() -> int:
     for path in sorted(glob.glob(os.path.join(args.dir, "*.csv"))):
         m = re.match(r"(.+)_s(\d+)$", os.path.basename(path)[:-4])
         if m:
-            runs[m.group(1)][int(m.group(2))] = load(path)
+            rows = load(path)
+            if not rows or any("accuracy_fixed" not in r or
+                               not np.isfinite(r["accuracy_fixed"]) or
+                               not np.isfinite(r.get("cost", float("nan"))) or r["cost"] < 0
+                               for r in rows):
+                print(f"cannot compare budgets: {path} needs finite accuracy_fixed and nonnegative cost; re-run legacy results")
+                return 1
+            runs[m.group(1)][int(m.group(2))] = rows
+    if not runs:
+        print("need complete seeds and b_random")
+        return 1
     seeds = sorted(set.intersection(*[set(v) for v in runs.values()]))
     if not seeds or "b_random" not in runs:
         print("need complete seeds and b_random")
         return 1
-    target = 0.9 * np.mean([runs["b_random"][s][-1]["accuracy"] for s in seeds])
+    target = 0.9 * np.mean([runs["b_random"][s][-1]["accuracy_fixed"] for s in seeds])
     at_budget: dict[str, dict[int, float]] = defaultdict(dict)
     used: dict[str, list[float]] = defaultdict(list)
     to_target: dict[str, list[float]] = defaultdict(list)
@@ -60,17 +73,17 @@ def main() -> int:
                 cum += r["cost"]
                 if cum > B + 1e-9:
                     break
-                last, spent = r["accuracy"], cum
+                last, spent = r["accuracy_fixed"], cum
             if last is not None:
                 at_budget[c][s] = last
                 used[c].append(spent / B if B > 0 else 1.0)
             cum = 0.0
             for r in runs[c][s]:
                 cum += r["cost"]
-                if r["accuracy"] >= target:
+                if r["accuracy_fixed"] >= target:
                     to_target[c].append(cum)
                     break
-    print(f"# {args.dir}: {len(seeds)} seeds; target accuracy {target:.3f}\n")
+    print(f"# {args.dir}: {len(seeds)} seeds; target accuracy {target:.3f} (accuracy_fixed)\n")
     print(f"| condition | acc at equal spend | seeds | share of budget used | diff vs {args.ref} "
           "| p | reach target | median cost to target |")
     print("|---|---|---|---|---|---|---|---|")

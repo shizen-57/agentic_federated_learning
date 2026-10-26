@@ -30,8 +30,8 @@ from .provenance import LOADED as CODE_LOADED, code_hash
 from .sim import ClientEnv
 
 LOG_FIELDS = [
-    "round", "accuracy", "acc_worst10", "test_loss", "reward", "cost", "latency",
-    "n_selected", "n_success", "fail_ratio", "arl_online", "arl_selected", "arl_oracle",
+    "round", "accuracy", "accuracy_fixed", "eval_fixed_n", "acc_worst10", "test_loss", "reward", "cost", "latency",
+    "n_selected", "n_success", "fail_ratio", "empty_round", "arl_online", "arl_selected", "arl_oracle",
     "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
     "mode_priority", "weak_selected", "weak_success", "late_delivered",
     "budget_dropped", "debt_mean", "arl_v2", "departed",
@@ -580,6 +580,7 @@ class Experiment:
                 x, y = self._client_xy(i)
                 if len(y) == 0:
                     ok = False
+                    reasons[i] = "rejected"
                 else:
                     gs = {} if want_var else None
                     upd, n_steps = local_train(
@@ -599,6 +600,7 @@ class Experiment:
                             grad_var[i] = gs["var"]
                     else:
                         ok = False
+                        reasons[i] = "rejected"
             elif (self.cfg.fl.async_late and out["reason"] == "deadline"
                   and self.env.late_ok(i, mode, frac)):
                 # Too slow for this round, but done within the staleness bound:
@@ -687,20 +689,21 @@ class Experiment:
                 self.hist_sketch[i] = self._sketch(u)
                 self.has_hist[i] = True
 
-        # The reward always sees the same evaluation set from round to round
-        # (the subset, if one is configured) so dAcc never mixes two test sets;
-        # only the logged accuracy of the final round switches to the full set.
+        # Keep a fixed held-out evaluation series for budget/target comparisons.
+        # Final headline accuracy and client metrics still use the full test set.
+        # Evaluate it last so _last_* describes the reported client population.
         if self.val_idx is not None:
             # Reward and learning baselines see the validation set only; the
             # reported accuracy is computed afterwards and never fed back.
             acc_r, _, _ = self._evaluate(idx=self.val_idx)
-            acc, test_loss, acc_worst = self._evaluate(full=(t == self.cfg.fl.rounds))
+            acc, test_loss, acc_worst = self._evaluate(full=False)
         else:
             acc_r, loss_r, worst_r = self._evaluate(full=False)
-            if t == self.cfg.fl.rounds and self.eval_idx is not None:
-                acc, test_loss, acc_worst = self._evaluate(full=True)
-            else:
-                acc, test_loss, acc_worst = acc_r, loss_r, worst_r
+            acc, test_loss, acc_worst = acc_r, loss_r, worst_r
+        acc_fixed = acc
+        eval_fixed_n = len(self._last_ok) if self._last_ok is not None else 0
+        if t == self.cfg.fl.rounds and self.eval_idx is not None:
+            acc, test_loss, acc_worst = self._evaluate(full=True)
         d_acc = acc_r - (self._prev_acc_r if self._prev_acc_r is not None else acc_r)
         self._prev_acc_r = acc_r
 
@@ -727,7 +730,9 @@ class Experiment:
         cv = M.cv_fairness(self.x_succ)          # successful-contribution CV (core metric, Eq. 3.32)
         cv_sel = M.cv_fairness(self.x_sel)        # raw-selection-count CV (Task 2 ablation comparator)
         n_succ = int(sum(success.values()))
-        fail_ratio = 1.0 - n_succ / max(len(selected), 1)
+        # No invitations means no failed invitations. Log empty rounds so a
+        # zero here cannot be mistaken for evidence of successful service.
+        fail_ratio = 1.0 - n_succ / len(selected) if selected else 0.0
 
         # Now safe to apply this round's real energy spend -- after the oracle
         # diagnostic above has queried every client's pre-spend state.
@@ -861,10 +866,11 @@ class Experiment:
         weak = self.env.weak
         row = {
             "round": t, "accuracy": acc, "acc_worst10": acc_worst,
+            "accuracy_fixed": acc_fixed, "eval_fixed_n": eval_fixed_n,
             "test_loss": test_loss, "reward": reward,
             "cost": round_cost, "latency": latency,
             "n_selected": len(selected), "n_success": n_succ,
-            "fail_ratio": fail_ratio,
+            "fail_ratio": fail_ratio, "empty_round": int(not selected),
             "arl_online": arl_on, "arl_selected": arl_sel, "arl_oracle": arl_or,
             "cv": cv, "cv_selection": cv_sel, "jain": M.jain(self.x_succ),
             "ece": M.calibration_error(self.cal_probs[-200:], self.cal_out[-200:]),

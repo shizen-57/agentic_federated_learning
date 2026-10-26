@@ -1028,10 +1028,10 @@ def test_equal_spend_never_gives_a_method_more_than_the_budget(tmp_path):
     import csv, subprocess
     def write(name, costs, accs):
         with open(tmp_path / f"{name}.csv", "w", newline="") as fh:
-            wr = csv.DictWriter(fh, fieldnames=["round", "cost", "accuracy"])
+            wr = csv.DictWriter(fh, fieldnames=["round", "cost", "accuracy", "accuracy_fixed"])
             wr.writeheader()
             for t, (c, a) in enumerate(zip(costs, accs), 1):
-                wr.writerow({"round": t, "cost": c, "accuracy": a})
+                wr.writerow({"round": t, "cost": c, "accuracy": a, "accuracy_fixed": a})
     write("b_random_s0", [5, 5], [0.3, 0.4])               # spends 10 in total
     write("c2_rl_fedprox_s0", [9, 9, 9], [0.5, 0.9, 0.95])  # 9 <= 10 < 18
     out = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "budget_s2.py"),
@@ -1071,12 +1071,13 @@ def _fake_s2_runs(root, plan_jobs, family_tests, value, bad=None):
     """Write valid-looking runs (exact planned config, all rounds) for a family."""
     import json, csv
     from sweep import expected_config
+    from prespec_s2 import FROZEN_CODE_HASH
     for (g, cond, seed), raw in plan_jobs.items():
         if not any(g == t[0] and cond in (t[1], t[2]) for t in family_tests):
             continue
         os.makedirs(raw["out"], exist_ok=True)
         meta = expected_config(raw)
-        meta["code_hash"] = "abc"
+        meta["code_hash"] = FROZEN_CODE_HASH
         T = meta["fl"]["rounds"]
         col = family_tests[0][3]
         v = value(cond)
@@ -1088,6 +1089,8 @@ def _fake_s2_runs(root, plan_jobs, family_tests, value, bad=None):
             meta["fl"]["rounds"] = 1
         if bad == "nohash":
             meta.pop("code_hash")
+        if bad == "wronghash":
+            meta["code_hash"] = "0" * 16
         if bad == "protocol_off":
             meta["fl"]["val_frac"] = 0.0
         with open(os.path.join(raw["out"], raw["tag"] + ".csv"), "w", newline="") as fh:
@@ -1098,7 +1101,7 @@ def _fake_s2_runs(root, plan_jobs, family_tests, value, bad=None):
             json.dump(meta, fh)
 
 
-@pytest.mark.parametrize("bad", [None, "nan", "short", "nohash", "protocol_off"])
+@pytest.mark.parametrize("bad", [None, "nan", "short", "nohash", "wronghash", "protocol_off"])
 def test_confirmatory_report_accepts_only_valid_complete_runs(tmp_path, bad):
     import subprocess
     import prespec_s2
@@ -1110,6 +1113,6 @@ def test_confirmatory_report_accepts_only_valid_complete_runs(tmp_path, bad):
                           "--root", str(tmp_path)], capture_output=True, text=True, cwd=ROOT).stdout
     fam_a = out.split("## Family A ")[1].split("## Family")[0]
     if bad is None:
-        assert "INCOMPLETE" not in fam_a and fam_a.count("| yes |") == 4
+        assert "INCOMPLETE" not in fam_a and fam_a.count("| significantly better |") == 4
     else:
-        assert "INCOMPLETE" in fam_a and "| yes |" not in fam_a
+        assert "INCOMPLETE" in fam_a and "| significantly better |" not in fam_a

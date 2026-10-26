@@ -30,10 +30,18 @@ def load(path: str) -> list[dict]:
 
 
 def rounds_to_target(rows: list[dict], target: float) -> float:
+    col = "accuracy_fixed" if all("accuracy_fixed" in r for r in rows) else "accuracy"
     for r in rows:
-        if r["accuracy"] >= target:
+        if r[col] >= target:
             return r["round"]
     return float("nan")
+
+
+def invitation_failure_rate(rows: list[dict]) -> float:
+    """Fraction of invitations that failed on time; empty runs have no rate."""
+    invited = sum(r["n_selected"] for r in rows)
+    return (sum(r["n_selected"] - r["n_success"] for r in rows) / invited
+            if invited else float("nan"))
 
 
 def main() -> int:
@@ -59,8 +67,12 @@ def main() -> int:
     # acc_worst10 only exists in CSVs written after the advanced-sweep upgrade.
     final = FINAL + (["acc_worst10"] if all("acc_worst10" in r[0][0] for r in groups.values())
                      else [])
+    counts = all("n_selected" in row and "n_success" in row
+                 for runs in groups.values() for run in runs for row in run)
     cols = ["run", "seeds"] + [f"final_{k}" for k in final] + \
            [f"mean_{k}" for k in MEANS] + [f"reached_{args.target:g}", f"rounds_to_{args.target:g}"]
+    if counts:
+        cols += ["invitation_fail_ratio", "invitation_rate_seeds", "empty_rounds"]
 
     for tag in sorted(groups):
         runs = groups[tag]
@@ -79,6 +91,15 @@ def main() -> int:
         rec[f"reached_{args.target:g}"] = f"{len(good)}/{len(vals)}"
         rec[f"rounds_to_{args.target:g}"] = (
             (st.mean(good), st.stdev(good) if len(good) > 1 else 0.0) if good else (float("nan"), 0.0))
+        if counts:
+            rates = [invitation_failure_rate(r) for r in runs]
+            defined = [v for v in rates if math.isfinite(v)]
+            rec["invitation_fail_ratio"] = (
+                (st.mean(defined), st.stdev(defined) if len(defined) > 1 else 0.0)
+                if defined else (float("nan"), 0.0))
+            rec["invitation_rate_seeds"] = f"{len(defined)}/{len(runs)}"
+            empty = [sum(row["n_selected"] == 0 for row in r) for r in runs]
+            rec["empty_rounds"] = (st.mean(empty), st.stdev(empty) if len(empty) > 1 else 0.0)
         out_rows.append(rec)
 
     def fmt(v):
@@ -86,6 +107,9 @@ def main() -> int:
             return "n/a" if v[0] != v[0] else f"{v[0]:.3f} ± {v[1]:.3f}"
         return str(v)
 
+    if any("accuracy_fixed" not in row for runs in groups.values() for run in runs for row in run):
+        print("Legacy target times use accuracy, which may switch test sets at the last round; "
+              "new runs use accuracy_fixed.\n")
     print("| " + " | ".join(cols) + " |")
     print("|" + "|".join(["---"] * len(cols)) + "|")
     for rec in out_rows:
