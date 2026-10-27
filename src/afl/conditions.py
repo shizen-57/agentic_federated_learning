@@ -102,6 +102,11 @@ CONDITIONS: dict[str, dict] = {
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3", "policy.per_client_credit": True,
                               "policy.mode_mask": "feasible"},
+    # RL2 M1: ARL-v3 with predictor v2 and the Thompson gate (docs/RL2_DESIGN.md C1+C2).
+    "arl3_full_pg":          {"policy.name": "rl", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3", "policy.per_client_credit": True,
+                              "policy.predictor": "v2", "policy.gate_mode": "thompson"},
     "arl3_shared":           {"policy.name": "rl", "fl.aggregator": "fedprox",
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3"},

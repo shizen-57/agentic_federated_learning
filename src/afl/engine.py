@@ -25,7 +25,7 @@ from .local import accepted, local_train
 from .models import build_model, get_flat, set_flat
 from .policies import build_policy
 from .policies.base import best_work_mode, est_time, mode_by_rule
-from .predictor import SuccessPredictor
+from .predictor import SuccessPredictor, SuccessPredictorV2
 from .provenance import LOADED as CODE_LOADED, code_hash
 from .sim import ClientEnv
 from .diagnostics import DiagWriter, norm_state
@@ -70,7 +70,16 @@ class Experiment:
         self.d = build_data(cfg)
         self.N = cfg.data.num_clients
         self.env = ClientEnv(cfg, self.d["n_i"], cfg.seed, sketch=self.d["sketch"])
-        self.predictor = SuccessPredictor(cfg)
+        if cfg.policy.predictor not in ("v1", "v2"):
+            raise ValueError(f"unknown policy.predictor {cfg.policy.predictor}")
+        if cfg.policy.gate_mode not in ("top", "thompson"):
+            raise ValueError(f"unknown policy.gate_mode {cfg.policy.gate_mode}")
+        if cfg.policy.gate_mode == "thompson" and cfg.policy.predictor != "v2":
+            raise ValueError("policy.gate_mode=thompson needs policy.predictor=v2")
+        self.pv2 = cfg.policy.predictor == "v2"
+        self.predictor = SuccessPredictorV2(cfg) if self.pv2 else SuccessPredictor(cfg)
+        # Own stream for the Thompson gate, so it never shifts any other draw.
+        self.gate_rng = np.random.default_rng(cfg.seed + 7100)
         self.policy = build_policy(cfg)
         # Opt-in diagnostic sidecars; reading only, never changes the run.
         self.diag = DiagWriter(cfg.out, cfg.tag) if cfg.diag.enabled else None
@@ -243,16 +252,27 @@ class Experiment:
             }
             for i in range(self.N)
         }
-        if self.cfg.policy.predictor_norm == "round":
+        if self.cfg.policy.predictor_norm == "round" or self.pv2:
             self.predictor.set_reference(np.array(
                 [self.predictor.client_features(obs[i], hist[i]) for i in range(self.N)]))
-        p_succ = {
-            i: {m: self.predictor.predict(obs[i], hist[i], m) for m in self.cfg.system.modes}
-            for i in range(self.N)
-        }
+        p_sd = None
+        if self.pv2:
+            post = {i: {m: self.predictor.predict_client(i, obs[i], hist[i], m)
+                        for m in self.cfg.system.modes} for i in range(self.N)}
+            p_succ = {i: {m: v[0] for m, v in post[i].items()} for i in range(self.N)}
+            p_sd = {i: {m: v[1] for m, v in post[i].items()} for i in range(self.N)}
+        else:
+            p_succ = {
+                i: {m: self.predictor.predict(obs[i], hist[i], m) for m in self.cfg.system.modes}
+                for i in range(self.N)
+            }
         # e^elig_{i,t} (Eq. 3.26): at least one mode clears the threshold.
+        # Gate v2 (thompson): on the optimistic bound p + z*sd, so a client the
+        # predictor knows little about is not written off.
+        z = self.cfg.policy.gate_z if self.cfg.policy.gate_mode == "thompson" else 0.0
         eligible = {
-            i: int(max(p_succ[i].values()) >= self.cfg.policy.elig_threshold)
+            i: int(max(p_succ[i][m] + (z * p_sd[i][m] if p_sd else 0.0)
+                       for m in self.cfg.system.modes) >= self.cfg.policy.elig_threshold)
             for i in range(self.N)
         }
         # True round time under this round's draws -- what the original Oort
@@ -274,6 +294,10 @@ class Experiment:
         noise = self.fc_rng.random(self.N)
         state = {
             "obs": obs, "hist": hist, "p_succ": p_succ, "eligible": eligible,
+            "p_sd": p_sd, "gate_rng": self.gate_rng,
+            "p_post": ({i: {m: self.predictor.posterior(i, obs[i], hist[i], m)
+                            for m in self.cfg.system.modes} for i in range(self.N)}
+                       if self.cfg.policy.gate_mode == "thompson" else None),
             "t_expected": t_expected, "t_est": t_est, "n_i": self.d["n_i"],
             "avail_forecast": np.where(wrong, noise, fc),
             "n_late": len(self.late),
@@ -651,7 +675,10 @@ class Experiment:
                     recv_ids.append(i)
 
             # The predictor learns from every issued invitation, success or not.
-            self.predictor.update(state["obs"][i], state["hist"][i], mode, int(ok))
+            if self.pv2:
+                self.predictor.update_client(i, state["obs"][i], state["hist"][i], mode, int(ok))
+            else:
+                self.predictor.update(state["obs"][i], state["hist"][i], mode, int(ok))
             self.cal_probs.append(state["p_succ"][i][mode])
             self.cal_out.append(int(ok))
             self.cal_mode.append(mode)

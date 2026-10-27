@@ -189,6 +189,13 @@ class RewardCfg:
 class PolicyCfg:
     name: str = "rl"                    # random | fedcs | powerofchoice | oort | rl
     elig_threshold: float = 0.5         # e^elig_{i,t} gate (Sec. 3.10)
+    predictor: str = "v1"               # v1: the original success predictor; v2: standardised
+                                        # features + per-client Beta correction + uncertainty
+                                        # (afl.predictor.SuccessPredictorV2, RL2 design C1)
+    gate_mode: str = "top"              # top: gate fallback = highest predicted success (original);
+                                        # thompson: eligibility on p + gate_z*sd and fallback
+                                        # by Thompson sampling (needs predictor v2; RL2 C2)
+    gate_z: float = 1.0
     mode_mask: str = "none"             # none: the RL policy may draw any mode (original).
                                         # feasible: only modes whose predicted success is
                                         # >= elig_threshold (else only the most likely

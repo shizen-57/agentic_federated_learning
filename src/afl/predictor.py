@@ -79,3 +79,49 @@ class SuccessPredictor:
         self.w -= self.lr * (g * f + self.l2 * self.w)
         self.b -= self.lr * g
         self.seen += 1
+
+
+class SuccessPredictorV2(SuccessPredictor):
+    """Predictor v2 (docs/RL2_DESIGN.md, C1): the shared logistic model on
+    standardised features, corrected per client and mode by the client's own
+    record, with an uncertainty estimate.
+
+    - The shared model is blended with the cold-start prior smoothly,
+      seen / (seen + c), instead of switching it off at 20 observations (the
+      round-3 cliff in docs/DIAGNOSTIC_FINDINGS.md).
+    - Per (client, mode), successes s and failures f give a Beta posterior
+      with the shared prediction p0 as its mean and strength k:
+      a = s + k*p0, b = f + k*(1 - p0), p = a / (a + b). A client's own
+      record outweighs the shared model only as evidence builds up.
+    - sd is the posterior standard deviation; the gate and the safety layer
+      use it so uncertain predictions are not trusted as if certain.
+    """
+
+    def __init__(self, cfg, dim: int = 9, lr: float = 0.08, l2: float = 1e-4,
+                 k: float = 5.0, prior: float = 0.7, prior_strength: float = 20.0):
+        super().__init__(cfg, dim, lr, l2)
+        self.norm = "round"                 # v2 always standardises client features
+        self.k, self.prior, self.c = k, prior, prior_strength
+        self.s: dict[tuple[int, str], float] = {}
+        self.f: dict[tuple[int, str], float] = {}
+
+    def shared(self, obs: dict, hist: dict, mode: str) -> float:
+        z = float(self.features(obs, hist, mode) @ self.w + self.b)
+        p = 1.0 / (1.0 + np.exp(-np.clip(z, -30, 30)))
+        return (self.seen * p + self.c * self.prior) / (self.seen + self.c)
+
+    def posterior(self, i: int, obs: dict, hist: dict, mode: str) -> tuple[float, float]:
+        p0 = self.shared(obs, hist, mode)
+        a = self.s.get((i, mode), 0.0) + self.k * p0
+        b = self.f.get((i, mode), 0.0) + self.k * (1.0 - p0)
+        return a, b
+
+    def predict_client(self, i: int, obs: dict, hist: dict, mode: str) -> tuple[float, float]:
+        a, b = self.posterior(i, obs, hist, mode)
+        n = a + b
+        return a / n, float(np.sqrt(a * b / (n * n * (n + 1.0))))
+
+    def update_client(self, i: int, obs: dict, hist: dict, mode: str, y: int) -> None:
+        self.update(obs, hist, mode, y)
+        d = self.s if y else self.f
+        d[(i, mode)] = d.get((i, mode), 0.0) + 1.0
