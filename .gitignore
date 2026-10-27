@@ -13,3 +13,4 @@ results/adv/*.log
 results/adv/**/*.part
 *.egg-info/
 .venv/
+runs/

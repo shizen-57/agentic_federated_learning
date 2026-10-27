@@ -174,7 +174,9 @@ Do **not** run another full sweep or redesign ARL yet.
    spend. Do not reuse inspected seeds (100–119) alone.
 
 Immediate coding task: tag + opt-in diagnostic logging + seed-113
-reproduction. Steps 2–4 run on CPU here; no GPU needed.
+reproduction. Steps 2–4 can run on CPU here; the dept GPU is used first for
+step 2 (`dept_gpu.sh repro113`, frozen code) — status: waiting for the user
+to run it and send back the results.
 
 ## 9. Compute notes
 
@@ -184,8 +186,17 @@ reproduction. Steps 2–4 run on CPU here; no GPU needed.
 - Estimates (4 parallel): fixed C2 + ARL-v3 on CIFAR+FEMNIST, 20 seeds = 80
   runs ≈ 40 min; core 16-method comparison = 640 runs ≈ 4.3 h; full s2 redo ≈
   10–11 h. Runner skips finished runs, so work can be split across days.
-- Free GPU options discussed: Kaggle (used), Colab, and others; the user has
-  limited access to the dept GPU, so keep GPU jobs minimal.
+- Free GPU options discussed: Kaggle (used), Colab, and others.
+- **Dept GPU server** (access since 2026-10-27, via SSH; login details are
+  kept by the user, never stored in the repo or this file). Server rules:
+  install only into our own conda env (`afl`), never the base env; never
+  change NVIDIA drivers (ask mosaddek@du.ac.bd if needed); files are deleted
+  periodically, so copy results home after every session.
+- Helper: `scripts/dept_gpu.sh` with steps `setup` (conda env, PyTorch for
+  the installed driver, FEMNIST + CIFAR data), `check` (GPU, cores, timing),
+  `repro113` (FEMNIST seed 113, all 23 methods, frozen code), `lockseeds`
+  (seeds 103 110 112 116), `pack` (tar.gz of `runs/`). Run inside tmux.
+  On this CPU container a FEMNIST run takes ~7 min alone.
 
 ## 10. Open questions / next decisions
 
