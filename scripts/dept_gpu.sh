@@ -7,6 +7,8 @@
 #   bash scripts/dept_gpu.sh check      # GPU visible? cores? one quick timing
 #   bash scripts/dept_gpu.sh repro113   # FEMNIST seed 113, all 23 methods (~10 min)
 #   bash scripts/dept_gpu.sh lockseeds  # the other lock-up seeds 103 110 112 116 (~30 min)
+#   bash scripts/dept_gpu.sh diag short # collapse diagnostics, 8 runs x 30 rounds
+#   bash scripts/dept_gpu.sh diag full  # the same 8 runs at the full 200 rounds
 #   bash scripts/dept_gpu.sh pack       # pack the results to copy back home
 #
 # Server rules this script follows: everything goes into our own conda env
@@ -80,6 +82,14 @@ lockseeds)
     python scripts/sweep.py --groups s2_femnist --seeds 103 110 112 116 --out "$OUT/lockseeds" \
         --jobs "$JOBS" --set fl.device=auto 2>&1 | tee -a "$OUT/lockseeds.log"
     ;;
+diag)
+    activate; jobs_default; mkdir -p "$OUT"
+    python scripts/diagnose_collapse.py --variant "${2:-short}" --jobs "$JOBS" \
+        --set fl.device=auto --out "$OUT/diagnostic_v1" 2>&1 | tee -a "$OUT/diag.log"
+    python scripts/report_diagnostics.py "$OUT/diagnostic_v1/${2:-short}" \
+        > "$OUT/diagnostic_v1/${2:-short}/report.md"
+    echo "report: $OUT/diagnostic_v1/${2:-short}/report.md"
+    ;;
 pack)
     stamp=$(date +%Y%m%d_%H%M)
     tar -czf "results_$stamp.tar.gz" "$OUT"
@@ -88,6 +98,6 @@ pack)
     echo "  scp -P <port> <user>@<server>:$(pwd)/results_$stamp.tar.gz ."
     ;;
 *)
-    sed -n '2,15p' "$0"; exit 1
+    sed -n '2,17p' "$0"; exit 1
     ;;
 esac

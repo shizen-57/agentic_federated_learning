@@ -150,3 +150,14 @@ def test_sidecars_are_parts_until_the_run_is_saved(tmp_path):
     assert sum(f.endswith(".jsonl") for f in files) == 3 and not [f for f in files if f.endswith(".part")]
     meta = json.load(open(os.path.join(raw["out"], raw["tag"] + ".config.json")))
     assert meta["diag"] == {"enabled": True}
+
+
+def test_diagnostic_runs_differ_from_the_s2_runs_only_where_intended():
+    import subprocess
+    for variant, diff in (("short", "diag.enabled, fl.rounds, out"), ("full", "diag.enabled, out")):
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "diagnose_collapse.py"),
+                            "--dry-run", "--variant", variant, "--out", "/nonexistent"],
+                           capture_output=True, text=True, cwd=ROOT)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert r.stdout.count(f"differs from s2 in: {diff}\n") == 8
+        assert "UNEXPECTED" not in r.stdout
