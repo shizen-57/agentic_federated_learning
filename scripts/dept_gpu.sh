@@ -24,6 +24,16 @@ activate() {
     # shellcheck disable=SC1091
     source "$(conda info --base)/etc/profile.d/conda.sh"
     conda activate "$ENV"
+    in_own_env
+}
+
+# Server rule: never install into (or run from) the base environment.
+in_own_env() {
+    local want; want="$(conda info --base)/envs/$ENV"
+    if [ "${CONDA_DEFAULT_ENV:-}" != "$ENV" ] || [ "$(python -c 'import sys; print(sys.prefix)')" != "$want" ]; then
+        echo "STOP: not inside the '$ENV' conda env (python is $(command -v python)); nothing installed."
+        exit 1
+    fi
 }
 
 jobs_default() {
@@ -39,6 +49,7 @@ setup)
     source "$(conda info --base)/etc/profile.d/conda.sh"
     conda env list | grep -q "^$ENV " || conda create -y -n "$ENV" python=3.11
     conda activate "$ENV"
+    in_own_env
     # Pick a PyTorch build the installed driver supports; never change the driver.
     cuda=$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9]*\)\.\([0-9]*\).*/\1\2/p' | head -1)
     if [ -z "$cuda" ]; then echo "nvidia-smi shows no CUDA version"; exit 1; fi
@@ -46,8 +57,9 @@ setup)
     elif [ "$cuda" -ge 118 ]; then idx=cu118
     else echo "Driver supports CUDA ${cuda:0:2}.${cuda:2}: too old for current PyTorch. Ask the admin; do not update the driver yourself."; exit 1
     fi
-    pip install --index-url "https://download.pytorch.org/whl/$idx" torch
-    pip install numpy pyyaml matplotlib pytest pyarrow pillow pandas
+    # pip of the env's own python, so packages can only land in the env
+    python -m pip install --index-url "https://download.pytorch.org/whl/$idx" torch
+    python -m pip install numpy pyyaml matplotlib pytest pyarrow pillow pandas
     python scripts/prepare_femnist.py
     PYTHONPATH=src python -c "from afl.data import ensure; ensure('cifar10')"
     echo "setup done"
