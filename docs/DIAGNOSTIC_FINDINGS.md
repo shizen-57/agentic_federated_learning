@@ -113,8 +113,7 @@ So the lock-up is a **tipping point**, not a fixed outcome: the gate/predictor
 chain puts nearly every learned-mode run into the same fragile state at
 round 3, and tiny numerical differences between devices decide whether it
 escapes. The cause in sections 2-3 stands; how often it bites depends on
-the platform. (Raw table pasted by the user; the archive
-`results_20261027_1911.tar.gz` is on their laptop.)
+the platform. Runs, checks and sidecars: `results/diagnostic_v1_rtx3070/`.
 
 ## 8. Unexecuted checks
 
