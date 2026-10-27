@@ -62,6 +62,15 @@
     reports that could hide failures or reuse stale runs), also fixed; the
     failure-ratio advantage over Random/Oort also needs re-confirming.
 
+13. **The final, pre-specified `s2_*` tests (1,540 runs, every protocol
+    fix on) give clear answers** (section "Outcome of the pre-specified
+    `s2_*` tests"): ARL-v3 does not help (0/8 tests pass); ARL-v2 is not
+    more efficient than always using Light; the proposed RL system beats
+    DELTA on CIFAR-10 but is significantly worse than six of nine
+    mode-fair baselines on FEMNIST, partly because RL policies that learn
+    their own modes sometimes lock into all-fail states that ARL cannot
+    see; a simple mode rule does as well as learned modes on accuracy.
+
 Groups: 1,190 runs on Kaggle 2x T4 (17 groups, 10 seeds each; `confirm_cifar`
 30 fresh seeds), plus 120 weak-client MNIST runs on this project's CPU. Every
 saved config was checked against `configs/sweep_advanced.yaml` before the
@@ -987,6 +996,87 @@ folder the runs were made in:
 `/kaggle/working/adv` -> `results/adv` (a symbolic link), then
 `python scripts/prespec_s2.py --root /kaggle/working/adv`. Every other
 check stays in force.
+
+#### Outcome of the pre-specified `s2_*` tests
+
+Full output: `results/adv/s2_prespecified_tests.md` (every family complete,
+no validation problem). Exact paired sign-flip, 20 seeds, Holm within family.
+
+- **A / A2 -- ARL-v3 does not protect the worst-represented classes or
+  clients.** 0 of 4 and 0 of 4 pass. Worst-10%-class accuracy vs the plain
+  failure count: -0.000 (CIFAR-10), -0.004 (FEMNIST), -0.047 (CIFAR-10 +
+  churn), -0.000 (FEMNIST + churn); worst-10%-client accuracy: -0.002,
+  -0.025, -0.040, +0.011. All inconclusive; seven of eight point the wrong way.
+- **B -- ARL-v2's efficiency is not more than "always Light".** 0 of 2 pass,
+  and the direction is reversed: ARL-v2 fails *more* often than the RL
+  policy with every client on Light (0.418 vs 0.324 on CIFAR-10, 0.546 vs
+  0.308 on FEMNIST).
+- **C -- proposed system (`c2_rl_fedprox`) vs the stronger baselines, final
+  accuracy.** CIFAR-10: significantly better than DELTA (+0.063) and DELTA
+  with the mode rule (+0.033); significantly worse than REFL with the mode
+  rule (-0.048); the other six inconclusive. FEMNIST: significantly worse
+  than six of nine (FAVOR, REFL, DELTA with the mode rule; Random, Oort,
+  Power-of-Choice with the mode rule; by -0.17 to -0.20), the other three
+  inconclusive and also lower.
+- **C2 -- failure ratio.** CIFAR-10: the proposed system fails significantly
+  less than eight of nine (0.440 vs 0.545-0.744); not different from Oort
+  with the mode rule (0.449). FEMNIST: all nine inconclusive.
+- **D -- learning vs a rule, same reward (`v2_rawfail`).** Accuracy: all six
+  inconclusive (learned modes vs the expected-work rule, vs always Light,
+  vs the greedy-coverage rule). **D2 -- failures:** learned modes fail
+  significantly less than the expected-work rule (CIFAR-10) and the
+  greedy-coverage rule (CIFAR-10), and significantly *more* than always
+  Light on both datasets (0.398 vs 0.324; 0.507 vs 0.308).
+
+**Descriptive (not pre-specified):**
+
+- **RL policies that learn their own modes sometimes lock up.** In some runs
+  every invitation fails for the rest of the run: after a few early
+  failures the success predictor rates every client below 0.5, nobody
+  passes the gate, all ten slots are fill-ins, the mode head has drifted to
+  Priority, everything fails, and the model never trains again (e.g.
+  `c2_rl_fedprox` FEMNIST seed 110: 1 success in rounds 21-200, final
+  accuracy 0.066). Runs with 50+ consecutive rounds of zero successes:
+  FEMNIST weak regime -- `c2_rl_fedprox` 4/20, `arl3_shared` 3/20,
+  `arl3_full` 2/20, `arl2_full` 1/20, `v2_rawfail` 1/20; a few elsewhere
+  (CIFAR-10 `arl2_full` 1/20; no-weak-client groups 1/10 for `c2`,
+  `v2_rawfail`, `arl3_full`); **never** for the RL policy with a fixed mode
+  rule (`rl_ew`, `rl_light`) or any baseline. This is most of the FEMNIST
+  accuracy gap in family C (`c2` seed spread 0.24 vs ~0.02-0.06 for the
+  baselines).
+- **ARL cannot see this failure.** Inside a locked-up run ARL' is 0.000 and
+  ARL-v3's loss ~0.006 while 100% of invitations fail: ARL counts only
+  losses among clients the predictor expects to succeed, so a pessimistic
+  predictor makes every loss look unavoidable. Standardised rewards add to
+  it: a constant all-fail round becomes the new normal and gives no
+  gradient. This is a concrete, reportable limitation of
+  predictor-relative loss measures.
+- **The mode choice is most of what matters.** Giving the selection-only
+  baselines the expected-work mode rule raised their accuracy on every
+  dataset (Random 0.510 -> 0.553 CIFAR-10, 0.715 -> 0.777 FEMNIST; Oort
+  0.481 -> 0.564, 0.716 -> 0.785). The RL policy with every client on
+  Light (`rl_light`) fails least of all RL variants (0.31-0.32), is
+  cheapest (~7.0 per round), loses the fewest clients under churn (20-22
+  vs 26-31) and is among the most accurate at equal spend.
+- **Equal spend** (`results/adv/s2_*/budget.md`): at the same cumulative
+  cost the proposed system is behind `rl_light`, REFL with the mode rule and
+  MimiC on both datasets (CIFAR-10 -0.06 to -0.07; FEMNIST -0.16 to -0.17).
+  Its earlier efficiency advantage does not survive equalising spend.
+- **No weak clients** (`s2_main_*`, 10 seeds): the same order -- Oort and
+  REFL with the mode rule, MimiC and `rl_light` lead; `c2_rl_fedprox` is
+  last or near last on accuracy (0.477 CIFAR-10, 0.704 FEMNIST).
+
+**What this supports for the thesis, after all fixes:** (1) ARL -- original,
+v2 and v3 -- is not shown to improve accuracy, worst-class or worst-client
+accuracy, or retention, and has an identified blind spot (a pessimistic
+predictor hides all losses); (2) choosing the participation mode well is
+what improves both accuracy and efficiency, and a simple rule (expected
+work, or always Light for efficiency) does at least as well as the learned
+RL mode choice, which can lock up; (3) the learned joint policy is not shown
+to beat strong baselines given the same mode choice, and is worse on
+FEMNIST. The original efficiency claim (fewer failures than Random/Oort)
+holds on CIFAR-10 against baselines that always use Standard, but not
+against mode-fair baselines on FEMNIST, nor at equal spend.
 
 #### ARL-v3 as frozen for the `s2_*` runs
 
