@@ -45,8 +45,19 @@ def _forced(pol, seq):
     pol._draw = lambda logits: (lambda i: (i, torch.log_softmax(logits, -1)[i]))(next(it))
 
 
+def _float64(pol):
+    """Run this policy's maths in float64, for exact enumeration in tests only
+    (float32 rounding alone leaves ~1e-9 residuals in sums that should be 0).
+    Production training precision is not touched."""
+    pol.net.double()
+    feats, cov = pol._feature_matrix, pol._coverage_inputs
+    pol._feature_matrix = lambda st: feats(st).double()
+    pol._coverage_inputs = lambda st, picked: tuple(v.double() for v in cov(st, picked))
+    return pol
+
+
 def _expected_vs_exact(N, K, R, b=0.3):
-    pol = _policy(N, K)
+    pol = _float64(_policy(N, K))
     st = _state(N)
     params = list(pol.net.parameters())
     actions = [picks + modes for picks in itertools.permutations(range(N), K)
