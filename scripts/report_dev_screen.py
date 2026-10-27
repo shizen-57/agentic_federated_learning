@@ -40,6 +40,7 @@ def measures(path: str) -> dict:
             "longest": longest, "starved": longest >= STARVE,
             "modes": "/".join(f"{100 * m / max(sum(modes), 1):.0f}" for m in modes),
             "acc": f(rows[-1], "accuracy"), "spend": sum(f(r, "cost") for r in rows),
+            "worst10": f(rows[-1], "acc_client_worst10") if "acc_client_worst10" in rows[-1] else float("nan"),
             "acc_budget": at_budget}
 
 
@@ -47,6 +48,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("dir")
     ap.add_argument("--revision", default=REVISION)
+    ap.add_argument("--screen-b", default="",
+                    help="comma-separated SAFE-PPO conditions judged by docs/RL2_SCREEN_B.md")
     args = ap.parse_args()
     rev = args.revision
     runs: dict[str, dict[int, dict]] = {}
@@ -65,15 +68,33 @@ def main() -> int:
             print(f"| {cond} | {seed} | {m['succ']}/{m['inv']} | {m['fallback']:.2f} | {m['longest']} | "
                   f"{'YES' if m['starved'] else 'no'} | {m['modes']} | {m['acc']:.3f} | {m['spend']:.0f} | "
                   + (f"{ab[0]:.3f} (r{ab[1]})" if ab else "-") + " |")
-    print("\n| condition | median successes | median final acc | median acc at equal spend | starved seeds |")
-    print("|---|---|---|---|---|")
-    med = {}
+    print("\n| condition | median successes | median final acc | median acc at equal spend "
+          "| median worst-10% client acc | starved seeds |")
+    print("|---|---|---|---|---|---|")
+    med, med_eq = {}, {}
     for cond in sorted(runs):
         v = runs[cond].values()
         med[cond] = (st.median(m["succ"] for m in v), st.median(m["acc"] for m in v))
         eq = [m["acc_budget"][0] for m in v if m["acc_budget"]]
-        print(f"| {cond} | {med[cond][0]:.0f} | {med[cond][1]:.3f} | "
-              f"{st.median(eq) if eq else float('nan'):.3f} | {sum(m['starved'] for m in v)}/{len(v)} |")
+        med_eq[cond] = st.median(eq) if eq else float("nan")
+        print(f"| {cond} | {med[cond][0]:.0f} | {med[cond][1]:.3f} | {med_eq[cond]:.3f} | "
+              f"{st.median(m['worst10'] for m in v):.3f} | {sum(m['starved'] for m in v)}/{len(v)} |")
+    if args.screen_b:
+        print("\nScreen B rule (docs/RL2_SCREEN_B.md): no starvation; median equal-spend acc >= "
+              "rl_light - 0.02; median final acc >= arl3_full - 0.02.\n")
+        passing = []
+        for c in args.screen_b.split(","):
+            if c not in runs:
+                continue
+            c1 = not any(m["starved"] for m in runs[c].values())
+            c2 = med_eq[c] >= med_eq["rl_light"] - 0.02
+            c3 = med[c][1] >= med["arl3_full"][1] - 0.02
+            ok = c1 and c2 and c3
+            passing += [c] if ok else []
+            print(f"- {c}: starvation {'pass' if c1 else 'FAIL'}, equal spend {'pass' if c2 else 'FAIL'}, "
+                  f"accuracy {'pass' if c3 else 'FAIL'} -> **{'PASS' if ok else 'fail'}**")
+        best = max(passing, key=lambda c: med_eq[c]) if passing else None
+        print(f"\nCarried forward: {best or 'none passed (ppo_full still goes to pre-training, per the rule)'}")
     if rev in runs and BASE in runs:
         c1 = not any(m["starved"] for m in runs[rev].values())
         c2 = med[rev][0] >= med[BASE][0]

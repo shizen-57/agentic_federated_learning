@@ -1,0 +1,13 @@
+# RL2 screen B: the SAFE-PPO stack, one layer at a time, from scratch (no
+# pre-training yet). Rule: docs/RL2_SCREEN_B.md (written first).
+version: 1
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+source_group: s2_femnist
+seeds: [215, 216, 217, 218, 219]
+conditions: [arl3_full, v2_rawfail, rl_light, ppo_v3, ppo_att, ppo_safe, ppo_full, ppo_full_mimic]
+reference: arl3_full
+new_conditions: [ppo_v3, ppo_att, ppo_safe, ppo_full, ppo_full_mimic]
+variants:
+  full: 200
+out: results/rl2_screen_b

@@ -10,6 +10,7 @@
 #   bash scripts/dept_gpu.sh diag short # collapse diagnostics, 8 runs x 30 rounds
 #   bash scripts/dept_gpu.sh diag full  # the same 8 runs at the full 200 rounds
 #   bash scripts/dept_gpu.sh pretrain femnist ppo_full   # RL2 pre-training -> checkpoints/
+#   bash scripts/dept_gpu.sh screen configs/rl2_screen_b.yaml   # a development screen
 #   bash scripts/dept_gpu.sh pack       # pack the results to copy back home
 #
 # Server rules this script follows: everything goes into our own conda env
@@ -105,6 +106,14 @@ diag)
         > "$OUT/diagnostic_v1/${2:-short}/report.md"
     echo "report: $OUT/diagnostic_v1/${2:-short}/report.md"
     ;;
+screen)
+    # a pre-registered development screen: bash scripts/dept_gpu.sh screen configs/<spec>.yaml
+    activate; jobs_default; mkdir -p "$OUT"
+    spec=${2:?give the screen spec, e.g. configs/rl2_screen_b.yaml}
+    name=$(basename "$spec" .yaml)
+    python scripts/diagnose_collapse.py --spec "$spec" --variant full --jobs "$JOBS" \
+        --set fl.device=auto --out "$OUT/$name" 2>&1 | tee -a "$OUT/$name.log"
+    ;;
 pretrain)
     activate; mkdir -p checkpoints
     ds=${2:-femnist}; cond=${3:-ppo_full}
@@ -120,6 +129,6 @@ pack)
     echo "  scp -P <port> <user>@<server>:$(pwd)/results_$stamp.tar.gz ."
     ;;
 *)
-    sed -n '2,18p' "$0"; exit 1
+    sed -n '2,19p' "$0"; exit 1
     ;;
 esac

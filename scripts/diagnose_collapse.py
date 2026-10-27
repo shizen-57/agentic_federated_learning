@@ -74,7 +74,9 @@ def compare(spec: dict, plan: dict, src: dict, out: str) -> list[tuple[dict, lis
     mine = build_jobs(plan, None, None, out, [])
     orig = {(j["cond"], j["seed"]): j for j in
             build_jobs(src, [spec["source_group"]], list(spec["seeds"]), "ORIGINAL", [])}
-    base_of = spec.get("base_of", {})          # revised condition -> the s2 one it modifies
+    base_of = dict(spec.get("base_of", {}))    # revised condition -> the s2 one it modifies
+    for c in spec.get("new_conditions", []):   # new methods: compared with the reference
+        base_of.setdefault(c, spec["reference"])
     res = []
     for j in mine:
         a = _flat(expected_config(j["raw"]))
@@ -156,8 +158,13 @@ def main() -> int:
     print("source: " + spec["source_plan"] + " group " + spec["source_group"]
           + " (same build_jobs expansion)")
     allowed = {"fl.rounds", "diag.enabled", "out", *spec.get("allowed_extra", [])}
+    from afl.conditions import CONDITIONS
     for j, diff in rows:
         ok = allowed | ({"tag"} if j["cond"] in spec.get("base_of", {}) else set())
+        if j["cond"] in spec.get("new_conditions", []):
+            # a new method may differ from the reference only in what its own
+            # condition sets (and its name) -- every s2 setting else is shared
+            ok = ok | {"tag"} | set(CONDITIONS[j["cond"]])
         bad = [k for k in diff if k not in ok]
         flag = "  <-- UNEXPECTED" if bad else ""
         print(f"  {j['cond']:16s} seed {j['seed']}  {os.path.join(j['raw']['out'], j['raw']['tag'])}"
