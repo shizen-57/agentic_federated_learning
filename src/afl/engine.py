@@ -28,6 +28,7 @@ from .policies.base import best_work_mode, est_time, mode_by_rule
 from .predictor import SuccessPredictor
 from .provenance import LOADED as CODE_LOADED, code_hash
 from .sim import ClientEnv
+from .diagnostics import DiagWriter, norm_state
 
 LOG_FIELDS = [
     "round", "accuracy", "accuracy_fixed", "eval_fixed_n", "acc_worst10", "test_loss", "reward", "cost", "latency",
@@ -71,6 +72,8 @@ class Experiment:
         self.env = ClientEnv(cfg, self.d["n_i"], cfg.seed, sketch=self.d["sketch"])
         self.predictor = SuccessPredictor(cfg)
         self.policy = build_policy(cfg)
+        # Opt-in diagnostic sidecars; reading only, never changes the run.
+        self.diag = DiagWriter(cfg.out, cfg.tag) if cfg.diag.enabled else None
 
         # Data lives on the training device once, so a GPU run does not copy a
         # client's samples across the bus every time it is selected.
@@ -497,6 +500,9 @@ class Experiment:
             self.probed = True
 
         selected, assign = self.policy.act(state, t)
+        dg = None
+        if self.diag is not None:
+            dg = {"proposed": list(selected), "proposed_modes": dict(assign), "invites": []}
         if self.cfg.policy.mode_rule != "own":
             assign = {i: mode_by_rule(self.cfg, state["p_succ"][i]) for i in selected}
         fracs = dict(getattr(self.policy, "upload_frac", {}) or {})
@@ -504,6 +510,10 @@ class Experiment:
         busy = {item[0] for item in self.late}
         if busy:
             selected = [i for i in selected if i not in busy]
+        if dg is not None:
+            dg["busy_removed"] = [i for i in dg["proposed"] if i in busy]
+            dg["pre_budget"] = list(selected)
+            dg["rule_modes"] = dict(assign)
         selected, assign, budget_dropped = self._enforce_budget(selected, assign, state, fracs)
         self._refresh_losses(selected)
 
@@ -559,8 +569,9 @@ class Experiment:
             # whose battery cannot cover the job, does no work and spends
             # nothing. Originally every invitation was charged in full.
             ran = not (self.cfg.system.charge_actual and out["reason"] in ("unavailable", "energy"))
+            charged = self.env.cost(i, mode, frac) if ran else 0.0
             if ran:
-                round_cost += self.env.cost(i, mode, frac)
+                round_cost += charged
             reasons[i] = out["reason"]
             latencies.append(out["latency"])
             # Energy spend is deferred until after the oracle diagnostic below
@@ -612,6 +623,9 @@ class Experiment:
                         upd = self._compress(i, upd, self._frac(mode, frac))
                     self.late.append((i, upd, n_steps, t, state["p_succ"][i][mode]))
 
+            if dg is not None:
+                dg["invites"].append(self._diag_invite(t, i, mode, frac, out, ok, reasons[i],
+                                                       ran, charged, state, dg))
             success[i] = int(ok)
             if ok:
                 self.x_succ[i] += 1
@@ -831,13 +845,21 @@ class Experiment:
             raise ValueError(f"unknown reward.damage_metric {r.damage_metric}")
         fairness_term = cv_sel if r.fairness_metric == "cv_selection" else cv
 
-        reward = (r.alpha * self.norm["acc"](d_acc)
-                  - r.beta * self.norm["cost"](round_cost)
-                  - r.delta * self.norm["lat"](latency)
+        # Same calls, same order and same arithmetic as one expression; named
+        # only so the diagnostics can record each part.
+        z_acc = self.norm["acc"](d_acc)
+        z_cost = self.norm["cost"](round_cost)
+        z_lat = self.norm["lat"](latency)
+        reward = (r.alpha * z_acc
+                  - r.beta * z_cost
+                  - r.delta * z_lat
                   - r.lambda_arl * damage_term
                   - r.lambda_fair * fairness_term)
+        z_debt = None
         if r.lambda_debt > 0:
-            reward -= r.lambda_debt * self.norm["debt"](float(self.debt.mean()))
+            z_debt = self.norm["debt"](float(self.debt.mean()))
+            reward -= r.lambda_debt * z_debt
+        shared_reward = reward
         client_adv = None
         if r.batch_client_norm:
             # Protocol fix: one set of statistics for the whole round, so a
@@ -862,6 +884,8 @@ class Experiment:
                 # round's action).
                 set_adv = (-r.lambda_arl * self.norm["v3s"].batch([arl_v3_loss])[0]
                            + r.lambda_cov * self.norm["v3sg"].batch([arl_v3_gain])[0])
+        credits = None if client_adv is None else dict(client_adv)   # diagnostics
+        set_credit = set_adv
         if client_adv is not None and self.cfg.policy.credit_total:
             # One round objective, R = shared reward + sum of the clients'
             # standardised ARL credits, for the whole joint action.
@@ -902,7 +926,106 @@ class Experiment:
             "wall_s": time.time() - t0,
         }
         self.rows.append(row)
+        if dg is not None:
+            self._diag_round(t, state, selected, assign, success, reasons, recv_ids, late_ids,
+                             mode_counts, dg, row, {
+                                 "d_acc": d_acc, "acc_for_reward": acc_r, "cost": round_cost,
+                                 "latency": latency, "damage_metric": r.damage_metric,
+                                 "damage_raw": {"fail_ratio": fail_ratio, "arl_selected": arl_sel,
+                                                "arl_online": arl_on, "arl_v2": arl_v2,
+                                                "arl_v3_loss": arl_v3_loss, "arl_v3_gain": arl_v3_gain},
+                                 "fairness_raw": fairness_term, "debt_raw": float(self.debt.mean()),
+                                 "z": {"acc": z_acc, "cost": z_cost, "lat": z_lat, "debt": z_debt,
+                                       "damage_term": damage_term},
+                                 "norm": {"acc": norm_state(self.norm["acc"], z_acc),
+                                          "cost": norm_state(self.norm["cost"], z_cost),
+                                          "lat": norm_state(self.norm["lat"], z_lat)},
+                                 "weights": {"alpha": r.alpha, "beta": r.beta, "delta": r.delta,
+                                             "lambda_arl": r.lambda_arl, "lambda_fair": r.lambda_fair,
+                                             "lambda_debt": r.lambda_debt, "lambda_cov": r.lambda_cov},
+                                 "shared_reward": shared_reward, "client_credit": credits,
+                                 "set_credit": set_credit,
+                                 "credit_total": bool(self.cfg.policy.credit_total), "total": reward})
         return row
+
+    # --------------------------------------------------------- diagnostics
+
+    def _diag_invite(self, t, i, mode, frac, out, ok, reason, ran, charged, state, dg) -> dict:
+        """One invitation, as the server saw it and as it turned out. Reads
+        only; the analysis-only block holds simulator truths no policy sees."""
+        dec = getattr(self.policy, "diag_decision", None) or {}
+        pick = next((p for p in dec.get("picks", []) if p["client"] == i), {})
+        env = self.env
+        return {
+            "t": t, "client": int(i), "order": dg["proposed"].index(i) if i in dg["proposed"] else None,
+            "how": pick.get("how", "fallback" if i in getattr(self.policy, "gate_fill", []) else "chosen"),
+            "logp_pick": pick.get("logp_pick"), "mode_probs": pick.get("mode_probs"),
+            "mode_entropy": pick.get("mode_entropy"),
+            "cov_gain": pick.get("cov_gain"), "cov_gain_weighted": pick.get("cov_gain_weighted"),
+            "proposed_mode": dg["proposed_modes"].get(i), "rule_mode": dg["rule_modes"].get(i),
+            "mode": mode, "epochs": self.cfg.system.local_epochs[mode],
+            "upload_frac": self._frac(mode, frac),
+            "p_succ": dict(state["p_succ"][i]), "eligible": int(state["eligible"][i]),
+            "obs": dict(state["obs"][i]), "hist": dict(state["hist"][i]),
+            "t_est": {m: state["t_est"][i][m] for m in self.cfg.system.modes},
+            "env_reason": out["reason"], "reason": reason, "success": int(ok),
+            "latency": out["latency"], "t_train": out["t_train"], "t_comm": out["t_comm"],
+            "ran": bool(ran), "charged": charged, "late_queued": any(x[0] == i for x in self.late),
+            "analysis_only": {
+                "weak": bool(env.weak[i]), "tier": int(env.tier[i]),
+                "available": bool(env._draw["available"][i]),
+                "energy_at_start": float(env._energy_at_round_start[i]),
+                "energy_cap": float(env.energy_cap[i]), "reliability": float(env.reliability[i]),
+                "drop_roll": float(env._draw["drop"][i]),
+                "t_true": {m: state["t_expected"][i][m] for m in self.cfg.system.modes},
+            },
+        }
+
+    def _diag_round(self, t, state, selected, assign, success, reasons, recv_ids, late_ids,
+                    mode_counts, dg, row, reward_parts) -> None:
+        modes = self.cfg.system.modes
+        p = state["p_succ"]
+        cands = state["candidates"] if state["candidates"] is not None else list(range(self.N))
+        pmax = [max(p[i].values()) for i in range(self.N)]
+        dec = getattr(self.policy, "diag_decision", None)
+        reason_counts: dict[str, int] = {}
+        for why in reasons.values():
+            reason_counts[why] = reason_counts.get(why, 0) + 1
+        w = self.predictor.w
+        rec = {
+            "t": t,
+            "online": int(self.env._draw["available"].sum()),
+            "departed": int(self.env.departed.sum()),
+            "candidates": len(cands),
+            "eligible": int(sum(state["eligible"][i] for i in cands)),
+            "elig_threshold": self.cfg.policy.elig_threshold,
+            "p_max": [round(v, 5) for v in pmax],
+            "p_mean_by_mode": {m: float(np.mean([p[i][m] for i in cands])) if cands else None
+                               for m in modes},
+            "fill": list(getattr(self.policy, "gate_fill", []) or []),
+            "gate_filled": int(getattr(self.policy, "gate_filled", 0)),
+            "proposed": dg["proposed"], "busy_removed": dg["busy_removed"],
+            "budget_removed": [i for i in dg["pre_budget"] if i not in selected],
+            "invited": list(selected), "modes": {int(i): assign[i] for i in selected},
+            "succeeded": [i for i in selected if success.get(i, 0)],
+            "late_delivered": sorted(late_ids), "late_queued": [x[0] for x in self.late],
+            "aggregated": len(recv_ids),
+            "unique_contributors": int((self.x_succ > 0).sum()),
+            "mode_counts": dict(mode_counts), "reason_counts": reason_counts,
+            "empty_round": int(not selected),
+            "decision": None if dec is None else {k: v for k, v in dec.items() if k != "picks"},
+            "predictor": {"seen": int(self.predictor.seen), "w_norm": float(np.linalg.norm(w)),
+                          "w": [float(v) for v in w], "b": float(self.predictor.b)},
+            "reward": reward_parts,
+            "accuracy": row["accuracy"], "accuracy_fixed": row["accuracy_fixed"],
+        }
+        self.diag.write("round", rec)
+        for inv in dg["invites"]:
+            self.diag.write("invite", inv)
+        upd = getattr(self.policy, "diag_update", None)
+        if upd is not None:
+            self.diag.write("update", {"t": t, **upd})
+        self.diag.flush()
 
     # ----------------------------------------------------------------- run
 
@@ -928,6 +1051,8 @@ class Experiment:
             wr.writeheader()
             wr.writerows(self.rows)
         os.replace(tmp, path)
+        if self.diag is not None:
+            self.diag.close()
         meta = self.cfg.to_dict()
         meta["init_checksum"] = self.init_checksum   # same for every method under fl.clean_rng
         # Which version of the simulator made this run: the code loaded at

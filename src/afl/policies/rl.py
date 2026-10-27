@@ -40,6 +40,11 @@ FEATURES = [
 ]
 
 
+def _f(x) -> float:
+    """A plain float from a number or (graph-attached) tensor, without touching the graph."""
+    return float(x.detach()) if torch.is_tensor(x) else float(x)
+
+
 class ScoreNet(nn.Module):
     def __init__(self, dim: int, hidden: int, n_modes: int):
         super().__init__()
@@ -71,6 +76,10 @@ class RLPolicy(Policy):
             # this combination would silently drop the ARL signal.
             raise ValueError("policy.horizon > 1 with policy.per_client_credit is not supported")
         self.gate_filled = 0
+        self.gate_fill: list[int] = []
+        self.diag = cfg.diag.enabled          # record decisions (afl.diagnostics)
+        self.diag_decision = None
+        self.diag_update = None
         if self.clean:
             # Own seed for the network; sampling below uses self.gen. Neither
             # touches PyTorch's global generator.
@@ -139,6 +148,7 @@ class RLPolicy(Policy):
         K = min(self.cfg.fl.clients_per_round, N)
         x = self._feature_matrix(state)
         allowed, k_s, fill = self._allowed(state, N, K)
+        self.diag_decision = None
         if k_s == 0 and not fill:
             self._pending = None
             return [], {}
@@ -182,6 +192,10 @@ class RLPolicy(Policy):
         sel_entropy = torch.distributions.Categorical(logits=masked).entropy()
         self._pending = {"logp": logp_sel + logp_mode, "entropy": entropy + sel_entropy,
                          "logp_client": logp_client, "logp_sel": logp_sel, "logp_mode": mode_lp}
+        if self.diag:
+            self._record_decision([int(i) for i in sel], fill, step_logp,
+                                  {int(i): mode_logits[i] for i in sel}, mode_lp,
+                                  allowed, k_s, sel_entropy)
         return [int(i) for i in sel], assign
 
     def _allowed(self, state, N: int, K: int):
@@ -197,6 +211,7 @@ class RLPolicy(Policy):
         mask = torch.zeros(N, dtype=torch.bool)
         mask[ok] = True
         self.gate_filled = len(fill)
+        self.gate_fill = list(fill)
         return mask, min(K, len(ok)), fill
 
     def _act_sequential(self, state, x, allowed, K, fill):
@@ -206,7 +221,9 @@ class RLPolicy(Policy):
         exact sequential one, so REINFORCE is unchanged."""
         open_ = allowed.clone()
         picked, steps, mode_rows = [], {}, {}
+        cov_at: dict[int, tuple[float, float]] = {}
         logp, entropy = 0.0, 0.0
+        first_entropy = None
         if K == 0:
             g, gu = self._coverage_inputs(state, [])
             xs = x.clone()
@@ -220,14 +237,19 @@ class RLPolicy(Policy):
             masked = scores.masked_fill(~open_, -1e9)
             if k == 0:
                 entropy = torch.distributions.Categorical(logits=masked).entropy()
+                first_entropy = entropy
             i, lp = self._draw(masked)
             logp = logp + lp
             steps[i] = lp
             mode_rows[i] = mode_logits[i]
+            if self.diag:
+                cov_at[i] = (float(g[i]), float(gu[i]))
             picked.append(i)
             open_[i] = False
         for i in fill:                       # gate fill-ins: not sampled, modes still are
             mode_rows[i] = mode_logits[i]
+            if self.diag:
+                cov_at[i] = (None, None)         # not scored, so no coverage input
         picked = picked + list(fill)
         assign, logp_client = {}, dict(steps)
         logp_sel, mode_lp = logp, {}
@@ -244,7 +266,40 @@ class RLPolicy(Policy):
             assign[i] = self.modes[m]
         self._pending = {"logp": logp, "entropy": entropy, "logp_client": logp_client,
                          "logp_sel": logp_sel, "logp_mode": mode_lp}
+        if self.diag:
+            self._record_decision(picked, fill, steps, mode_rows, mode_lp, allowed, K,
+                                  first_entropy, cov_at)
         return picked, assign
+
+    def _record_decision(self, picked, fill, step_logp, mode_rows, mode_lp, allowed, k_sampled,
+                         sel_entropy, cov_at=None):
+        """Diagnostics only (diag.enabled): what this round's decision looked
+        like, from values already computed -- no new draws, no gradient.
+        Gate fill-ins are deterministic, so they get no pick probability."""
+        fill = set(int(i) for i in fill)
+        fixed_modes = self.cfg.policy.mode_rule != "own"
+        picks = []
+        with torch.no_grad():
+            for k, i in enumerate(picked):
+                i = int(i)
+                rec = {"client": i, "order": k,
+                       "how": "fallback" if i in fill else "sampled",
+                       "logp_pick": _f(step_logp[i]) if i in step_logp else None}
+                if i in mode_rows:
+                    probs = torch.softmax(mode_rows[i].detach(), -1)
+                    rec["mode_probs"] = dict(zip(self.modes, (float(v) for v in probs)))
+                    rec["mode_entropy"] = float(-(probs * torch.log(probs.clamp_min(1e-30))).sum())
+                rec["logp_mode"] = None if fixed_modes or i not in mode_lp else _f(mode_lp[i])
+                if cov_at is not None and i in cov_at:
+                    rec["cov_gain"], rec["cov_gain_weighted"] = cov_at[i]
+                picks.append(rec)
+        logp = self._pending["logp"] if self._pending else None
+        self.diag_decision = {
+            "n_allowed": int(allowed.sum()), "k_sampled": int(k_sampled), "fill": sorted(fill),
+            "sel_entropy": None if sel_entropy is None else _f(sel_entropy),
+            "logp_joint": _f(logp) if torch.is_tensor(logp) else None,
+            "fixed_modes": fixed_modes, "picks": picks,
+        }
 
     def _sample_topk(self, logits: torch.Tensor, K: int):
         """Sequential softmax sampling without replacement (Plackett-Luce)."""
@@ -269,17 +324,27 @@ class RLPolicy(Policy):
     # -------------------------------------------------------------- learn
 
     def observe_outcome(self, state, action, reward, info):
+        self.diag_update = None
         if self._pending is None or not self.train_mode:
+            if self.diag:
+                self.diag_update = {"updated": False, "why": "no decision" if self.train_mode
+                                    else "not training"}
             return
         if not torch.is_tensor(self._pending["logp"]):
             self._pending = None               # nothing was sampled this round
+            if self.diag:
+                self.diag_update = {"updated": False, "why": "nothing sampled"}
             return
         if self.cfg.policy.horizon > 1:
             self._window.append((self._pending["logp"], self._pending["entropy"], reward))
             self._pending = None
+            if self.diag:
+                self.diag_update = {"updated": False, "why": "window",
+                                    "window_len": len(self._window)}
             if len(self._window) >= self.cfg.policy.horizon:
                 self._update_window()
             return
+        baseline_before = self.baseline
         if self.cfg.policy.prior_baseline:
             # Baseline from previous rounds only, so it does not depend on this
             # round's action; then fold this round in.
@@ -311,9 +376,27 @@ class RLPolicy(Policy):
                     loss = loss - self._pending["logp_client"][i] * a
         self.opt.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm_(self.net.parameters(), 5.0)
+        gnorm = nn.utils.clip_grad_norm_(self.net.parameters(), 5.0)
+        if self.diag:
+            self.diag_update = {
+                "updated": True, "reward": float(reward), "baseline_before": float(baseline_before),
+                "baseline_after": float(self.baseline), "baseline_n": int(self.baseline_n),
+                "advantage": float(advantage), "logp_joint": _f(self._pending["logp"]),
+                "entropy": _f(self._pending["entropy"]),
+                "client_credit": None if not client_adv else
+                {int(i): float(a) for i, a in client_adv.items()},
+                "set_credit": None if set_adv is None else float(set_adv),
+                "grad_norm": float(gnorm), "grad_norm_clipped": self._grad_norm(),
+                "clipped": bool(float(gnorm) > 5.0)}
         self.opt.step()
         self._pending = None
+
+    def _grad_norm(self) -> float:
+        """Norm of the gradient as it will be applied (after clipping)."""
+        with torch.no_grad():
+            sq = sum(float(p.grad.pow(2).sum()) for p in self.net.parameters()
+                     if p.grad is not None)
+        return sq ** 0.5
 
     def finish_run(self) -> None:
         """Learn from a last, unfinished multi-round window instead of dropping it."""
@@ -349,6 +432,11 @@ class RLPolicy(Policy):
                 self.baseline += (g - self.baseline) / self.baseline_n
         self.opt.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm_(self.net.parameters(), 5.0)
+        gnorm = nn.utils.clip_grad_norm_(self.net.parameters(), 5.0)
+        if getattr(self, "diag", False):
+            self.diag_update = {"updated": True, "window": True, "returns": returns,
+                                "baseline_before": float(prior), "baseline_after": float(self.baseline),
+                                "grad_norm": float(gnorm), "grad_norm_clipped": self._grad_norm(),
+                                "clipped": bool(float(gnorm) > 5.0)}
         self.opt.step()
         self._window = []

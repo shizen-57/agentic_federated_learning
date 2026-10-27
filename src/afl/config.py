@@ -265,12 +265,21 @@ class PolicyCfg:
 
 
 @dataclass
+class DiagCfg:
+    """Opt-in diagnostic sidecars (afl.diagnostics). Recording never changes
+    the run; with enabled=False (the default) nothing is written and the
+    section is left out of the saved config, so earlier runs keep matching."""
+    enabled: bool = False
+
+
+@dataclass
 class Cfg:
     data: DataCfg = field(default_factory=DataCfg)
     system: SystemCfg = field(default_factory=SystemCfg)
     fl: FLCfg = field(default_factory=FLCfg)
     reward: RewardCfg = field(default_factory=RewardCfg)
     policy: PolicyCfg = field(default_factory=PolicyCfg)
+    diag: DiagCfg = field(default_factory=DiagCfg)
     seed: int = 0
     out: str = "results"
     tag: str = "run"
@@ -293,7 +302,10 @@ class Cfg:
         return cfg
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        if not self.diag.enabled:
+            d.pop("diag")
+        return d
 
     def dump(self, path: str) -> None:
         with open(path, "w") as fh:

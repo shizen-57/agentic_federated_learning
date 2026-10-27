@@ -321,6 +321,7 @@ class GreedyCoveragePolicy(Policy):
         cands = pool(state, N)
         elig, fill = gate(self.cfg, state, cands, K)
         self.gate_filled = len(fill)
+        self.gate_fill = list(fill)
         if self.cfg.policy.strict_gate:
             ok = elig
         else:
