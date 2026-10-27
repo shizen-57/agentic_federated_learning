@@ -145,6 +145,8 @@ def main() -> int:
         spec = yaml.safe_load(fh)
     if args.variant not in spec["variants"]:
         raise SystemExit(f"unknown variant {args.variant}; have {list(spec['variants'])}")
+    import seeds as seedreg
+    seedreg.check(spec["seeds"], spec.get("purpose", "diagnostic"), spec.get("frozen_manifest"))
     out = os.path.join(args.out or os.path.join(ROOT, spec["out"]), args.variant)
     plan, src = plan_for(spec, args.variant)
     rows = compare(spec, plan, src, out)

@@ -251,3 +251,16 @@ to run it and send back the results.
   confirmation: 300+.
 - NEXT (user decides): thesis chapters (recommended), or a combined
   (b)+(d) screen on seeds 210-214 on the dept GPU (fast).
+
+## 12. RL2 plan (2026-10-27): SAFE-PPO + ARL-v4
+
+User wants every weakness fixed, no settling for simple. Decisions: pre-training
+allowed (strict separation; report pre-trained and from-scratch); two primary
+endpoints (P1 equal-spend accuracy, P2 worst-10% client accuracy; Holm);
+CIFAR-10 + FEMNIST. Design: docs/RL2_DESIGN.md (components C1-C9 + ARL-v4).
+Seeds: configs/seed_registry.yaml, guard scripts/seeds.py (dev 210-299,
+practice 1000-1999, confirmation 300-399 needs frozen manifest).
+Milestones: M0 spec+seeds (done) -> M1 predictor v2 + gate v2 -> M2 PPO ->
+M3 set encoder + memory -> M4 safety -> M5/M5b reward v2 + ARL-v4 ->
+M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
+(GPU, after user go-ahead). Each milestone: tests, pre-registered dev screen.

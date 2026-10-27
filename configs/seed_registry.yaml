@@ -1,0 +1,10 @@
+# Which seeds have been used, and which are reserved. Read by scripts/seeds.py.
+# A seed listed as "used" has been looked at; it can never serve as fresh
+# confirmation evidence. Confirmation seeds may only be run from a frozen plan.
+used:
+  - [0, 119]        # pilot, advanced sweep, s2 (100-119 = s2 confirmation)
+  - [200, 209]      # dev screens: predictor_norm (200-204), mode_mask (205-209)
+  - [900, 900]      # GPU smoke checks
+dev: [210, 299]           # development, tuning and ablation (RL2 plan)
+practice: [1000, 1999]    # pre-training episodes only; never evaluated
+confirmation: [300, 399]  # reserved, unrun; only with a frozen manifest
