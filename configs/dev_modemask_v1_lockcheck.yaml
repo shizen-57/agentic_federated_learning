@@ -1,0 +1,12 @@
+# Mechanism check, NOT part of the screen's rule: the revision on the two
+# inspected seeds where unchanged ARL-v3 / c2 locked up (110, 113).
+version: 1
+source_plan: configs/sweep_advanced.yaml
+source_group: s2_femnist
+seeds: [110, 113]
+conditions: [arl3_full_fm]
+base_of: {arl3_full_fm: arl3_full}
+allowed_extra: [policy.mode_mask]
+variants:
+  full: 200
+out: results/dev_modemask_v1_lockcheck

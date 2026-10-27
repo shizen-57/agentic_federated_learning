@@ -1,0 +1,14 @@
+# Development screen for revision 2 (policy.mode_mask = feasible).
+# Criteria fixed BEFORE any run: docs/DEV_SCREEN_MODEMASK_V1.md.
+# Seeds 205-209 are fresh (0-119, 200-204 and 900 have been used).
+#   python scripts/diagnose_collapse.py --spec configs/dev_modemask_v1.yaml --variant full --jobs 4
+version: 1
+source_plan: configs/sweep_advanced.yaml
+source_group: s2_femnist
+seeds: [205, 206, 207, 208, 209]
+conditions: [arl3_full, arl3_full_fm, v2_rawfail, rl_light]
+base_of: {arl3_full_fm: arl3_full}
+allowed_extra: [policy.mode_mask]
+variants:
+  full: 200
+out: results/dev_modemask_v1

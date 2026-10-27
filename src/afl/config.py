@@ -189,6 +189,11 @@ class RewardCfg:
 class PolicyCfg:
     name: str = "rl"                    # random | fedcs | powerofchoice | oort | rl
     elig_threshold: float = 0.5         # e^elig_{i,t} gate (Sec. 3.10)
+    mode_mask: str = "none"             # none: the RL policy may draw any mode (original).
+                                        # feasible: only modes whose predicted success is
+                                        # >= elig_threshold (else only the most likely
+                                        # one), with the log-probability of that masked
+                                        # draw (docs/DIAGNOSTIC_FINDINGS.md, option d)
     predictor_norm: str = "none"        # none: the success predictor sees raw client
                                         # features (original). round: they are centred
                                         # and scaled by this round's whole client

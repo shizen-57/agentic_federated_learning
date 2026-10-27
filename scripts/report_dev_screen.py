@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Apply the pre-registered rule of docs/DEV_SCREEN_PREDICTOR_V1.md.
+"""Apply the pre-registered rule of docs/DEV_SCREEN_PREDICTOR_V1.md (and of
+later screens that reuse it with --revision).
 
     python scripts/report_dev_screen.py results/dev_predictor_v1/full/s2_femnist
 
@@ -45,7 +46,9 @@ def measures(path: str) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("dir")
+    ap.add_argument("--revision", default=REVISION)
     args = ap.parse_args()
+    rev = args.revision
     runs: dict[str, dict[int, dict]] = {}
     for p in sorted(glob.glob(os.path.join(args.dir, "*_s*.csv"))):
         cond, seed = os.path.basename(p)[:-4].rsplit("_s", 1)
@@ -71,10 +74,10 @@ def main() -> int:
         eq = [m["acc_budget"][0] for m in v if m["acc_budget"]]
         print(f"| {cond} | {med[cond][0]:.0f} | {med[cond][1]:.3f} | "
               f"{st.median(eq) if eq else float('nan'):.3f} | {sum(m['starved'] for m in v)}/{len(v)} |")
-    if REVISION in runs and BASE in runs:
-        c1 = not any(m["starved"] for m in runs[REVISION].values())
-        c2 = med[REVISION][0] >= med[BASE][0]
-        c3 = med[REVISION][1] >= med[BASE][1] - 0.02
+    if rev in runs and BASE in runs:
+        c1 = not any(m["starved"] for m in runs[rev].values())
+        c2 = med[rev][0] >= med[BASE][0]
+        c3 = med[rev][1] >= med[BASE][1] - 0.02
         print(f"\nDecision rule: (1) no revision seed starves: {'pass' if c1 else 'FAIL'}; "
               f"(2) median successes >= unchanged ARL-v3: {'pass' if c2 else 'FAIL'}; "
               f"(3) median final accuracy within 0.02 of unchanged ARL-v3: {'pass' if c3 else 'FAIL'}.")

@@ -68,6 +68,8 @@ class RLPolicy(Policy):
         self.use_cov = cfg.policy.coverage_features
         n_feat = len(FEATURES) + (1 if self.use_debt else 0) + (2 if self.use_cov else 0)
         self.clean = cfg.fl.clean_rng
+        if cfg.policy.mode_mask not in ("none", "feasible"):
+            raise ValueError(f"unknown policy.mode_mask {cfg.policy.mode_mask}")
         if cfg.policy.credit_total and cfg.policy.credit_split:
             raise ValueError("policy.credit_total and policy.credit_split are alternatives")
         if cfg.policy.horizon > 1 and cfg.policy.per_client_credit and not cfg.policy.credit_total:
@@ -173,15 +175,18 @@ class RLPolicy(Policy):
         # Under a fixed mode rule (policy.mode_rule) the engine assigns the
         # modes, so the mode head is not sampled and gets no gradient.
         fixed_modes = self.cfg.policy.mode_rule != "own"
+        rows_used: dict[int, torch.Tensor] = {}
         for i in sel:
             if fixed_modes:
                 assign[int(i)] = self.modes[0]
                 continue
-            dist = torch.distributions.Categorical(logits=mode_logits[i])
+            row = self._mode_row(state, int(i), mode_logits[i])
+            rows_used[int(i)] = row
+            dist = torch.distributions.Categorical(logits=row)
             if self.clean and self.train_mode:
-                m = torch.multinomial(torch.softmax(mode_logits[i], -1), 1, generator=self.gen)[0]
+                m = torch.multinomial(torch.softmax(row, -1), 1, generator=self.gen)[0]
             else:
-                m = dist.sample() if self.train_mode else mode_logits[i].argmax()
+                m = dist.sample() if self.train_mode else row.argmax()
             lp = dist.log_prob(m)
             logp_mode = logp_mode + lp
             logp_client[int(i)] = logp_client.get(int(i), 0.0) + lp
@@ -194,7 +199,8 @@ class RLPolicy(Policy):
                          "logp_client": logp_client, "logp_sel": logp_sel, "logp_mode": mode_lp}
         if self.diag:
             self._record_decision([int(i) for i in sel], fill, step_logp,
-                                  {int(i): mode_logits[i] for i in sel}, mode_lp,
+                                  {int(i): rows_used.get(int(i), mode_logits[i]) for i in sel},
+                                  mode_lp,
                                   allowed, k_s, sel_entropy)
         return [int(i) for i in sel], assign
 
@@ -241,13 +247,13 @@ class RLPolicy(Policy):
             i, lp = self._draw(masked)
             logp = logp + lp
             steps[i] = lp
-            mode_rows[i] = mode_logits[i]
+            mode_rows[i] = self._mode_row(state, i, mode_logits[i])
             if self.diag:
                 cov_at[i] = (float(g[i]), float(gu[i]))
             picked.append(i)
             open_[i] = False
         for i in fill:                       # gate fill-ins: not sampled, modes still are
-            mode_rows[i] = mode_logits[i]
+            mode_rows[i] = self._mode_row(state, i, mode_logits[i])
             if self.diag:
                 cov_at[i] = (None, None)         # not scored, so no coverage input
         picked = picked + list(fill)
@@ -270,6 +276,24 @@ class RLPolicy(Policy):
             self._record_decision(picked, fill, steps, mode_rows, mode_lp, allowed, K,
                                   first_entropy, cov_at)
         return picked, assign
+
+    def _mode_row(self, state, i: int, logits: torch.Tensor) -> torch.Tensor:
+        """The mode logits client i's mode is actually sampled from.
+
+        policy.mode_mask = feasible: only modes whose predicted success clears
+        elig_threshold may be drawn (if none does, only the most likely one),
+        so a client is never sent a job it is not expected to finish. The
+        log-probability is then taken under this masked distribution, i.e.
+        the one actually sampled from, so REINFORCE stays exact."""
+        if self.cfg.policy.mode_mask == "none":
+            return logits
+        p = state["p_succ"][i]
+        thr = self.cfg.policy.elig_threshold
+        ok = [p[m] >= thr for m in self.modes]
+        if not any(ok):
+            best = max(self.modes, key=lambda m: p[m])
+            ok = [m == best for m in self.modes]
+        return logits.masked_fill(~torch.tensor(ok), -1e9)
 
     def _record_decision(self, picked, fill, step_logp, mode_rows, mode_lp, allowed, k_sampled,
                          sel_entropy, cov_at=None):
