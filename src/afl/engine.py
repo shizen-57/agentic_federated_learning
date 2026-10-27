@@ -81,6 +81,13 @@ class Experiment:
         # Own stream for the Thompson gate, so it never shifts any other draw.
         self.gate_rng = np.random.default_rng(cfg.seed + 7100)
         self.policy = build_policy(cfg)
+        ck = getattr(self.policy, "checkpoint_meta", None)
+        data_fp = (self.d.get("split") or {}).get("fingerprint")
+        if ck is not None and (data_fp is None or ck.get("split_fingerprint") != data_fp):
+            # A pre-trained scheduler may only be used on the same persistent
+            # split it practised on (practice pool / validation only).
+            raise ValueError("checkpoint split fingerprint "
+                             f"{ck.get('split_fingerprint')} does not match this run's {data_fp}")
         # Opt-in diagnostic sidecars; reading only, never changes the run.
         self.diag = DiagWriter(cfg.out, cfg.tag) if cfg.diag.enabled else None
 
@@ -99,7 +106,17 @@ class Experiment:
         # from uses only it.
         self.val_idx = self.test_idx = None
         pool = np.arange(n_test)
-        if cfg.fl.val_frac > 0:
+        self.split_fp = None
+        if self.d.get("split") is not None:
+            # data.split = persistent: every example's role is fixed for all
+            # seeds (afl.data), so no run's test example is ever another run's
+            # validation (reward) example.
+            roles = self.d["split"]["val_role"]
+            self.val_idx = torch.from_numpy(np.where(roles)[0]).to(self.dev)
+            pool = np.where(~roles)[0]
+            self.test_idx = torch.from_numpy(pool).to(self.dev)
+            self.split_fp = self.d["split"]["fingerprint"]
+        elif cfg.fl.val_frac > 0:
             perm = np.random.default_rng(cfg.seed + 6).permutation(n_test)
             n_val = int(round(cfg.fl.val_frac * n_test))
             self.val_idx = torch.from_numpy(np.sort(perm[:n_val])).to(self.dev)
@@ -1188,6 +1205,8 @@ class Experiment:
         # start-up. If the files changed while it ran, say so -- the sweep and
         # the confirmatory report then refuse to use the result.
         meta["code_hash"] = CODE_LOADED
+        if self.split_fp:
+            meta["split_fingerprint"] = self.split_fp
         if getattr(self.policy, "checkpoint_sha", None):
             meta["init_checkpoint_sha256"] = self.policy.checkpoint_sha
         if code_hash() != CODE_LOADED:

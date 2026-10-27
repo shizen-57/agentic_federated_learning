@@ -21,6 +21,15 @@ class DataCfg:
     max_samples: int = 600
     num_classes: int = 10
     seed: int = 0
+    split: str = "per_seed"             # per_seed: validation/test (and FEMNIST writers and
+                                        # held-out examples) are drawn from each run's seed,
+                                        # as in s2. persistent: every example has ONE role
+                                        # (train / validation / test) for all seeds, and
+                                        # FEMNIST writers are split once into a practice
+                                        # pool (pre-training only) and an evaluation pool
+                                        # (afl.data.persistent_*; RL2 review finding 1)
+    split_seed: int = 20261027          # fixes the persistent split; never a run seed
+    practice_writer_share: float = 0.5  # FEMNIST: share of writers kept for practice
 
 
 @dataclass

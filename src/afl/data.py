@@ -198,7 +198,8 @@ def load_cifar10(root: str = "data"):
 
 
 def load_femnist(root: str, num_clients: int, seed: int, min_samples: int,
-                 max_samples: int, test_frac: float = 0.1, return_owner: bool = False):
+                 max_samples: int, test_frac: float = 0.1, return_owner: bool = False,
+                 persistent: dict | None = None):
     """Natural per-writer partition of FEMNIST (LEAF).
 
     Picks ``num_clients`` writers with at least ``min_samples`` images, caps each
@@ -218,6 +219,10 @@ def load_femnist(root: str, num_clients: int, seed: int, min_samples: int,
     counts = np.bincount(w_all)
     starts = np.concatenate([[0], np.cumsum(counts)[:-1]])
     eligible = np.where(counts >= min_samples)[0]
+    if persistent is not None:
+        prac, evl = femnist_writer_pools(len(counts), persistent["split_seed"], persistent["share"])
+        pool = prac if persistent["pool"] == "practice" else evl
+        eligible = np.intersect1d(eligible, pool)
     if len(eligible) < num_clients:
         raise ValueError(f"only {len(eligible)} FEMNIST writers have >= {min_samples} "
                          f"samples; asked for {num_clients}")
@@ -227,7 +232,10 @@ def load_femnist(root: str, num_clients: int, seed: int, min_samples: int,
     train_idx, test_idx, parts, owner, off = [], [], [], [], 0
     for k, w in enumerate(writers):
         idx = order[starts[w]:starts[w] + counts[w]].copy()
-        rng.shuffle(idx)
+        if persistent is not None:     # the same examples, in the same order, for every seed
+            idx = idx[np.random.default_rng([persistent["split_seed"], 17, int(w)]).permutation(len(idx))]
+        else:
+            rng.shuffle(idx)
         idx = idx[:max_samples]
         n_test = max(1, int(round(test_frac * len(idx))))
         test_idx.append(idx[:n_test])
@@ -250,7 +258,50 @@ def load_femnist(root: str, num_clients: int, seed: int, min_samples: int,
     out = ((xtr - mu) / sd, y_all[tr_all].astype(np.int64),
            (xte - mu) / sd, y_all[te_all].astype(np.int64), parts)
     # owner[j] = the client whose held-out writing test example j is.
-    return out + (np.concatenate(owner),) if return_owner else out
+    out = out + (np.concatenate(owner),) if return_owner else out
+    if persistent is not None:
+        roles = femnist_example_roles(len(y_all), persistent["split_seed"], persistent["val_frac"])
+        prac, evl = femnist_writer_pools(len(counts), persistent["split_seed"], persistent["share"])
+        fp = split_fingerprint(prac, np.packbits(roles), dataset="femnist",
+                               split_seed=persistent["split_seed"], val_frac=persistent["val_frac"],
+                               share=persistent["share"], max_samples=max_samples, test_frac=test_frac)
+        out = out + ({"test_global": te_all, "train_global": tr_all, "val_role": roles[te_all],
+                      "writers": writers, "fingerprint": fp},)
+    return out
+
+
+# ------------------------------------------------------- persistent splits
+# RL2 review finding 1: with per-seed splits, an example that is "test" in one
+# run is "validation" (a reward signal) in another, so a scheduler pre-trained
+# across seeds could learn from future test examples. A persistent split gives
+# every example one role for every seed.
+
+def pooled_roles(n_test: int, split_seed: int, val_frac: float) -> np.ndarray:
+    """Pooled test sets (CIFAR-10, MNIST): True = validation, False = test,
+    the same for every run seed."""
+    return np.random.default_rng([split_seed, 7]).random(n_test) < val_frac
+
+
+def femnist_writer_pools(n_writers: int, split_seed: int, practice_share: float):
+    """(practice writers, evaluation writers): disjoint, fixed for all seeds."""
+    perm = np.random.default_rng([split_seed, 11]).permutation(n_writers)
+    k = int(round(practice_share * n_writers))
+    return np.sort(perm[:k]), np.sort(perm[k:])
+
+
+def femnist_example_roles(n_examples: int, split_seed: int, val_frac: float) -> np.ndarray:
+    """Held-out FEMNIST examples: True = validation, False = test, by global id."""
+    return np.random.default_rng([split_seed, 13]).random(n_examples) < val_frac
+
+
+def split_fingerprint(*arrays, **params) -> str:
+    """SHA-256 over the split's defining parameters and role/pool arrays."""
+    import hashlib
+    h = hashlib.sha256(repr(sorted(params.items())).encode())
+    for a in arrays:
+        a = np.ascontiguousarray(a)
+        h.update(str(a.dtype).encode() + str(a.shape).encode() + a.tobytes())
+    return h.hexdigest()
 
 
 def ensure(dataset: str, root: str = "data") -> None:
@@ -342,6 +393,12 @@ def build(cfg) -> dict:
     d = cfg.data
     parts = None
     owner = None
+    split = None
+    if d.split not in ("per_seed", "persistent"):
+        raise ValueError(f"unknown data.split {d.split}")
+    pers = d.split == "persistent"
+    if pers and not cfg.fl.val_frac > 0:
+        raise ValueError("data.split=persistent needs fl.val_frac > 0")
     if d.dataset == "mnist":
         xtr, ytr, xte, yte = load_mnist()
         num_classes = 10
@@ -349,8 +406,14 @@ def build(cfg) -> dict:
         xtr, ytr, xte, yte = load_cifar10()
         num_classes = 10
     elif d.dataset == "femnist":
-        xtr, ytr, xte, yte, parts, owner = load_femnist(
-            "data", d.num_clients, d.seed, d.min_samples, d.max_samples, return_owner=True)
+        res = load_femnist(
+            "data", d.num_clients, d.seed, d.min_samples, d.max_samples, return_owner=True,
+            persistent=({"split_seed": d.split_seed, "val_frac": cfg.fl.val_frac,
+                         "share": d.practice_writer_share,
+                         "pool": "practice" if cfg.fl.practice else "evaluation"} if pers else None))
+        xtr, ytr, xte, yte, parts, owner = res[:6]
+        if pers:
+            split = res[6]
         num_classes = 62
     elif d.dataset == "synthetic":
         xtr, ytr, xte, yte = load_synthetic(d.num_classes, d.seed)
@@ -361,7 +424,14 @@ def build(cfg) -> dict:
     if parts is None:
         parts = dirichlet_partition(ytr, d.num_clients, d.dirichlet_alpha, d.seed,
                                     d.min_samples, d.max_samples)
+    if pers and split is None:
+        # pooled test set: one validation/test role per test example, all seeds
+        roles = pooled_roles(len(yte), d.split_seed, cfg.fl.val_frac)
+        split = {"test_global": np.arange(len(yte)), "val_role": roles,
+                 "fingerprint": split_fingerprint(np.packbits(roles), dataset=d.dataset,
+                                                  split_seed=d.split_seed, val_frac=cfg.fl.val_frac)}
     return {
+        "split": split,
         "x_train": xtr, "y_train": ytr, "x_test": xte, "y_test": yte,
         "parts": parts,
         # Which client each test example belongs to (FEMNIST: the writer's own

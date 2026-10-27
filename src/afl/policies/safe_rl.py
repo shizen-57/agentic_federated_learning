@@ -34,7 +34,7 @@ N_MEM = 7             # per-client memory features (SafePPOPolicy._memory_featur
 N_SUMMARY = 6         # per-round summary (success rate, fallback share, eligible share, mode shares)
 
 
-def load_checkpoint(net: nn.Module, path: str) -> str:
+def load_checkpoint(net: nn.Module, path: str) -> tuple[str, dict]:
     """Load pre-trained weights made by THIS simulator code (scripts/pretrain.py).
     Refuses a checkpoint from another code version or practice on non-practice
     seeds. Returns the checkpoint file's SHA-256 for the run's provenance."""
@@ -50,7 +50,7 @@ def load_checkpoint(net: nn.Module, path: str) -> str:
     if not meta.get("practice_only"):
         raise ValueError(f"checkpoint {path} was not made from practice episodes only")
     net.load_state_dict(ck["state_dict"])
-    return sha
+    return sha, meta
 
 
 def gae(rewards: list[float], values: list[float], last_value: float, gamma: float,
@@ -196,9 +196,9 @@ class SafePPOPolicy(RLPolicy):
                 self.net = build()
         else:
             self.net = build()
-        self.checkpoint_sha = None
+        self.checkpoint_sha = self.checkpoint_meta = None
         if p.init_checkpoint:
-            self.checkpoint_sha = load_checkpoint(self.net, p.init_checkpoint)
+            self.checkpoint_sha, self.checkpoint_meta = load_checkpoint(self.net, p.init_checkpoint)
         self.opt = torch.optim.Adam(self.net.parameters(), lr=p.ppo_lr)
         self.buf: list[dict] = []
         self._last = None                 # the step waiting for its reward
