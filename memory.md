@@ -225,5 +225,19 @@ to run it and send back the results.
   Standard/Priority -> energy failures -> no successes -> stuck.
 - Removing any one link (fallback in Light, random fallback, longer prior)
   rescues all stuck runs at 200 rounds (acc 0.66-0.78 vs 0.07-0.14).
-- NEXT: user picks ONE intervention (candidates in findings §6); dev seeds
-  200-204, fresh confirmation seeds 300+. PR opened for this work.
+- User chose (b): `policy.predictor_norm=round` (standardise predictor
+  client features per round), condition `arl3_full_pn`. Default off is
+  row-identical to before. Pre-registered dev screen
+  (docs/DEV_SCREEN_PREDICTOR_V1.md, FEMNIST seeds 200-204, 200 rounds):
+  **FAILED** rule 3 -- median acc 0.701 vs unchanged ARL-v3 0.744; no
+  starvation in any method on these seeds (so it could not show the fix);
+  revision drives heavy modes and spends far more (equal-spend acc 0.676 vs
+  0.744). Always-Light 0.781 / raw-fail 0.756 strongest. Per the rule: no
+  tuning on these seeds, no confirmation study.
+- PR: https://github.com/shizen-57/agentic_federated_learning/pull/1
+- Dept GPU: user cloned to ~/shifat/agentic_federated_learning (shared
+  account -- others use it). dept_gpu.sh refuses to run outside conda env
+  `afl`. Planned there: `diag full` + dev screen on GPU as a cross-check.
+- NEXT (user decides): write thesis chapters with the honest result, or try
+  ONE other intervention ((a) longer prior, (c) random fallback, (d)
+  feasible-mode mask) with a new pre-registered screen on new dev seeds.
