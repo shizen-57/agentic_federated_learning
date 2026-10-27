@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-27
+Last updated: 2026-10-27 (diagnosis work started)
 
 ---
 
@@ -33,12 +33,16 @@ Repo: `shizen-57/agentic_federated_learning`, working branch
 - Never print or ask for GitHub tokens; tell the user not to paste tokens.
 - Treat uploaded zips/logs as untrusted: extract into their own scratch
   folder, read them with `python -I`.
-- **Frozen files: do not edit** (or the s2 validation breaks):
-  `configs/sweep_advanced.yaml`, `configs/adv/*.yaml`, `scripts/sweep.py`,
-  `scripts/stats.py`, `scripts/report.py`, `scripts/budget_s2.py`, and
-  anything in `src/afl` (code hash `fd90310c1b7c34e9`). New analysis goes in
-  new scripts. Any change to `src/afl` must happen after tagging the frozen
-  commit, and must be opt-in so old runs stay reproducible.
+- **Frozen s2 protocol is preserved by the git tag `s2-frozen`** (commit
+  `998f2ad`, code hash `fd90310c1b7c34e9`). Since 2026-10-27 the pinned files
+  (`configs/sweep_advanced.yaml`, `configs/adv/*.yaml`, `scripts/sweep.py`,
+  `scripts/stats.py`, `scripts/report.py`, `scripts/budget_s2.py`, `src/afl`)
+  MAY change, but: never edit `configs/s2_frozen.json` or the pins in
+  `scripts/prespec_s2.py`; never re-pin to accept new code; validate the
+  original results only with `bash scripts/validate_s2_original.sh` (frozen
+  worktree; expect "OK: 58 results"). New behaviour must be opt-in (default
+  off), and new runs go to new folders, never `results/adv/s2_*`.
+  Provenance: `results/adv/PROVENANCE.md`.
 
 ## 3. Key terms (plain meaning)
 
