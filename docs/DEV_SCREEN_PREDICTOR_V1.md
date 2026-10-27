@@ -53,7 +53,8 @@ revision is not tuned on these seeds.
 ## Outcome (added after the runs; rule applied as written)
 
 Full table: `results/dev_predictor_v1/full/screen.md`
-(`python scripts/report_dev_screen.py results/dev_predictor_v1/full/s2_femnist`).
+(`python scripts/report_dev_screen.py results/dev_predictor_v1/full/s2_femnist`, the report
+version of that time; the current one takes `--spec` and validates the runs first).
 20/20 runs completed on CPU in 1,537 s.
 
 | condition | median successes | median final acc | median acc at equal spend | starved seeds |

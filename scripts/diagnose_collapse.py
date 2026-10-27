@@ -7,8 +7,9 @@
     python scripts/report_diagnostics.py results/diagnostic_v1/short
 
 Every run is expanded from the original s2 group by sweep.build_jobs, exactly
-as the s2 runs were, with only fl.rounds and diag.enabled changed; --dry-run
-prints that difference for every job, so nothing is approximated by hand.
+as the s2 runs were, with only fl.rounds, diag.enabled and the spec's shared
+`set` (e.g. data.split) changed; --dry-run prints that difference for every
+job, so nothing is approximated by hand.
 The runs themselves go through scripts/sweep.py (resume, quarantine, and the
 refusal to write into results/adv all apply). Each variant has its own
 folder; a short run is never reused as, or padded into, a full one.
@@ -62,8 +63,10 @@ def plan_for(spec: dict, variant: str) -> tuple[dict, dict]:
     src = _load(os.path.join(ROOT, spec["source_plan"]))
     g = src["groups"][spec["source_group"]]
     rounds = int(spec["variants"][variant])
-    group = {"config": g["config"], "set": {**(g.get("set") or {}), "fl.rounds": rounds,
-                                            "diag.enabled": True},
+    # spec "set": settings shared by every condition of this screen (e.g. the
+    # persistent data split), applied on top of the s2 group's own
+    group = {"config": g["config"], "set": {**(g.get("set") or {}), **(spec.get("set") or {}),
+                                            "fl.rounds": rounds, "diag.enabled": True},
              "conditions": list(spec["conditions"]), "seeds": list(spec["seeds"])}
     return {"seeds": list(spec["seeds"]), "sets": {}, "groups": {spec["source_group"]: group}}, src
 
@@ -105,7 +108,8 @@ def manifest(spec_path: str, spec: dict, variant: str, plan_path: str, overrides
         "git_dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
         "plan_sha256": {"diagnostic": _sha(spec_path), "generated": _sha(plan_path),
                         "source": _sha(os.path.join(ROOT, spec["source_plan"]))},
-        "overrides_vs_source": ["fl.rounds", "diag.enabled", "out"] + overrides,
+        "overrides_vs_source": ["fl.rounds", "diag.enabled", "out"]
+                               + sorted(spec.get("set") or {}) + overrides,
         "python": platform.python_version(), "torch": torch.__version__,
         "numpy": np.__version__, "cuda": torch.version.cuda,
         "device": (torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"),
@@ -157,7 +161,8 @@ def main() -> int:
           f"{spec['variants'][args.variant]} rounds -> {out}")
     print("source: " + spec["source_plan"] + " group " + spec["source_group"]
           + " (same build_jobs expansion)")
-    allowed = {"fl.rounds", "diag.enabled", "out", *spec.get("allowed_extra", [])}
+    allowed = {"fl.rounds", "diag.enabled", "out", *spec.get("allowed_extra", []),
+               *(spec.get("set") or {})}
     from afl.conditions import CONDITIONS
     for j, diff in rows:
         ok = allowed | ({"tag"} if j["cond"] in spec.get("base_of", {}) else set())

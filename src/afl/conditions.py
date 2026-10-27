@@ -125,26 +125,20 @@ CONDITIONS: dict[str, dict] = {
                               "policy.predictor": "v2", "policy.gate_mode": "thompson",
                               "policy.mode_mask": "feasible", "policy.mode_mask_z": 0.5,
                               "policy.cost_target_mult": 1.25, "policy.curriculum": True},
-    # RL2 M5/M5b: everything -- SAFE-PPO (attention, memory, predictor v2, Thompson
-    # gate, safety layer) with reward v2 (validation worst-class protection) and
-    # ARL-v4; cost handled by the constraint, not a fixed reward weight (beta 0).
+    # RL2 M5/M5b: everything -- SAFE-PPO (attention, memory, predictor v2 with
+    # evidence ageing, Thompson gate, safety layer: feasible mask, soft cost
+    # constraint, hard per-round cap, curriculum) with reward v2 (validation
+    # worst-class protection) and ARL-v4; cost handled by the constraint, not a
+    # fixed reward weight (beta 0).
     "ppo_full":              {"policy.name": "safe_ppo", "fl.aggregator": "fedprox",
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v4", "policy.per_client_credit": True,
                               "policy.encoder": "attention", "policy.memory": True,
                               "policy.predictor": "v2", "policy.gate_mode": "thompson",
+                              "policy.pred_decay": 0.98,
                               "policy.mode_mask": "feasible", "policy.mode_mask_z": 0.5,
-                              "policy.cost_target_mult": 1.25, "policy.curriculum": True,
-                              "reward.protect_weight": 0.5, "reward.beta": 0.0},
-    # The same with MimiC aggregation (RL + MimiC was the best pair in the early
-    # sweep; its confirmation narrowly failed -- docs/ADVANCED_RESULTS.md item 9).
-    "ppo_full_mimic":        {"policy.name": "safe_ppo", "fl.aggregator": "mimic",
-                              "policy.value_feature": "marginal",
-                              "reward.damage_metric": "arl_v4", "policy.per_client_credit": True,
-                              "policy.encoder": "attention", "policy.memory": True,
-                              "policy.predictor": "v2", "policy.gate_mode": "thompson",
-                              "policy.mode_mask": "feasible", "policy.mode_mask_z": 0.5,
-                              "policy.cost_target_mult": 1.25, "policy.curriculum": True,
+                              "policy.cost_target_mult": 1.25, "policy.hard_budget_mult": 2.0,
+                              "policy.curriculum": True,
                               "reward.protect_weight": 0.5, "reward.beta": 0.0},
     "arl3_shared":           {"policy.name": "rl", "fl.aggregator": "fedprox",
                               "policy.value_feature": "marginal",
@@ -192,6 +186,44 @@ CONDITIONS: dict[str, dict] = {
     "sens_fair01":           {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_fair": 0.1},
     "sens_fair1":            {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_fair": 1.0},
 }
+
+
+
+def _variant(base: str, drop: tuple = (), **change) -> dict:
+    """A condition equal to `base` with keys removed (back to the group's value)
+    and/or changed; keys are written with "__" for "."."""
+    out = {k: v for k, v in CONDITIONS[base].items() if k not in drop}
+    out.update({k.replace("__", "."): v for k, v in change.items()})
+    return out
+
+
+# RL2 screen B (docs/RL2_SCREEN_B.md): ppo_full with exactly ONE component
+# removed, so each component's effect is measured on its own, plus MimiC
+# aggregation, the same stack without ARL-v4, and a repaired simple scheduler.
+CONDITIONS.update({
+    "ppo_full_mimic":   _variant("ppo_full", fl__aggregator="mimic"),
+    "ppo_full_mlp":     _variant("ppo_full", policy__encoder="mlp"),           # no attention
+    "ppo_full_nomem":   _variant("ppo_full", policy__memory=False),            # no memory
+    "ppo_full_pv1":     _variant("ppo_full", ("policy.pred_decay",),           # original predictor
+                                 policy__predictor="v1", policy__gate_mode="top",  # (Thompson needs v2)
+                                 policy__mode_mask_z=0.0),
+    "ppo_full_top":     _variant("ppo_full", policy__gate_mode="top"),         # no Thompson gate
+    "ppo_full_nodecay": _variant("ppo_full", policy__pred_decay=1.0),          # predictor never forgets
+    "ppo_full_nomask":  _variant("ppo_full", ("policy.mode_mask_z",),          # any mode may be drawn
+                                 policy__mode_mask="none"),
+    "ppo_full_fixcost": _variant("ppo_full", ("reward.beta",),                 # fixed cost weight, no
+                                 policy__cost_target_mult=0.0),                # Lagrangian constraint
+    "ppo_full_nocap":   _variant("ppo_full", policy__hard_budget_mult=0.0),    # no hard round cap
+    "ppo_full_nocurr":  _variant("ppo_full", policy__curriculum=False),        # no trust curriculum
+    "ppo_full_noprot":  _variant("ppo_full", reward__protect_weight=0.0),      # no protection reward
+    "ppo_full_arl3":    _variant("ppo_full", reward__damage_metric="arl_v3"),  # ARL-v3 instead of v4
+    "ppo_full_rawfail": _variant("ppo_full", reward__damage_metric="raw_fail",  # no ARL at all:
+                                 policy__per_client_credit=False),             # plain failure count
+    # the repaired simple scheduler: always Light, with the same repaired
+    # predictor and gate as ppo_full
+    "rl_light_pg":      _variant("rl_light", policy__predictor="v2", policy__gate_mode="thompson",
+                                 policy__pred_decay=0.98),
+})
 
 
 def apply(raw: dict, overrides: dict) -> dict:

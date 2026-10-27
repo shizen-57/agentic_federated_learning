@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-27 (two revisions screened, both failed their rules)
+Last updated: 2026-10-27 (screen A passed; second review fixed; screen B v2 ready, unrun)
 
 ---
 
@@ -273,13 +273,38 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   protection reward, `ppo_full`; `ppo_full_mimic` = + MimiC, user asked),
   M6 (practice mode, scripts/pretrain.py, checkpoints with provenance).
   Every switch defaults off; defaults row-identical to earlier runs.
-  Suite ~280 tests pass (8 frozen-validator tests skip; they run in the
+  Suite 306 tests pass (8 frozen-validator tests skip; they run in the
   frozen checkout).
 - LESSON: never edit src/afl while a screen runs here -- runs get flagged
   "source changed while it ran" (happened once to screen A; restarted).
   Run screens from a frozen git worktree
   (scratchpad/wt_screen, data symlinked) with --out into the main repo.
-- Screen A (M1, seeds 210-214 + lock-check 110/113): running on CPU.
-- Next: screen B for the SAFE-PPO stack (dev seeds 215-219) and
-  pre-training -> best on the dept RTX 3070; then M7 tuning (215-239),
-  M8 ablation (240-259), M9 freeze, M10 confirmation (300+, user go-ahead).
+- Screen A (M1, seeds 210-214 + lock-check 110/113, CPU, per-seed split):
+  **PASSED** (docs/RL2_M1_SCREEN.md). Median final / equal-spend / worst-10%:
+  arl3_full_pg 0.768 / 0.769 / 0.529, 0 starved; arl3_full 0.748 / 0.738 /
+  0.483, 1 starved; rl_light 0.754 / 0.754 / 0.460; v2_rawfail 0.744 / 0.744 /
+  0.511. Lock-check s110 0.754, s113 0.766 (both escape).
+- Second external review (of e105c56), all 7 findings fixed and tested
+  (docs/RL2_DESIGN.md "Revision 2"): (1) persistent data split
+  (`data.split: persistent`, fixed val/test pools, FEMNIST practice vs
+  evaluation writers, fingerprint; checkpoint refused on another split);
+  (2) pretrain command runs; (3) one shared start network; (4) mask x
+  curriculum rule (feasible AND unlocked, else Light only if optimistic, else
+  abstain); (5) ARL-v4 joint reward = set-level coverage f(D), not summed
+  difference credits; (6) empty rounds kept in the PPO trajectory; (7)
+  report_dev_screen.py --spec validates every expected run, else
+  "INCOMPLETE -- no decision" (exit 2). Also: counterfactual on the joint
+  budget, hard per-round cap (`hard_budget_mult` 2.0), predictor evidence
+  ageing (`pred_decay` 0.98), pre-training cost recorded.
+- Screen B **version 2** (docs/RL2_SCREEN_B.md, configs/rl2_screen_b.yaml,
+  seeds 215-219, persistent split, 100 runs): ppo_full, each component
+  removed one at a time (12 leave-one-out), ppo_full_mimic, ppo_v3, and
+  references incl. rl_light_pg (repaired simple scheduler) and
+  ppo_full_rawfail / ppo_full_arl3 (the stack without ARL-v4). Rule is in the
+  spec. Version 1 was never run.
+- Seed plan: 210-214 screen A (used), 215-219 screen B, 220-239 tuning (M7),
+  240-259 screen C / ablation (M8), confirmation 300+ (user go-ahead).
+- Next: on the dept RTX 3070, after `git pull`: `bash scripts/dept_gpu.sh
+  screen configs/rl2_screen_b.yaml` (report written to
+  runs/rl2_screen_b/full/report.md), then pre-training of the carried-forward
+  condition, then screen C (pre-trained vs from scratch).

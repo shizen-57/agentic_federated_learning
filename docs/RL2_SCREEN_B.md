@@ -1,31 +1,73 @@
-# RL2 screen B: the SAFE-PPO stack, layer by layer (from scratch)
+# RL2 screen B: the SAFE-PPO stack, one component at a time
 
 Written and committed before any run. Development gate; exploratory.
 
+**Version 2.** Version 1 (a ladder that added several components per step)
+was revised after the second external review, before any of its runs: its
+steps bundled components, it lacked the "same stack without ARL-v4" and
+"repaired simple scheduler" comparisons, and it used per-seed data splits.
+No version-1 run exists.
+
 **Conditions** (`configs/rl2_screen_b.yaml`; FEMNIST, s2 settings, 200 rounds,
-dev seeds 215-219, no pre-training): references `arl3_full`, `v2_rawfail`,
-`rl_light`; stack `ppo_v3` (PPO), `ppo_att` (+ attention + memory),
-`ppo_safe` (+ predictor v2, Thompson gate, safety layer), `ppo_full`
-(+ ARL-v4 + protection reward, cost via constraint), `ppo_full_mimic`
-(+ MimiC aggregation). Run on the department RTX 3070
-(`bash scripts/dept_gpu.sh screen configs/rl2_screen_b.yaml`) or CPU; the
-device is recorded in MANIFEST.json.
+dev seeds 215-219, from scratch -- no pre-training; every condition on the
+persistent data split, `data.split: persistent`):
 
-**Measures:** as in docs/DEV_SCREEN_PREDICTOR_V1.md, plus the median final
-worst-10% client accuracy (`acc_client_worst10`, the P2 measure), reported.
+- references: `arl3_full`, `arl3_full_pg` (screen A's winner), `v2_rawfail`,
+  `rl_light` (always Light), `rl_light_pg` (always Light + the same predictor
+  v2, Thompson gate and evidence ageing as the full stack: the repaired simple
+  scheduler);
+- `ppo_v3`: the PPO learner alone (ARL-v3 reward, no other upgrade);
+- `ppo_full`: everything (attention, memory, predictor v2 with ageing 0.98,
+  Thompson gate, feasible mask z 0.5, cost constraint 1.25, hard cap 2.0,
+  curriculum, protection 0.5, ARL-v4 with the set-level objective, beta 0);
+- `ppo_full_mimic`: the same with MimiC aggregation;
+- leave-one-out, each `ppo_full` minus ONE component: `ppo_full_mlp`
+  (attention), `ppo_full_nomem` (memory), `ppo_full_pv1` (predictor v2 +
+  Thompson gate, which needs v2), `ppo_full_top` (Thompson gate),
+  `ppo_full_nodecay` (evidence ageing), `ppo_full_nomask` (feasible mask),
+  `ppo_full_fixcost` (cost constraint; fixed cost weight instead),
+  `ppo_full_nocap` (hard cap), `ppo_full_nocurr` (curriculum),
+  `ppo_full_noprot` (protection reward), `ppo_full_arl3` (ARL-v4 -> ARL-v3),
+  `ppo_full_rawfail` (ARL-v4 -> plain failure count: the same stack without ARL).
 
-**Rule** for each stack condition c:
-1. no seed starves (50+ rounds with invitations and no success);
-2. median accuracy at equal spend (B = 1,400) >= median of `rl_light` - 0.02;
-3. median final accuracy >= median of `arl3_full` - 0.02.
+20 conditions x 5 seeds = 100 runs. Run on the department RTX 3070
+(`bash scripts/dept_gpu.sh screen configs/rl2_screen_b.yaml`) or CPU; the device
+is recorded in MANIFEST.json. Run it from a clean checkout and do not edit the
+code while it runs.
 
-**Carried forward:** among conditions that pass, the one with the highest
-median equal-spend accuracy goes to pre-training (M6) and tuning (M7). If
-`ppo_full_mimic` is that one, MimiC aggregation is kept. If none passes,
-`ppo_full` still goes to pre-training: pre-training is part of the design and
-from-scratch learning over 200 rounds is the known weak point (W7); screen C
-then judges the pre-trained version on new dev seeds. Results are reported
-for every seed either way; nothing is tuned on seeds 215-219.
+**Measures:** as in docs/DEV_SCREEN_PREDICTOR_V1.md, plus the final worst-10%
+client accuracy (`acc_client_worst10`, the P2 measure).
 
-Report: `python scripts/report_dev_screen.py <out>/full/s2_femnist
---screen-b ppo_v3,ppo_att,ppo_safe,ppo_full,ppo_full_mimic`.
+**Evidence check (before any decision).** `scripts/report_dev_screen.py --spec`
+rebuilds all 100 expected runs from the spec and checks each: the exact
+expected config, rounds 1-200 all present with finite values, no source change
+during the run; all runs from one code version, made from a clean checkout,
+and the report run with that same code. If anything is missing or invalid it
+prints "INCOMPLETE -- no decision" and nothing below is applied.
+
+**Rule** (also in the spec's `rule` block):
+
+1. *Gate*, for `ppo_full` and `ppo_full_mimic`: no seed starves (50+ rounds
+   with invitations and no success); median accuracy at equal spend
+   (B = 1,400) >= median of `rl_light` - 0.02; median final accuracy >= median
+   of `arl3_full` - 0.02.
+2. *Carried forward* to pre-training (M6) and tuning (M7): the passing one
+   with the higher median equal-spend accuracy. If neither passes, `ppo_full`
+   still goes forward: pre-training is part of the design and from-scratch
+   learning over 200 rounds is the known weak point (W7); screen C judges the
+   pre-trained version on new dev seeds (240-259).
+3. *Comparisons* (reported, no decision): median over seeds of the paired
+   difference (condition - `ppo_full`) in equal-spend accuracy, final accuracy
+   and worst-10% accuracy, for every reference, `ppo_v3` and `ppo_full_mimic`.
+4. *Leave-one-out*: for each removed component, the median paired difference
+   (minus-one - `ppo_full`) in equal-spend accuracy and in worst-10% accuracy.
+   A component is a *drop candidate* if its removal starves no seed and raises
+   one of the two by >= 0.01 while lowering neither by more than 0.01. Drop
+   candidates are decided in tuning (M7) on seeds 220-239, not here; every
+   other component is kept.
+
+Results are reported for every seed either way; nothing is tuned on seeds
+215-219.
+
+Report: `python scripts/report_dev_screen.py <out>/full/s2_femnist --spec
+configs/rl2_screen_b.yaml` (the GPU script writes it to `<out>/full/report.md`).

@@ -5,6 +5,8 @@ used:
   - [0, 119]        # pilot, advanced sweep, s2 (100-119 = s2 confirmation)
   - [200, 209]      # dev screens: predictor_norm (200-204), mode_mask (205-209)
   - [900, 900]      # GPU smoke checks
-dev: [210, 299]           # development, tuning and ablation (RL2 plan)
+dev: [210, 299]           # development, tuning and ablation (RL2 plan):
+                          #   210-214 screen A (run), 215-219 screen B, 220-239 tuning (M7),
+                          #   240-259 screen C / ablation (M8), 260-299 spare
 practice: [1000, 1999]    # pre-training episodes only; never evaluated
 confirmation: [300, 399]  # reserved, unrun; only with a frozen manifest

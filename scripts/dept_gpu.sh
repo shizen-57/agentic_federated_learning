@@ -113,6 +113,12 @@ screen)
     name=$(basename "$spec" .yaml)
     python scripts/diagnose_collapse.py --spec "$spec" --variant full --jobs "$JOBS" \
         --set fl.device=auto --out "$OUT/$name" 2>&1 | tee -a "$OUT/$name.log"
+    # the pre-registered rule, applied only if every expected run is complete and valid
+    group=$(python -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["source_group"])' "$spec")
+    python scripts/report_dev_screen.py "$OUT/$name/full/$group" --spec "$spec" \
+        > "$OUT/$name/full/report.md" \
+        || echo "report says INCOMPLETE -- no decision (see $OUT/$name/full/report.md)"
+    echo "report: $OUT/$name/full/report.md"
     ;;
 pretrain)
     activate; mkdir -p checkpoints

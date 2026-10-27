@@ -21,7 +21,9 @@ definition, equal-spend budget B = 1,400, and three-part rule with
 
 - Plan `configs/dev_modemask_v1.yaml`; seeds **205-209** (fresh; 200-204 were
   inspected in the first screen). Results: `results/dev_modemask_v1/full/`.
-- Report: `python scripts/report_dev_screen.py results/dev_modemask_v1/full/s2_femnist --revision arl3_full_fm`.
+- Report: `python scripts/report_dev_screen.py results/dev_modemask_v1/full/s2_femnist --revision arl3_full_fm`
+  (the report version of that time; the current report takes `--spec`, validates the runs and
+  leaves this screen's decision to this document).
 
 ## Mechanism check (reported, not part of the rule)
 
