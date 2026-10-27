@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-27 (diagnosis work started)
+Last updated: 2026-10-27 (collapse diagnosed; no algorithm changed yet)
 
 ---
 
@@ -209,3 +209,21 @@ to run it and send back the results.
 - Whether the fix touches only RL code (then reuse old baseline runs) or
   shared code (then re-run the core comparison).
 - Thesis chapters not written yet; charts 1, 5, 6 suggested for the main text.
+
+## 11. Collapse diagnosis (2026-10-27) — see docs/DIAGNOSTIC_FINDINGS.md
+
+- Done: resume-validation fix, window-baseline fix, float64 test, opt-in
+  diagnostics (`diag.enabled`, proven not to change runs), runner
+  `scripts/diagnose_collapse.py`, report `scripts/report_diagnostics.py`,
+  analysis-only `scripts/diagnose_mechanisms.py`. Tests: 194 pass, 8 skipped
+  (frozen-validator tests; they run in the frozen checkout).
+- Collapse reproduced on CPU (ARL-v3 s113 4 successes, c2 s110 5, s113 8).
+- Cause: cold-start prior switches off at 20 observations -> every client
+  below 0.5 at round 3 -> all 10 slots gate fallback; predictor (uncentred
+  features, failure-only labels) ranks slow/low-battery clients highest;
+  deterministic fallback picks tier-0 devices; learned modes give them
+  Standard/Priority -> energy failures -> no successes -> stuck.
+- Removing any one link (fallback in Light, random fallback, longer prior)
+  rescues all stuck runs at 200 rounds (acc 0.66-0.78 vs 0.07-0.14).
+- NEXT: user picks ONE intervention (candidates in findings §6); dev seeds
+  200-204, fresh confirmation seeds 300+. PR opened for this work.
