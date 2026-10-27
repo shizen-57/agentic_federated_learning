@@ -264,3 +264,22 @@ Milestones: M0 spec+seeds (done) -> M1 predictor v2 + gate v2 -> M2 PPO ->
 M3 set encoder + memory -> M4 safety -> M5/M5b reward v2 + ARL-v4 ->
 M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
 (GPU, after user go-ahead). Each milestone: tests, pre-registered dev screen.
+
+### RL2 progress (2026-10-27)
+- Built and pushed: M0 (spec + seeds), M1 (predictor v2 + Thompson gate,
+  `arl3_full_pg`), M2 (SafePPOPolicy, `ppo_v3`), M3 (attention set encoder +
+  pointer picks + memory, `ppo_att`), M4 (Lagrangian cost constraint, trust
+  curriculum, mask margin, `ppo_safe`), M5/M5b (ARL-v4 + validation-only
+  protection reward, `ppo_full`; `ppo_full_mimic` = + MimiC, user asked),
+  M6 (practice mode, scripts/pretrain.py, checkpoints with provenance).
+  Every switch defaults off; defaults row-identical to earlier runs.
+  Suite ~280 tests pass (8 frozen-validator tests skip; they run in the
+  frozen checkout).
+- LESSON: never edit src/afl while a screen runs here -- runs get flagged
+  "source changed while it ran" (happened once to screen A; restarted).
+  Run screens from a frozen git worktree
+  (scratchpad/wt_screen, data symlinked) with --out into the main repo.
+- Screen A (M1, seeds 210-214 + lock-check 110/113): running on CPU.
+- Next: screen B for the SAFE-PPO stack (dev seeds 215-219) and
+  pre-training -> best on the dept RTX 3070; then M7 tuning (215-239),
+  M8 ablation (240-259), M9 freeze, M10 confirmation (300+, user go-ahead).
