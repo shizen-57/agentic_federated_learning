@@ -116,6 +116,15 @@ CONDITIONS: dict[str, dict] = {
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3", "policy.per_client_credit": True,
                               "policy.encoder": "attention", "policy.memory": True},
+    # RL2 M4: PPO + attention + memory + predictor v2 + Thompson gate + the
+    # safety layer (feasible mask with margin, cost constraint, trust curriculum).
+    "ppo_safe":              {"policy.name": "safe_ppo", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3", "policy.per_client_credit": True,
+                              "policy.encoder": "attention", "policy.memory": True,
+                              "policy.predictor": "v2", "policy.gate_mode": "thompson",
+                              "policy.mode_mask": "feasible", "policy.mode_mask_z": 0.5,
+                              "policy.cost_target_mult": 1.25, "policy.curriculum": True},
     "arl3_shared":           {"policy.name": "rl", "fl.aggregator": "fedprox",
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3"},

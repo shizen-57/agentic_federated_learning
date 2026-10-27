@@ -196,6 +196,15 @@ class PolicyCfg:
                                         # thompson: eligibility on p + gate_z*sd and fallback
                                         # by Thompson sampling (needs predictor v2; RL2 C2)
     gate_z: float = 1.0
+    mode_mask_z: float = 0.0           # feasible-mode mask on p - z*sd (needs predictor v2)
+    # SAFE-PPO safety layer (RL2 design C6)
+    cost_target_mult: float = 0.0       # 0 = off; else Lagrangian constraint: mean round cost
+                                        # <= mult x (K x mean cost of a Light job)
+    lagrange_lr: float = 0.05           # dual ascent step on the cost multiplier
+    curriculum: bool = False            # trust curriculum: Light only, then Standard, then
+                                        # Priority, unlocked by the predictor's recent calibration
+    curr_err: float = 0.1               # calibration error needed to unlock the next level
+    curr_min: int = 200                 # invitations observed before a level can unlock
     mode_mask: str = "none"             # none: the RL policy may draw any mode (original).
                                         # feasible: only modes whose predicted success is
                                         # >= elig_threshold (else only the most likely

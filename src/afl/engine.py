@@ -306,6 +306,10 @@ class Experiment:
             "repr_value": self.value_input,
             "sketch": self.d["sketch"],
             "n_work": self.env.n_work,
+            # K x the mean cost of a Light job: the scale of the safety layer's
+            # spend target (RL2 C6). Observable: from data sizes and mode costs.
+            "cost_ref": float(min(self.cfg.fl.clients_per_round, self.N) * np.mean(
+                [self.env.cost(i, "light") for i in range(self.N)])),
             "debt": self.debt / (1.0 + self.debt.max()),
             "cov_deficit": 1.0 - self.cov_ema / max(float(self.cov_ema.max()), 1e-9),
             # Protocol fix (system.checkin_pool): the clients that checked in
@@ -926,6 +930,7 @@ class Experiment:
             # For the baselines that learn from what arrived (FAVOR, DELTA, REFL).
             "acc": acc_r, "recv_ids": list(recv_ids), "updates": dict(zip(recv_ids, updates)),
             "stale": dict(zip(recv_ids, stale)), "grad_var": grad_var, "base_flat": base_flat,
+            "cost": round_cost,
         })
 
         weak = self.env.weak

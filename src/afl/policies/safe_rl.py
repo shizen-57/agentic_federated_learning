@@ -28,7 +28,8 @@ from torch import nn
 
 from .rl import RLPolicy, _f
 
-N_GLOBAL = 3          # round fraction, mean best success probability, eligible share
+N_GLOBAL = 6          # round fraction, mean best success probability, eligible share,
+                      # cost multiplier, recent cost / target, curriculum level
 N_MEM = 7             # per-client memory features (SafePPOPolicy._memory_features)
 N_SUMMARY = 6         # per-round summary (success rate, fallback share, eligible share, mode shares)
 
@@ -192,6 +193,13 @@ class SafePPOPolicy(RLPolicy):
         self.m_count = np.zeros(N)
         self.m_win = np.zeros((p.mem_window, N_SUMMARY))
         self._t = 0
+        # safety layer (RL2 C6)
+        self.lam = 0.0                    # Lagrange multiplier on round cost
+        self.cost_target = None           # set from the first state's cost_ref
+        self.cost_ema = 0.0
+        self.level = 0 if p.curriculum else len(self.modes) - 1
+        self.cal: list[tuple[float, int]] = []   # (predicted, observed) of recent invitations
+        self._pred = {}                   # this round's predicted success of the chosen modes
 
     # ------------------------------------------------------------- inputs
 
@@ -214,10 +222,21 @@ class SafePPOPolicy(RLPolicy):
         if self.cfg.policy.mode_mask != "none":
             for i in range(N):
                 pm[i] = self._mode_row(state, i, torch.zeros(len(self.modes))) > -1.0
+        if self.level < len(self.modes) - 1:
+            # Trust curriculum: modes above the unlocked level are not allowed;
+            # Light (level 0) always is.
+            pm[:, self.level + 1:] = False
+            pm[:, 0] = True
+        if self.cfg.policy.cost_target_mult > 0 and self.cost_target is None:
+            self.cost_target = self.cfg.policy.cost_target_mult * float(state["cost_ref"])
         pmax = np.array([max(state["p_succ"][i].values()) for i in range(N)])
+        tgt = self.cost_target or 1.0
         g = torch.tensor([t / max(self.rounds, 1), float(pmax.mean()),
-                          float(np.mean([state["eligible"][i] for i in range(N)]))],
+                          float(np.mean([state["eligible"][i] for i in range(N)])),
+                          self.lam, self.cost_ema / tgt if self.cost_target else 0.0,
+                          self.level / max(len(self.modes) - 1, 1)],
                          dtype=torch.float32)
+        self._p_round = state["p_succ"]
         cov = (torch.tensor(state["sketch"], dtype=torch.float32),
                torch.tensor(state["cov_deficit"], dtype=torch.float32)) if self.use_cov else None
         return {"x": x, "allowed": allowed, "k": k_s, "fill": list(fill), "pm": pm, "g": g,
@@ -277,7 +296,7 @@ class SafePPOPolicy(RLPolicy):
             # Bootstrap from this round's state value (the batch's next state).
             self._update(0.0 if inp is None else self._value_only(inp))
         if inp is None:
-            self._last = None
+            self._last, self._pred = None, {}
             return [], {}
         with torch.no_grad():
             out = self._pass(inp)
@@ -287,6 +306,7 @@ class SafePPOPolicy(RLPolicy):
             self._record_decision(out["chosen"], inp["fill"], out["steps"], out["rows"],
                                   out["mode_lp"], inp["allowed"], inp["k"], None)
         assign = {i: self.modes[m] for i, m in zip(out["chosen"], out["modes"])}
+        self._pred = {i: float(self._p_round[i][assign[i]]) for i in out["chosen"]}
         return list(out["chosen"]), assign
 
     def _value_only(self, inp) -> float:
@@ -320,9 +340,51 @@ class SafePPOPolicy(RLPolicy):
         summ = [sum(float(success.get(i, 0)) for i in sel) / n, fb, elig] + shares
         self.m_win = np.vstack([self.m_win[1:], np.array(summ[:N_SUMMARY])])
 
+    # ------------------------------------------------------------- safety
+
+    def shaped_reward(self, reward: float, cost: float | None) -> float:
+        """Lagrangian relaxation of 'mean round cost <= target': the policy
+        learns from r - lam * cost / target, and lam rises while spending is
+        over the target and falls (to 0) while under it (dual ascent)."""
+        if self.cost_target is None or cost is None:
+            return reward
+        ratio = cost / self.cost_target
+        shaped = reward - self.lam * ratio
+        self.lam = max(0.0, self.lam + self.cfg.policy.lagrange_lr * (ratio - 1.0))
+        self.cost_ema = 0.9 * self.cost_ema + 0.1 * cost
+        return shaped
+
+    @staticmethod
+    def calibration_error(pairs: list[tuple[float, int]], bins: int = 5) -> float:
+        """Expected calibration error of (predicted, observed) pairs."""
+        if not pairs:
+            return 1.0
+        p = np.array([a for a, _ in pairs])
+        y = np.array([b for _, b in pairs], dtype=float)
+        idx = np.minimum((p * bins).astype(int), bins - 1)
+        return float(sum(abs(p[idx == b].mean() - y[idx == b].mean()) * (idx == b).mean()
+                         for b in range(bins) if (idx == b).any()))
+
+    def _curriculum(self, action, info) -> None:
+        p = self.cfg.policy
+        if not p.curriculum or not action:
+            return
+        success = (info or {}).get("success", {})
+        self.cal.extend((self._pred[i], int(success.get(i, 0))) for i in action[0] if i in self._pred)
+        self.cal = self.cal[-p.curr_min:]
+        err = self.calibration_error(self.cal)
+        if len(self.cal) >= p.curr_min and err < p.curr_err and self.level < len(self.modes) - 1:
+            self.level += 1
+            self.cal = []                    # the next level must prove itself afresh
+        elif len(self.cal) >= p.curr_min // 2 and err > 2 * p.curr_err and self.level > 0:
+            self.level -= 1
+            self.cal = []
+
     def observe_outcome(self, state, action, reward, info):
         self.diag_update = None
         self._remember(action, info)
+        self._curriculum(action, info)
+        reward = self.shaped_reward(reward, (info or {}).get("cost"))
         if self._last is None or not self.train_mode:
             if self.diag:
                 self.diag_update = {"updated": False, "why": "no decision"}
@@ -331,8 +393,10 @@ class SafePPOPolicy(RLPolicy):
         self.buf.append(self._last)
         self._last = None
         if self.diag:
-            self.diag_update = self._update_stats or {"updated": False, "why": "buffered",
-                                                      "buffer": len(self.buf)}
+            self.diag_update = {**(self._update_stats or {"updated": False, "why": "buffered",
+                                                           "buffer": len(self.buf)}),
+                                "shaped_reward": float(reward), "lam": self.lam,
+                                "cost_target": self.cost_target, "level": self.level}
         self._update_stats = None
 
     def _ent_coef(self) -> float:

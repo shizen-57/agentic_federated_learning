@@ -289,6 +289,11 @@ class RLPolicy(Policy):
             return logits
         p = state["p_succ"][i]
         thr = self.cfg.policy.elig_threshold
+        z, sd = self.cfg.policy.mode_mask_z, state.get("p_sd")
+        if z > 0 and sd is not None:
+            # Safety margin (RL2 C6): trust a mode only if it clears the bar
+            # even after subtracting z posterior standard deviations.
+            p = {m: p[m] - z * sd[i][m] for m in self.modes}
         ok = [p[m] >= thr for m in self.modes]
         if not any(ok):
             best = max(self.modes, key=lambda m: p[m])
