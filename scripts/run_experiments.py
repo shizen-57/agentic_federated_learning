@@ -29,7 +29,7 @@ from afl.provenance import code_hash  # noqa: E402
 from afl.run import _load             # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from sweep import run_status          # noqa: E402
+from sweep import quarantine, run_status  # noqa: E402
 
 # Every condition in the shared registry, in its declared order. Earlier
 # versions of this script listed only Table 3.4 and four of the Table 3.5
@@ -74,6 +74,9 @@ def main() -> int:
                     continue
                 if st != "missing":
                     print(f"re-run {full}: {st}")
+                    quarantine(raw, st)
+            elif quarantine(raw, "forced re-run"):
+                print(f"re-run {full}: forced (earlier result kept in quarantine/)")
 
             t0 = time.time()
             exp = Experiment(Cfg.from_dict(raw))

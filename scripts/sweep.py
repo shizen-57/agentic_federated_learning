@@ -84,18 +84,77 @@ def expected_config(raw: dict) -> dict:
     return want
 
 
+# Columns every run CSV has had since the first advanced sweep. Later code
+# versions added the rest of afl.engine.LOG_FIELDS; a result made by older
+# code (reused with --ignore-code) may lack those, but never these.
+CORE_COLUMNS = (
+    "round", "accuracy", "acc_worst10", "test_loss", "reward", "cost", "latency",
+    "n_selected", "n_success", "fail_ratio", "arl_online", "arl_selected", "arl_oracle",
+    "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard", "mode_priority",
+    "weak_selected", "weak_success", "wall_s",
+)
+
+
+def _csv_status(path: str, rounds: int, exact_schema: bool) -> str:
+    """'ok' or why the run CSV cannot be reused: wrong columns, a truncated or
+    non-numeric row, a NaN/inf value, or rounds that are not exactly 1..rounds."""
+    import csv as _csv
+    import math
+    from afl.engine import LOG_FIELDS
+    try:
+        with open(path, newline="") as fh:
+            reader = _csv.reader(fh)
+            header = next(reader, None)
+            rows = list(reader)
+    except (OSError, UnicodeDecodeError, _csv.Error):
+        return "unreadable csv"
+    if not header:
+        return "empty csv"
+    if len(set(header)) != len(header):
+        return "duplicate columns"
+    if [c for c in header if c not in LOG_FIELDS]:
+        return "unexpected columns"
+    if exact_schema and header != list(LOG_FIELDS):
+        return "different columns"
+    if [c for c in CORE_COLUMNS if c not in header]:
+        return "missing columns"
+    seq = []
+    for row in rows:
+        if len(row) != len(header):
+            return "truncated row"
+        try:
+            vals = [float(v) for v in row]
+        except ValueError:
+            return "non-numeric value"
+        if not all(math.isfinite(v) for v in vals):
+            return "non-finite value"
+        r = vals[header.index("round")]
+        if not r.is_integer():
+            return "fractional round"
+        seq.append(int(r))
+    if seq != list(range(1, rounds + 1)):
+        return "incomplete"
+    return "ok"
+
+
 def run_status(raw: dict, current_code: str | None = None) -> str:
     """'ok' if this job's run exists, was made with exactly this config (and,
-    if current_code is given, by this code), has every round in order and was
-    not affected by a source change mid-run; 'missing'; otherwise why the
-    existing result cannot be used."""
+    if current_code is given, by this code), has every round in order with
+    finite values in the expected columns, and was not affected by a source
+    change mid-run; 'missing'; otherwise why the existing result cannot be
+    used. Never raises on a damaged result: a reason means "run it again"."""
     base = os.path.join(raw["out"], raw["tag"])
     if not os.path.exists(base + ".csv"):
         return "missing"
     if not os.path.exists(base + ".config.json"):
         return "no saved config"
-    with open(base + ".config.json") as fh:
-        meta = json.load(fh)
+    try:
+        with open(base + ".config.json") as fh:
+            meta = json.load(fh)
+    except (OSError, UnicodeDecodeError, ValueError):
+        return "unreadable config"
+    if not isinstance(meta, dict) or not isinstance(meta.get("fl", {}), dict):
+        return "malformed config"
     if meta.get("code_changed_during_run"):
         return "source changed while it ran"
     want = expected_config(raw)
@@ -105,16 +164,29 @@ def run_status(raw: dict, current_code: str | None = None) -> str:
         return "different config"
     if current_code is not None and meta.get("code_hash") != current_code:
         return "made by different code"
-    import csv as _csv
-    with open(base + ".csv") as fh:
-        rounds = [r.get("round") for r in _csv.DictReader(fh)]
-    try:
-        seq = [int(float(r)) for r in rounds]
-    except (TypeError, ValueError):
-        return "unreadable rounds"
-    if seq != list(range(1, want["fl"]["rounds"] + 1)):
-        return "incomplete"
-    return "ok"
+    return _csv_status(base + ".csv", want["fl"]["rounds"], exact_schema=current_code is not None)
+
+
+def quarantine(raw: dict, why: str) -> str | None:
+    """Move an existing, unusable result out of the way before it is re-run,
+    so no evidence is overwritten. Returns the quarantine folder, or None."""
+    base = os.path.join(raw["out"], raw["tag"])
+    files = [base + ext for ext in (".csv", ".config.json") if os.path.exists(base + ext)]
+    if not files:
+        return None
+    dest = os.path.join(raw["out"], "quarantine", time.strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(dest, exist_ok=True)
+    for f in files:
+        os.replace(f, os.path.join(dest, os.path.basename(f)))
+    with open(os.path.join(dest, raw["tag"] + ".why.txt"), "w") as fh:
+        fh.write(why + "\n")
+    return dest
+
+
+def frozen_evidence(out: str) -> bool:
+    """A results folder holding an original evaluation (marked by a
+    PROVENANCE.md next to its groups) must never be written to."""
+    return os.path.exists(os.path.join(os.path.dirname(os.path.abspath(out)), "PROVENANCE.md"))
 
 
 def _deepcopy(d):
@@ -202,6 +274,17 @@ def main() -> int:
         print(f"  {n} existing result(s) will be re-run: {why}", flush=True)
     if not pending:
         return 0
+    frozen = sorted({j["group"] for j in pending if frozen_evidence(j["raw"]["out"])})
+    if frozen:
+        print(f"refusing to write into an original evaluation (PROVENANCE.md): {frozen}; "
+              f"use another --out", flush=True)
+        return 1
+    moved = 0
+    for j in pending:
+        if quarantine(j["raw"], "forced re-run" if args.force else check(j)):
+            moved += 1
+    if moved:
+        print(f"  moved {moved} earlier result(s) to quarantine/ before re-running", flush=True)
 
     # Download/prepare every dataset once, before parallel workers race on it.
     from afl.data import ensure
