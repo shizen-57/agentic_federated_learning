@@ -91,6 +91,12 @@ CONDITIONS: dict[str, dict] = {
     "arl3_full":             {"policy.name": "rl", "fl.aggregator": "fedprox",
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3", "policy.per_client_credit": True},
+    # Development revision (docs/DIAGNOSTIC_FINDINGS.md): ARL-v3 with the
+    # success predictor's client features standardised per round.
+    "arl3_full_pn":          {"policy.name": "rl", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3", "policy.per_client_credit": True,
+                              "policy.predictor_norm": "round"},
     "arl3_shared":           {"policy.name": "rl", "fl.aggregator": "fedprox",
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3"},

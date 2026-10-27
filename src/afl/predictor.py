@@ -25,10 +25,14 @@ class SuccessPredictor:
         self.l2 = l2
         self.seen = 0
         self.mode_idx = {m: k for k, m in enumerate(cfg.system.modes)}
+        self.norm = cfg.policy.predictor_norm
+        if self.norm not in ("none", "round"):
+            raise ValueError(f"unknown policy.predictor_norm {self.norm}")
+        self.ref_mean = None
+        self.ref_std = None
 
-    def features(self, obs: dict, hist: dict, mode: str) -> np.ndarray:
-        m = np.zeros(3)
-        m[self.mode_idx[mode]] = 1.0
+    @staticmethod
+    def client_features(obs: dict, hist: dict) -> np.ndarray:
         return np.array([
             np.log1p(obs["speed_hat"]),
             np.log1p(obs["bw_hat"]),
@@ -36,8 +40,27 @@ class SuccessPredictor:
             obs["avail_hint"],
             hist["success_rate"],
             np.tanh(hist["rounds_since_success"] / 10.0),
-            *m,
         ])
+
+    def set_reference(self, rows: np.ndarray) -> None:
+        """policy.predictor_norm = round: this round's population statistics
+        of the client features (one row per client), used to standardise them.
+        The raw features are all non-negative; with uncentred inputs a model
+        trained on failures pushes every weight negative, so the slowest,
+        emptiest clients score highest. Centred inputs leave failures to the
+        intercept and keep the ranking tied to real differences."""
+        self.ref_mean = rows.mean(axis=0)
+        self.ref_std = np.maximum(rows.std(axis=0), 1e-3)
+
+    def features(self, obs: dict, hist: dict, mode: str) -> np.ndarray:
+        m = np.zeros(3)
+        m[self.mode_idx[mode]] = 1.0
+        c = self.client_features(obs, hist)
+        if self.norm == "round":
+            if self.ref_mean is None:
+                raise RuntimeError("policy.predictor_norm=round needs set_reference() each round")
+            c = (c - self.ref_mean) / self.ref_std
+        return np.concatenate([c, m])
 
     def predict(self, obs: dict, hist: dict, mode: str) -> float:
         z = float(self.features(obs, hist, mode) @ self.w + self.b)

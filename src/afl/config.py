@@ -189,6 +189,12 @@ class RewardCfg:
 class PolicyCfg:
     name: str = "rl"                    # random | fedcs | powerofchoice | oort | rl
     elig_threshold: float = 0.5         # e^elig_{i,t} gate (Sec. 3.10)
+    predictor_norm: str = "none"        # none: the success predictor sees raw client
+                                        # features (original). round: they are centred
+                                        # and scaled by this round's whole client
+                                        # population first, so training on (mostly)
+                                        # failures cannot turn "slow, low battery" into
+                                        # "likely to succeed" (docs/DIAGNOSTIC_FINDINGS.md)
     strict_gate: bool = False           # protocol fix: when fewer than K clients pass the
                                         # gate, keep the ones that pass and fill the rest
                                         # with the highest predicted success (instead of

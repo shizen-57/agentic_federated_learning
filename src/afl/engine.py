@@ -243,6 +243,9 @@ class Experiment:
             }
             for i in range(self.N)
         }
+        if self.cfg.policy.predictor_norm == "round":
+            self.predictor.set_reference(np.array(
+                [self.predictor.client_features(obs[i], hist[i]) for i in range(self.N)]))
         p_succ = {
             i: {m: self.predictor.predict(obs[i], hist[i], m) for m in self.cfg.system.modes}
             for i in range(self.N)

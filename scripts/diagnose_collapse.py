@@ -74,10 +74,11 @@ def compare(spec: dict, plan: dict, src: dict, out: str) -> list[tuple[dict, lis
     mine = build_jobs(plan, None, None, out, [])
     orig = {(j["cond"], j["seed"]): j for j in
             build_jobs(src, [spec["source_group"]], list(spec["seeds"]), "ORIGINAL", [])}
+    base_of = spec.get("base_of", {})          # revised condition -> the s2 one it modifies
     res = []
     for j in mine:
         a = _flat(expected_config(j["raw"]))
-        b = _flat(expected_config(orig[(j["cond"], j["seed"])]["raw"]))
+        b = _flat(expected_config(orig[(base_of.get(j["cond"], j["cond"]), j["seed"])]["raw"]))
         diff = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
         res.append((j, diff))
     return res
@@ -152,8 +153,10 @@ def main() -> int:
           f"{spec['variants'][args.variant]} rounds -> {out}")
     print("source: " + spec["source_plan"] + " group " + spec["source_group"]
           + " (same build_jobs expansion)")
+    allowed = {"fl.rounds", "diag.enabled", "out", *spec.get("allowed_extra", [])}
     for j, diff in rows:
-        bad = [k for k in diff if k not in ("fl.rounds", "diag.enabled", "out")]
+        ok = allowed | ({"tag"} if j["cond"] in spec.get("base_of", {}) else set())
+        bad = [k for k in diff if k not in ok]
         flag = "  <-- UNEXPECTED" if bad else ""
         print(f"  {j['cond']:16s} seed {j['seed']}  {os.path.join(j['raw']['out'], j['raw']['tag'])}"
               f"  differs from s2 in: {', '.join(diff)}{flag}")
