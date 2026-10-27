@@ -1,0 +1,251 @@
+# The advanced experimental design (docs/ADVANCED_EXPERIMENTS.md).
+#
+# Each group = one base config + overrides + a set of conditions from
+# src/afl/conditions.py, run for every seed. Results land in
+# results/adv/<group>/<condition>_s<seed>.csv.
+#
+#   python scripts/sweep.py --list                      # what would run, and how much
+#   python scripts/sweep.py --groups 'weak_*' --jobs 4  # one family of groups
+#   python scripts/sweep.py --groups 'main_cifar' --shard 0/3   # split across machines
+#
+# Seeds are matched across conditions (same seed -> same data split, same device
+# profiles, same random draws), which is what makes the paired tests in
+# scripts/stats.py valid.
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+sets:
+  all: [c1_rl_fedavg, c2_rl_fedprox, c3_rl_fednova, c4_heuristic_fedprox,
+        c5_rl_fedprox_fednova, b_random, b_fedcs, b_powerofchoice, b_oort,
+        b_fedcer, b_mimic_impute, ablation_rawfail, ablation_cvsel, ablation_arlsel]
+  # The claim tests plus the baselines they must beat.
+  focus: [c2_rl_fedprox, ablation_rawfail, ablation_cvsel, ablation_arlsel,
+          b_random, b_oort, b_fedcs, b_fedcer]
+  # Minimum set for robustness checks (scale, non-IID severity).
+  core: [c2_rl_fedprox, ablation_rawfail, b_random, b_oort]
+  claims: [c2_rl_fedprox, ablation_rawfail, ablation_cvsel, ablation_arlsel]
+  # Parts of Chapter 3 switched on, budgets, and the published baselines.
+  ext: [c2_rl_fedprox, c2_gamma, c2_reweight, c2_async, c2_debt, c2_budget,
+        b_random_budget, b_oort_budget, b_mifa, b_mimic, b_fedcg]
+  # Follow-ups to the first 1,190 runs: MimiC vs RL, RL + MimiC, FedCG with slack.
+  follow: [c2_rl_fedprox, b_mimic, c2_mimic, b_fedcg, b_fedcg_m07]
+  # Fair re-test of ARL with the corrected value input.
+  value: [v2_c2, v2_rawfail, v2_arlsel, v2_arl0]
+  # ARL-v2 against the plain failure count and the original ARL (all with the
+  # corrected value input), plus Random for context.
+  arl2: [arl2_full, arl2_shared, v2_rawfail, v2_c2, b_random]
+  # After the simulator fix: the proposed RL policy and its variants, the
+  # mode controls, every earlier baseline (plus mode-fair versions), and the
+  # published FAVOR, DELTA and REFL.
+  s2: [c2_rl_fedprox, v2_rawfail, arl2_full, arl3_full, arl3_shared, rl_light, rl_ew,
+       b_random, b_random_ew, b_oort, b_oort_ew, b_powerofchoice, b_poc_ew,
+       b_fedcs, b_fedcer, b_cov_ew, b_mimic,
+       b_favor, b_favor_ew, b_delta, b_delta_ew, b_refl, b_refl_ew]
+  # ARL-v3 against the failure count, ARL-v2 and always-Light, for churn.
+  s2arl: [v2_rawfail, arl2_full, arl3_full, rl_light]
+  # Reward-weight sensitivity (Sec. 3.18).
+  sens: [c2_rl_fedprox, sens_arl0, sens_arl025, sens_arl1, sens_arl2,
+         sens_fair0, sens_fair01, sens_fair1]
+
+# The regime the thesis argues ARL is for: 30% of clients are persistently
+# weak (slower than the mid tier, less reliable, less available) in a way
+# that makes them mode-sensitive -- Light usually works (~33%), Priority
+# almost never (~4%) -- availability is sticky, and the weak clients are the
+# ones holding the rarest classes.
+weak_rare: &weak_rare
+  system.weak_frac: 0.3
+  system.weak_select: rarity
+  system.avail_persistence: 0.8
+# Weak clients holding rare data, AND clients that can quit: half the clients
+# leave for good after 3 consecutive invitations they attempted and failed.
+# The scenario where a scheduler's mistakes cause permanent loss.
+weak_churn: &weak_churn
+  system.weak_frac: 0.3
+  system.weak_select: rarity
+  system.avail_persistence: 0.8
+  system.churn_after: 3
+  system.churn_prob: 0.5
+# Control: same weakness, but a random 30% -- weakness without value. If ARL
+# helps under weak_rare but not here, the effect is about value, as claimed.
+weak_random: &weak_random
+  system.weak_frac: 0.3
+  system.weak_select: random
+  system.avail_persistence: 0.8
+
+# Simulator fix (docs/ADVANCED_RESULTS.md, "Simulator fix"): a mode's upload
+# fraction is what the server really receives (top-k with error feedback), and
+# Oort no longer sees the true round time. Protocol fix (same doc, "Protocol
+# fix"): rewards use a validation set kept apart from the test images; every
+# method starts from the same model for a seed, with separate random streams;
+# the absence counter counts every round; and every RL variant gets the same
+# inputs (corrected value input, coverage inputs), so RL variants differ only
+# in reward and mode rule. Second review: charge only what a client actually
+# did, every method picks from the clients that checked in, per-client credit
+# does not depend on processing order, and the eligibility gate keeps the
+# clients that pass it. Third review: normalised reward terms have a minimum
+# spread, a warm-up and a +-3 cap. Fifth/sixth review: with per-client ARL
+# credit the policy learns from one round reward (shared reward + the sum of
+# the clients' credits) on the whole joint action, with a baseline from
+# previous rounds only; FedCER-like estimates round time with the workload.
+# Every group from here on uses all of it.
+sim2: &sim2
+  fl.compress_upload: true
+  policy.oort_estimated_time: true
+  fl.val_frac: 0.3
+  fl.clean_rng: true
+  fl.absence_counter: true
+  policy.value_feature: marginal
+  policy.coverage_features: true
+  system.charge_actual: true
+  system.checkin_pool: true
+  reward.batch_client_norm: true
+  reward.robust_norm: true
+  policy.strict_gate: true
+  policy.credit_total: true
+  policy.prior_baseline: true
+  policy.shared_time_estimate: true
+weak_rare_s2: &weak_rare_s2
+  <<: [*weak_rare, *sim2]
+weak_churn_s2: &weak_churn_s2
+  <<: [*weak_churn, *sim2]
+# Five-round versions, to check on the GPU that every condition runs end to
+# end before the long runs. Seed 900 is never used for any test.
+smoke_rare_s2: &smoke_rare_s2
+  <<: *weak_rare_s2
+  fl.rounds: 5
+smoke_churn_s2: &smoke_churn_s2
+  <<: *weak_churn_s2
+  fl.rounds: 5
+
+groups:
+  # 1. Main comparison: every condition, every dataset, at N=100 / K=10.
+  main_mnist:   {config: configs/adv/mnist.yaml,   conditions: all}
+  main_femnist: {config: configs/adv/femnist.yaml, conditions: all}
+  main_cifar:   {config: configs/adv/cifar10.yaml, conditions: all}
+
+  # 2. Persistent weak clients holding rare data -- the direct test of ARL.
+  weak_mnist:   {config: configs/adv/mnist.yaml,   set: *weak_rare, conditions: focus}
+  weak_femnist: {config: configs/adv/femnist.yaml, set: *weak_rare, conditions: focus}
+  weak_cifar:   {config: configs/adv/cifar10.yaml, set: *weak_rare, conditions: focus}
+
+  # 3. Control for (2): weak clients chosen at random.
+  weakrand_mnist:   {config: configs/adv/mnist.yaml,   set: *weak_random, conditions: claims}
+  weakrand_femnist: {config: configs/adv/femnist.yaml, set: *weak_random, conditions: claims}
+
+  # 4. Scale: N=30/K=5 (the pilot's setting) and N=200/K=20.
+  scale_n30_mnist:
+    config: configs/adv/mnist.yaml
+    set: {data.num_clients: 30, fl.clients_per_round: 5, data.min_samples: 100, data.max_samples: 900}
+    conditions: core
+  scale_n200_mnist:
+    config: configs/adv/mnist.yaml
+    set: {data.num_clients: 200, fl.clients_per_round: 20, data.min_samples: 40, data.max_samples: 350}
+    conditions: core
+  scale_n30_femnist:
+    config: configs/adv/femnist.yaml
+    set: {data.num_clients: 30, fl.clients_per_round: 5}
+    conditions: core
+  scale_n200_femnist:
+    config: configs/adv/femnist.yaml
+    set: {data.num_clients: 200, fl.clients_per_round: 20}
+    conditions: core
+
+  # 5. Non-IID severity: alpha 0.1 (very skewed) and 0.5 (milder). FEMNIST is
+  #    naturally partitioned, so it has no alpha to vary.
+  alpha01_mnist: {config: configs/adv/mnist.yaml,   set: {data.dirichlet_alpha: 0.1}, conditions: core}
+  alpha05_mnist: {config: configs/adv/mnist.yaml,   set: {data.dirichlet_alpha: 0.5}, conditions: core}
+  alpha01_cifar: {config: configs/adv/cifar10.yaml, set: {data.dirichlet_alpha: 0.1}, conditions: core}
+  alpha05_cifar: {config: configs/adv/cifar10.yaml, set: {data.dirichlet_alpha: 0.5}, conditions: core}
+
+  # 6. Pre-specified confirmatory test (docs/ADVANCED_RESULTS.md), decided
+  #    after weak_cifar seeds 0-9 hinted at a small effect and BEFORE these
+  #    runs: fresh seeds 10-39 only (never pooled with 0-9), ARL reward vs the
+  #    plain failure count, one metric (final_acc_worst10), one-sided, alpha 0.05.
+  confirm_cifar:
+    config: configs/adv/cifar10.yaml
+    set: *weak_rare
+    conditions: [c2_rl_fedprox, ablation_rawfail]
+    seeds: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]
+
+  # 7. Chapter 3 pieces the original runs left off (multi-round returns,
+  #    Eq. 3.54 reweighting, semi-async staleness, fairness debt, C_max/L_max
+  #    budgets) and the published MIFA, MimiC and FedCG algorithms, in the
+  #    weak-client regime where client dropouts matter most.
+  ext_mnist: {config: configs/adv/mnist.yaml,   set: *weak_rare, conditions: ext}
+  ext_cifar: {config: configs/adv/cifar10.yaml, set: *weak_rare, conditions: ext}
+
+  # 8. Reward-weight sensitivity (Sec. 3.18), including lambda_arl = 0 (no
+  #    damage term at all), in the regime ARL is meant for.
+  sens_cifar: {config: configs/adv/cifar10.yaml, set: *weak_rare, conditions: sens}
+
+  # 9. Real device heterogeneity: FedScale's measured phone speeds and
+  #    bandwidths instead of the three guessed tiers.
+  trace_mnist: {config: configs/adv/mnist.yaml,   set: {system.device_trace: fedscale}, conditions: focus}
+  trace_cifar: {config: configs/adv/cifar10.yaml, set: {system.device_trace: fedscale}, conditions: focus}
+
+  # 10. Follow-up to ext_cifar, which found MimiC more accurate than RL on
+  #     seeds 0-9 (a comparison picked after seeing the data). Replicated on
+  #     FRESH seeds 10-29 only; the pre-specified test is in
+  #     docs/ADVANCED_RESULTS.md. Also RL + MimiC together, and FedCG with a
+  #     deadline margin so it is not handicapped by a hard deadline.
+  follow_cifar:
+    config: configs/adv/cifar10.yaml
+    set: *weak_rare
+    conditions: follow
+    seeds: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
+
+  # 11. Fair re-test of ARL (docs/ADVANCED_RESULTS.md, "Why ARL showed no
+  #     gain"): the RL policy's value input was anti-correlated with the value
+  #     ARL rewards. Same weak-client CIFAR-10 setting with the corrected input,
+  #     on FRESH seeds 40-59 (no overlap with any earlier group). Tests fixed
+  #     in advance in docs/ADVANCED_RESULTS.md.
+  value_cifar:
+    config: configs/adv/cifar10.yaml
+    set: *weak_rare
+    conditions: value
+    seeds: [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59]
+
+  # 12. Pre-specified confirmation of RL selection + MimiC aggregation, which
+  #     beat RL alone as a secondary result in follow_cifar. Fresh seeds 60-79,
+  #     CIFAR-10 and FEMNIST, weak-client regime (docs/ADVANCED_RESULTS.md).
+  confirm_mimic_cifar:
+    config: configs/adv/cifar10.yaml
+    set: *weak_rare
+    conditions: [c2_rl_fedprox, c2_mimic, b_mimic]
+    seeds: [60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79]
+  confirm_mimic_femnist:
+    config: configs/adv/femnist.yaml
+    set: *weak_rare
+    conditions: [c2_rl_fedprox, c2_mimic, b_mimic]
+    seeds: [60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79]
+
+  # 13. ARL-v2 (design frozen in docs/ADVANCED_RESULTS.md before any run).
+  #     Development runs on MNIST, seeds 0-2: bug check only, not used to
+  #     choose or tune anything.
+  dev_mnist:       {config: configs/adv/mnist.yaml, set: *weak_rare,  conditions: arl2, seeds: [0, 1, 2]}
+  dev_churn_mnist: {config: configs/adv/mnist.yaml, set: *weak_churn, conditions: arl2, seeds: [0, 1, 2]}
+  #     Pre-specified confirmation: fresh seeds 80-99, CIFAR-10 and FEMNIST,
+  #     weak-client regime with and without churn.
+  arl2_cifar:         {config: configs/adv/cifar10.yaml, set: *weak_rare,  conditions: arl2, seeds: [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]}
+  arl2_churn_cifar:   {config: configs/adv/cifar10.yaml, set: *weak_churn, conditions: arl2, seeds: [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]}
+  arl2_femnist:       {config: configs/adv/femnist.yaml, set: *weak_rare,  conditions: arl2, seeds: [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]}
+  arl2_churn_femnist: {config: configs/adv/femnist.yaml, set: *weak_churn, conditions: arl2, seeds: [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]}
+
+  # 14. After the simulator fix (design and tests fixed in
+  #     docs/ADVANCED_RESULTS.md before these runs). Development runs on
+  #     MNIST, seeds 0-2: bug check only.
+  dev_s2_mnist: {config: configs/adv/mnist.yaml, set: *weak_rare_s2, conditions: s2, seeds: [0, 1, 2]}
+  #     Pre-specified tests: fresh seeds 100-119, weak-client regime, CIFAR-10
+  #     and FEMNIST; ARL-v3 also under churn. Listed in the order to run them.
+  s2_cifar:         {config: configs/adv/cifar10.yaml, set: *weak_rare_s2,  conditions: s2,    seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119]}
+  s2_femnist:       {config: configs/adv/femnist.yaml, set: *weak_rare_s2,  conditions: s2,    seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119]}
+  s2_churn_cifar:   {config: configs/adv/cifar10.yaml, set: *weak_churn_s2, conditions: s2arl, seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119]}
+  s2_churn_femnist: {config: configs/adv/femnist.yaml, set: *weak_churn_s2, conditions: s2arl, seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119]}
+  #     The original setting (no weak clients) with the fix, for the main
+  #     comparison table. Seeds 100-109.
+  s2_main_cifar:    {config: configs/adv/cifar10.yaml, set: *sim2, conditions: s2, seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]}
+  s2_main_femnist:  {config: configs/adv/femnist.yaml, set: *sim2, conditions: s2, seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]}
+  #     GPU smoke check (5 rounds, seed 900): run first, before the groups above.
+  smoke_s2_cifar:       {config: configs/adv/cifar10.yaml, set: *smoke_rare_s2,  conditions: s2,    seeds: [900]}
+  smoke_s2_femnist:     {config: configs/adv/femnist.yaml, set: *smoke_rare_s2,  conditions: s2,    seeds: [900]}
+  smoke_s2_churn_cifar: {config: configs/adv/cifar10.yaml, set: *smoke_churn_s2, conditions: s2arl, seeds: [900]}

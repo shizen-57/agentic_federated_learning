@@ -22,10 +22,11 @@ import torch
 def _weighted(updates, weights):
     w = torch.tensor(weights, dtype=torch.float32)
     w = w / w.sum()
-    return sum(u * wi for u, wi in zip(updates, w))
+    # float(): the weights live on the CPU while updates may be on a GPU.
+    return sum(u * float(wi) for u, wi in zip(updates, w))
 
 
-def aggregate(rule: str, updates, n_i, steps, success_probs=None):
+def aggregate(rule: str, updates, n_i, steps, success_probs=None, p_floor: float = 1e-3):
     """Return the flat delta to add to the global model.
 
     `success_probs` enables the optional importance reweighting of Eq. (3.54),
@@ -37,10 +38,15 @@ def aggregate(rule: str, updates, n_i, steps, success_probs=None):
 
     weights = list(n_i)
     if success_probs is not None:
-        weights = [n / max(p, 1e-3) for n, p in zip(n_i, success_probs)]
+        weights = [n / max(p, p_floor) for n, p in zip(n_i, success_probs)]
 
     if rule in ("fedavg", "fedprox"):
         return _weighted(updates, weights)
+
+    if rule == "fedcg":
+        # FedCG aggregates the received (compressed) updates with equal weight:
+        # x^{k+1} = x^k - eta/M * sum_n G~_n (Alg. 1, line 11).
+        return sum(updates) / len(updates)
 
     if rule in ("fednova", "fedprox_fednova"):
         w = torch.tensor(weights, dtype=torch.float32)

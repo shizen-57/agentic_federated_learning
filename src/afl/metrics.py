@@ -61,6 +61,54 @@ def per_client_representation_value(sketch: np.ndarray, selected: list[int]) -> 
     return vals
 
 
+def expected_marginal_value(sketch: np.ndarray, k: int, n_samples: int = 200,
+                            seed: int = 0) -> np.ndarray:
+    """E[V^repr_i] over random k-client sets, scaled to [0, 1].
+
+    The policy-side counterpart of Eq. (3.26): how much class coverage client
+    i typically adds to (or would take away from) a round's selection. V^repr
+    itself depends on the set chosen this round, so it cannot be an input to
+    the choice; its expectation can, and it ranks clients the way ARL values
+    them. Computed once from the class sketches.
+    """
+    rng = np.random.default_rng(seed)
+    N = sketch.shape[0]
+    v = np.zeros(N)
+    for _ in range(n_samples):
+        S = list(rng.choice(N, size=min(k, N), replace=False))
+        v += per_client_representation_value(sketch, S)
+    v /= n_samples
+    return v / v.max() if v.max() > 0 else v
+
+
+def coverage_shapley(sketch: np.ndarray, selected: list[int]) -> dict[int, float]:
+    """Each selected client's fair share of Cov(S), the Shapley value.
+
+    The leave-one-out value of Eq. (3.26) gives two selected clients who hold
+    the same rare class zero each (removing either leaves the other), so if
+    both fail the lost coverage is invisible to a sum of per-client values.
+    The Shapley value splits Cov(S) = sum_k max_{i in S} c_ik instead: for each
+    class, sort the holders' shares x_(1) <= ... <= x_(m); the slice
+    (x_(l-1), x_(l)] is provided by the m - l + 1 clients holding at least
+    x_(l), so each gets an equal part of it (the "airport game"). Two clients
+    with the same share of a class get half of it each, and the shares always
+    add up to Cov(S).
+    """
+    sel = list(selected)
+    if not sel:
+        return {}
+    X = sketch[sel]                                   # m x C
+    m = len(sel)
+    order = np.argsort(X, axis=0, kind="stable")
+    xs = np.take_along_axis(X, order, axis=0)
+    inc = np.diff(np.vstack([np.zeros((1, X.shape[1])), xs]), axis=0)
+    share = inc / (m - np.arange(m))[:, None]         # slice l split over m - l + 1
+    cum = np.cumsum(share, axis=0)                    # value of the l-th smallest
+    phi = np.zeros_like(X)
+    np.put_along_axis(phi, order, cum, axis=0)
+    return {i: float(v) for i, v in zip(sel, phi.sum(axis=1))}
+
+
 def standalone_value(sketch: np.ndarray) -> np.ndarray:
     """Value of each client evaluated on its own, used as a cheap static prior."""
     return sketch.sum(axis=1) * (sketch > 0.05).sum(axis=1) / sketch.shape[1]
@@ -134,20 +182,53 @@ class Normalizer:
 
     Accuracy gain, cost, latency and ARL live on wildly different scales, so the
     reward coefficients would be uninterpretable without this.
+
+    The defaults are the original runs' behaviour. The robust settings
+    (reward.robust_norm) guard against a near-constant history: after ten
+    zeros, a loss of 0.2 would otherwise be 0.2 / 1e-6 = 200,000 standard
+    deviations. `floor` is the smallest spread used, `clip` bounds the result,
+    and nothing is returned until `warmup` values have been seen.
     """
 
-    def __init__(self, eps: float = 1e-6):
+    def __init__(self, eps: float = 1e-6, floor: float = 0.0, clip: float | None = None,
+                 warmup: int = 2):
         self.n = 0
         self.mean = 0.0
         self.m2 = 0.0
         self.eps = eps
+        self.floor = floor
+        self.clip = clip
+        self.warmup = warmup
+
+    def _z(self, x: float) -> float:
+        std = max((self.m2 / (self.n - 1)) ** 0.5, self.floor)
+        z = float((x - self.mean) / (std + self.eps))
+        if self.clip is not None:
+            z = max(-self.clip, min(self.clip, z))
+        return z
+
+    def batch(self, xs: list[float]) -> list[float]:
+        """Standardise a batch with the statistics from before it, then add it.
+
+        Every value in the batch is judged against the same mean and spread,
+        so the result does not depend on the order of the batch.
+        """
+        if self.n < max(self.warmup, 2):
+            out = [0.0] * len(xs)
+        else:
+            out = [self._z(x) for x in xs]
+        for x in xs:
+            self.n += 1
+            d = x - self.mean
+            self.mean += d / self.n
+            self.m2 += d * (x - self.mean)
+        return out
 
     def __call__(self, x: float) -> float:
         self.n += 1
         d = x - self.mean
         self.mean += d / self.n
         self.m2 += d * (x - self.mean)
-        if self.n < 2:
+        if self.n < max(self.warmup, 2):
             return 0.0
-        std = (self.m2 / (self.n - 1)) ** 0.5
-        return float((x - self.mean) / (std + self.eps))
+        return self._z(x)

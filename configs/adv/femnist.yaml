@@ -1,0 +1,31 @@
+# Advanced sweep, FEMNIST: one client per real writer (natural non-IID split,
+# dirichlet_alpha is ignored), 62 classes, ~220k-param CNN, 200 rounds.
+# Prepare the data once first: python scripts/prepare_femnist.py
+tag: adv_femnist
+seed: 0
+out: results/adv
+data:
+  dataset: femnist
+  num_clients: 100
+  min_samples: 150
+  max_samples: 400
+fl:
+  rounds: 200
+  clients_per_round: 10
+  lr: 0.05
+  batch_size: 32
+  mu: 0.01
+  aggregator: fedprox
+  model: cnn_femnist
+  device: auto
+system:
+  work_ref_samples: 500
+reward:
+  alpha: 1.0
+  beta: 0.1
+  delta: 0.1
+  lambda_arl: 0.5
+  lambda_fair: 0.3
+policy:
+  name: rl
+  elig_threshold: 0.5

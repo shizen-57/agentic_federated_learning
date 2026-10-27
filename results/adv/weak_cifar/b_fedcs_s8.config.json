@@ -1,0 +1,76 @@
+{
+  "data": {
+    "dataset": "cifar10",
+    "num_clients": 100,
+    "dirichlet_alpha": 0.3,
+    "min_samples": 50,
+    "max_samples": 600,
+    "num_classes": 10,
+    "seed": 8
+  },
+  "system": {
+    "modes": [
+      "light",
+      "standard",
+      "priority"
+    ],
+    "local_epochs": {
+      "light": 1,
+      "standard": 2,
+      "priority": 4
+    },
+    "upload_frac": {
+      "light": 0.25,
+      "standard": 0.5,
+      "priority": 1.0
+    },
+    "deadline": 1.0,
+    "cost_max": 1000000000.0,
+    "latency_max": 1000000000.0,
+    "availability_p": 0.85,
+    "diurnal_amplitude": 0.35,
+    "rounds_per_day": 96,
+    "staleness_max": 1,
+    "norm_clip": 10.0,
+    "work_ref_samples": 500,
+    "weak_frac": 0.3,
+    "weak_select": "rarity",
+    "weak_speed": 0.8,
+    "weak_bandwidth": 0.6,
+    "weak_reliability": 0.6,
+    "weak_avail_drop": 0.1,
+    "avail_persistence": 0.8
+  },
+  "fl": {
+    "rounds": 200,
+    "clients_per_round": 10,
+    "lr": 0.05,
+    "batch_size": 32,
+    "mu": 0.01,
+    "aggregator": "fedprox",
+    "model": "cnn_cifar",
+    "device": "cuda:0",
+    "eval_subset": 2000,
+    "impute_missing": false
+  },
+  "reward": {
+    "alpha": 1.0,
+    "beta": 0.1,
+    "delta": 0.1,
+    "lambda_arl": 0.5,
+    "lambda_fair": 0.3,
+    "gamma": 0.95,
+    "damage_metric": "arl",
+    "fairness_metric": "cv_success"
+  },
+  "policy": {
+    "name": "fedcs",
+    "elig_threshold": 0.5,
+    "rl_lr": 0.01,
+    "rl_hidden": 32,
+    "entropy_coef": 0.01
+  },
+  "seed": 8,
+  "out": "/kaggle/working/adv/weak_cifar",
+  "tag": "b_fedcs_s8"
+}

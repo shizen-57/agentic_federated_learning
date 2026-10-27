@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Run the full experimental design of Sec. 3.23 and write one CSV per run.
 
-Conditions 1-4 of Table 3.4 (aggregation-rule ablation, plus the heuristic
-control) and the external baselines of Table 3.5 (Table 3.5's FedCER/MIFA rows
-are not implemented here -- see docs/EXPERIMENT_PLAN.md).
+Every condition in afl.conditions: Table 3.4 (aggregation-rule ablation plus
+the heuristic control), the Table 3.5 baselines, and the Task 1/2 ablations.
+For the multi-dataset sweep of docs/ADVANCED_EXPERIMENTS.md use scripts/sweep.py.
 
 Runs are sequential and each one is independent, so this script is safe to stop
-and restart: it skips any run whose CSV already exists. That matters on free
-compute, where a session can be reclaimed mid-sweep.
+and restart: it skips a run only if its saved result was made with exactly this
+config, by this code, and has every round (the same check as scripts/sweep.py);
+anything else is re-run. That matters on free compute, where a session can be
+reclaimed mid-sweep.
 
     python scripts/run_experiments.py --config configs/mnist.yaml --seeds 0 1 2
 """
@@ -20,27 +22,20 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
+from afl.conditions import CONDITIONS, apply  # noqa: E402
 from afl.config import Cfg            # noqa: E402
 from afl.engine import Experiment     # noqa: E402
+from afl.provenance import code_hash  # noqa: E402
 from afl.run import _load             # noqa: E402
 
-# (tag, policy, aggregator) -- the tag is what report.py groups on.
-RUNS = [
-    ("c1_rl_fedavg",        "rl",            "fedavg"),
-    ("c2_rl_fedprox",       "rl",            "fedprox"),
-    ("c3_rl_fednova",       "rl",            "fednova"),
-    ("c4_heuristic_fedprox", "roundrobin",   "fedprox"),
-    # Added beyond Table 3.4's original 4 conditions: FedProx's local proximal
-    # term (drift control) and FedNova's server-side step-normalisation
-    # (objective-inconsistency correction) address different parts of the
-    # pipeline and are not mutually exclusive -- this tests whether combining
-    # them beats either alone.
-    ("c5_rl_fedprox_fednova", "rl",          "fedprox_fednova"),
-    ("b_random",            "random",        "fedprox"),
-    ("b_fedcs",             "fedcs",         "fedprox"),
-    ("b_powerofchoice",     "powerofchoice", "fedprox"),
-    ("b_oort",              "oort",          "fedprox"),
-]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sweep import quarantine, run_status  # noqa: E402
+
+# Every condition in the shared registry, in its declared order. Earlier
+# versions of this script listed only Table 3.4 and four of the Table 3.5
+# baselines; the ablations, FedCER-like and MIFA/MimiC-like runs had to be
+# launched by hand. They are now part of the same sweep.
+RUNS = list(CONDITIONS)
 
 
 def main() -> int:
@@ -50,6 +45,8 @@ def main() -> int:
     ap.add_argument("--out", default="results")
     ap.add_argument("--only", nargs="*", help="restrict to these run tags")
     ap.add_argument("--force", action="store_true", help="re-run even if the CSV exists")
+    ap.add_argument("--ignore-code", action="store_true",
+                    help="reuse finished runs made by other code versions")
     ap.add_argument("--tag-prefix", default="",
                     help="prefix every run tag with this, e.g. 'n100_' for a "
                          "different client population -- RUNS tags are shared "
@@ -58,23 +55,28 @@ def main() -> int:
     args = ap.parse_args()
 
     base = _load(args.config)
-    todo = [r for r in RUNS if not args.only or r[0] in args.only]
+    todo = [r for r in RUNS if not args.only or r in args.only]
+    current = None if args.ignore_code else code_hash()
 
     for seed in args.seeds:
-        for tag, policy, agg in todo:
+        for tag in todo:
             full = f"{args.tag_prefix}{tag}_s{seed}"
-            path = os.path.join(args.out, f"{full}.csv")
-            if os.path.exists(path) and not args.force:
-                print(f"skip {full} (exists)")
-                continue
-
             raw = {k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}
             raw["tag"] = full
             raw["seed"] = seed
             raw["out"] = args.out
             raw.setdefault("data", {})["seed"] = seed
-            raw.setdefault("fl", {})["aggregator"] = agg
-            raw.setdefault("policy", {})["name"] = policy
+            apply(raw, CONDITIONS[tag])
+            if not args.force:
+                st = run_status(raw, current)
+                if st == "ok":
+                    print(f"skip {full} (done)")
+                    continue
+                if st != "missing":
+                    print(f"re-run {full}: {st}")
+                    quarantine(raw, st)
+            elif quarantine(raw, "forced re-run"):
+                print(f"re-run {full}: forced (earlier result kept in quarantine/)")
 
             t0 = time.time()
             exp = Experiment(Cfg.from_dict(raw))

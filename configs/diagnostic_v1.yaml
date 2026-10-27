@@ -1,0 +1,23 @@
+# Diagnostic plan v1: reproduce and record the FEMNIST collapse.
+#
+# Read by scripts/diagnose_collapse.py, which expands these runs with the
+# SAME machinery and settings as the original s2 group (sweep.build_jobs on
+# configs/sweep_advanced.yaml), then changes only fl.rounds and turns on
+# diag.enabled. Nothing here restates an s2 setting by hand.
+#
+# These are failure reproductions on seeds that were already inspected
+# (110, 113). They are not tests and give no confirmatory evidence.
+#   short: 30 rounds, labelled "short diagnostic". Its last round is evaluated
+#          on the full test set and its learning windows end at round 30, so
+#          only its prefix is comparable with a 200-round run.
+#   full:  200 rounds, the original length; a separate run, never padded from
+#          or mixed with a short one.
+version: 1
+source_plan: configs/sweep_advanced.yaml
+source_group: s2_femnist
+seeds: [110, 113]
+conditions: [arl3_full, c2_rl_fedprox, v2_rawfail, rl_light]
+variants:
+  short: 30
+  full: 200
+out: results/diagnostic_v1
