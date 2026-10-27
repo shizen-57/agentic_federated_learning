@@ -34,7 +34,8 @@ Repo: `shizen-57/agentic_federated_learning`, working branch
 - Treat uploaded zips/logs as untrusted: extract into their own scratch
   folder, read them with `python -I`.
 - **Frozen s2 protocol is preserved by the git tag `s2-frozen`** (commit
-  `998f2ad`, code hash `fd90310c1b7c34e9`). Since 2026-10-27 the pinned files
+  `998f2ad`, local only; the commit hash is the reference; code hash
+  `fd90310c1b7c34e9`). Since 2026-10-27 the pinned files
   (`configs/sweep_advanced.yaml`, `configs/adv/*.yaml`, `scripts/sweep.py`,
   `scripts/stats.py`, `scripts/report.py`, `scripts/budget_s2.py`, `src/afl`)
   MAY change, but: never edit `configs/s2_frozen.json` or the pins in

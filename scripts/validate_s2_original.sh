@@ -6,7 +6,7 @@
 # Later commits may change files the s2 manifest pins (scripts/sweep.py,
 # src/afl, ...), so the current tree is expected to fail prespec_s2.py's
 # manifest check. That is by design: the original results are only ever
-# validated from a checkout of the `s2-frozen` tag, never by re-pinning.
+# validated from a checkout of the `s2-frozen` tag (commit 998f2ad), never by re-pinning.
 #
 # The saved run configs record their Kaggle output path, /kaggle/working/adv,
 # and the frozen validator compares it. So this script points that path at
@@ -15,13 +15,20 @@
 set -euo pipefail
 
 TAG=s2-frozen
+FROZEN_COMMIT=998f2adb1c6cb244da311b3837319276d480d8f3   # what the tag points at
 REPO=$(git rev-parse --show-toplevel)
 WT=${WT:-$(mktemp -d)/s2-frozen}
 LINK=/kaggle/working/adv
 
-git -C "$REPO" rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
-    || { echo "tag $TAG not found (git fetch --tags)"; exit 1; }
-git -C "$REPO" worktree add --detach -q "$WT" "$TAG"
+# Use the tag if this clone has it, otherwise the commit it names.
+REF=$FROZEN_COMMIT
+if git -C "$REPO" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+    [ "$(git -C "$REPO" rev-parse "$TAG^{commit}")" = "$FROZEN_COMMIT" ] \
+        || { echo "tag $TAG does not point at $FROZEN_COMMIT; refusing"; exit 1; }
+fi
+git -C "$REPO" cat-file -e "$FROZEN_COMMIT^{commit}" 2>/dev/null \
+    || { echo "frozen commit $FROZEN_COMMIT not in this clone (git fetch)"; exit 1; }
+git -C "$REPO" worktree add --detach -q "$WT" "$REF"
 old=""
 if [ -L "$LINK" ]; then
     old=$(readlink "$LINK")

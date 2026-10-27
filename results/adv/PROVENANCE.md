@@ -7,7 +7,7 @@ other folders (e.g. `results/diagnostic_v1/`).
 
 | Item | Value |
 |---|---|
-| Git tag | `s2-frozen` (commit `998f2adb1c6cb244da311b3837319276d480d8f3`) |
+| Frozen commit | `998f2adb1c6cb244da311b3837319276d480d8f3` (local tag `s2-frozen`; the tag could not be pushed from the cloud session, so the commit hash is the reference) |
 | Code reviewed externally | `012190e8decc5113eff0af2a945c2ac42036d5a8` (same frozen inputs and simulator) |
 | Simulator fingerprint (`afl.provenance.code_hash`) | `fd90310c1b7c34e9` |
 | Frozen manifest `configs/s2_frozen.json` SHA-256 | `8d04e337909babbad5e61cf319a1a66384cd993922ef40be34a38ab9d7640ffe` |
@@ -35,7 +35,7 @@ the table below, which is the stronger check.
 
     bash scripts/validate_s2_original.sh
 
-It checks out the `s2-frozen` tag in a temporary worktree, points
+It checks out the frozen commit (or the `s2-frozen` tag, if present) in a temporary worktree, points
 `/kaggle/working/adv` (the output path recorded in every saved config) at that
 checkout's `results/adv` with a symlink (never replacing a real directory),
 runs the frozen `scripts/prespec_s2.py`, and compares its output with
