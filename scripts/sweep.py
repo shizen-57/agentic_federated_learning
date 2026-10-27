@@ -72,7 +72,8 @@ def build_jobs(plan: dict, groups: list[str] | None, seeds: list[int] | None,
     return jobs
 
 
-PROVENANCE_KEYS = ("init_checksum", "code_hash", "code_changed_during_run")
+PROVENANCE_KEYS = ("init_checksum", "code_hash", "code_changed_during_run",
+                   "init_checkpoint_sha256")
 
 
 def expected_config(raw: dict) -> dict:

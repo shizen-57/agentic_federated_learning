@@ -9,6 +9,7 @@
 #   bash scripts/dept_gpu.sh lockseeds  # the other lock-up seeds 103 110 112 116 (~30 min)
 #   bash scripts/dept_gpu.sh diag short # collapse diagnostics, 8 runs x 30 rounds
 #   bash scripts/dept_gpu.sh diag full  # the same 8 runs at the full 200 rounds
+#   bash scripts/dept_gpu.sh pretrain femnist ppo_full   # RL2 pre-training -> checkpoints/
 #   bash scripts/dept_gpu.sh pack       # pack the results to copy back home
 #
 # Server rules this script follows: everything goes into our own conda env
@@ -104,14 +105,21 @@ diag)
         > "$OUT/diagnostic_v1/${2:-short}/report.md"
     echo "report: $OUT/diagnostic_v1/${2:-short}/report.md"
     ;;
+pretrain)
+    activate; mkdir -p checkpoints
+    ds=${2:-femnist}; cond=${3:-ppo_full}
+    python scripts/pretrain.py --group "s2_$ds" --condition "$cond" --iterations "${ITER:-20}" \
+        --workers "${WORKERS:-8}" --set fl.device=auto --out "checkpoints/${cond}_${ds}.pt" \
+        2>&1 | tee -a "$OUT/pretrain_${cond}_${ds}.log"
+    ;;
 pack)
     stamp=$(date +%Y%m%d_%H%M)
-    tar -czf "results_$stamp.tar.gz" "$OUT"
+    tar -czf "results_$stamp.tar.gz" "$OUT" $( [ -d checkpoints ] && echo checkpoints )
     ls -la "results_$stamp.tar.gz"
     echo "Now copy it home (run this on YOUR computer):"
     echo "  scp -P <port> <user>@<server>:$(pwd)/results_$stamp.tar.gz ."
     ;;
 *)
-    sed -n '2,17p' "$0"; exit 1
+    sed -n '2,18p' "$0"; exit 1
     ;;
 esac

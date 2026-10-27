@@ -141,6 +141,8 @@ class Experiment:
         self.align_ema = np.zeros(self.N)                # ARL-v4: update/validation alignment
         self._prev_worst_r: float | None = None
         self.arl4 = cfg.reward.damage_metric == "arl_v4"
+        if cfg.fl.practice and not cfg.fl.val_frac > 0:
+            raise ValueError("a practice episode needs fl.val_frac > 0 (its reward uses validation data)")
         if (self.arl4 or cfg.reward.protect_weight > 0) and not cfg.fl.val_frac > 0:
             raise ValueError("ARL-v4 and the protection reward need fl.val_frac > 0 "
                              "(they use the validation set, never the test set)")
@@ -493,6 +495,13 @@ class Experiment:
             out[f"ece_{m}"] = ece(modes == m) if len(P) else 0.0
         return out
 
+    def _practice_metrics(self) -> dict:
+        """Practice episodes measure nothing on the test set: NaN placeholders."""
+        keys = ["acc_client_worst10", "acc_labelmix_worst10", "acc_client_measured",
+                "acc_client_weak", "gap_max_all", "gap_max_weak", "ece_weak", "ece_strong"]
+        keys += [f"ece_{m}" for m in self.cfg.system.modes]
+        return {k: float("nan") for k in keys}
+
     def _measured_client_acc(self):
         """Each client's accuracy on its own held-out test examples, from the
         last reported evaluation; None if the test set has no owners or that
@@ -767,7 +776,11 @@ class Experiment:
         # Keep a fixed held-out evaluation series for budget/target comparisons.
         # Final headline accuracy and client metrics still use the full test set.
         # Evaluate it last so _last_* describes the reported client population.
-        if self.val_idx is not None:
+        if self.cfg.fl.practice:
+            # Pre-training episode (RL2 M6): validation only, no test set at all.
+            acc_r, _, worst_r = self._evaluate(idx=self.val_idx)
+            acc = test_loss = acc_worst = float("nan")
+        elif self.val_idx is not None:
             # Reward and learning baselines see the validation set only; the
             # reported accuracy is computed afterwards and never fed back.
             acc_r, _, worst_r = self._evaluate(idx=self.val_idx)
@@ -776,8 +789,9 @@ class Experiment:
             acc_r, loss_r, worst_r = self._evaluate(full=False)
             acc, test_loss, acc_worst = acc_r, loss_r, worst_r
         acc_fixed = acc
-        eval_fixed_n = len(self._last_ok) if self._last_ok is not None else 0
-        if t == self.cfg.fl.rounds and self.eval_idx is not None:
+        eval_fixed_n = 0 if self.cfg.fl.practice else (
+            len(self._last_ok) if self._last_ok is not None else 0)
+        if t == self.cfg.fl.rounds and self.eval_idx is not None and not self.cfg.fl.practice:
             acc, test_loss, acc_worst = self._evaluate(full=True)
         d_acc = acc_r - (self._prev_acc_r if self._prev_acc_r is not None else acc_r)
         self._prev_acc_r = acc_r
@@ -1031,7 +1045,8 @@ class Experiment:
             "arl_v3_loss": arl_v3_loss, "arl_v3_gain": arl_v3_gain,
             "arl_v4_loss": arl_v4_loss, "arl_v4_deficit": arl_v4_deficit,
             "val_accuracy": acc_r, "cov_lost": cov_lost, "cov_lost_avoid": cov_lost_avoid,
-            **self._client_metrics(success, late_ids),
+            **(self._practice_metrics() if self.cfg.fl.practice
+               else self._client_metrics(success, late_ids)),
             "gate_filled": int(getattr(self.policy, "gate_filled", 0)),
             "wall_s": time.time() - t0,
         }
@@ -1153,6 +1168,8 @@ class Experiment:
         return self.rows
 
     def save(self) -> str:
+        if self.cfg.fl.practice:
+            raise RuntimeError("a practice (pre-training) episode is never saved as a result")
         os.makedirs(self.cfg.out, exist_ok=True)
         path = os.path.join(self.cfg.out, f"{self.cfg.tag}.csv")
         # Write-then-rename: the sweep runners skip any run whose CSV exists,
@@ -1171,6 +1188,8 @@ class Experiment:
         # start-up. If the files changed while it ran, say so -- the sweep and
         # the confirmatory report then refuse to use the result.
         meta["code_hash"] = CODE_LOADED
+        if getattr(self.policy, "checkpoint_sha", None):
+            meta["init_checkpoint_sha256"] = self.policy.checkpoint_sha
         if code_hash() != CODE_LOADED:
             meta["code_changed_during_run"] = True
             print(f"[{self.cfg.tag}] WARNING: simulator source changed during the run; "

@@ -124,6 +124,10 @@ class FLCfg:
                                         # reported accuracy uses only the rest. 0 = the
                                         # original runs, where the reward was computed
                                         # on test images that the final score also used
+    practice: bool = False              # RL2 pre-training episode: the reward uses the
+                                        # validation set as always, and every test-set
+                                        # evaluation is skipped (reported metrics are NaN);
+                                        # a practice run can never be saved as a result
     clean_rng: bool = False             # protocol fix: the FL model is initialised from
                                         # its own seed (identical for every method with
                                         # the same seed), and policy init, policy
@@ -250,6 +254,8 @@ class PolicyCfg:
     mem_hidden: int = 32
     mem_window: int = 5
     mem_ema: float = 0.2
+    init_checkpoint: str = ""           # RL2 C9: start SAFE-PPO from pre-trained weights
+                                        # (scripts/pretrain.py); "" = from scratch
     entropy_coef: float = 0.01
     value_feature: str = "standalone"   # the RL policy's "value" input. standalone: the
                                         # original static prior (number of classes a
