@@ -107,6 +107,10 @@ CONDITIONS: dict[str, dict] = {
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3", "policy.per_client_credit": True,
                               "policy.predictor": "v2", "policy.gate_mode": "thompson"},
+    # RL2 M2: the PPO learner with ARL-v3's reward (docs/RL2_DESIGN.md C3).
+    "ppo_v3":                {"policy.name": "safe_ppo", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3", "policy.per_client_credit": True},
     "arl3_shared":           {"policy.name": "rl", "fl.aggregator": "fedprox",
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3"},

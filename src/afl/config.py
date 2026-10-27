@@ -213,6 +213,18 @@ class PolicyCfg:
                                         # dropping the gate for everyone)
     rl_lr: float = 1e-2
     rl_hidden: int = 32
+    # SAFE-PPO (policy.name = safe_ppo; docs/RL2_DESIGN.md C3). Pre-tuning defaults.
+    ppo_lr: float = 3e-3
+    ppo_clip: float = 0.2
+    ppo_epochs: int = 4
+    ppo_batch: int = 8                  # rounds per update
+    ppo_gamma: float = 0.9
+    ppo_lambda: float = 0.95
+    ppo_vf_coef: float = 0.5
+    ppo_ent_start: float = 0.01
+    ppo_ent_end: float = 0.001
+    ppo_norm_adv: bool = True
+    ppo_grad_clip: float = 1.0
     entropy_coef: float = 0.01
     value_feature: str = "standalone"   # the RL policy's "value" input. standalone: the
                                         # original static prior (number of classes a
