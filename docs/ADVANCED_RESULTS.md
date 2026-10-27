@@ -968,6 +968,26 @@ fingerprint `c4c4c85c373f99b1`; superseded), each run from a frozen snapshot:**
   changed after seeing this; the pre-specified tests decide whether it
   helps.
 
+#### The `s2_*` runs and how they are checked (written before looking at outcomes)
+
+All 1,540 `s2_*` runs were made on Kaggle (2x T4) in one session of 10.4 h,
+0 failed (`sweep.log`), from commit `ae0d449` (code fingerprint
+`fd90310c1b7c34e9`, the frozen one). Every run's saved config was compared
+with the frozen plan before any result was looked at: 1,540 of 1,540 match
+exactly in every experiment setting, all carry the frozen fingerprint, none
+was flagged for a source change during the run. The one field that differs
+is `out`, the folder the run was saved in (`/kaggle/working/adv/<group>` on
+Kaggle, `results/adv/<group>` here). `scripts/prespec_s2.py` compares that
+field too, so it reports "different config" for every run.
+
+Decision, fixed before any outcome was read: the save folder is not part of
+the experiment, so neither the data nor the frozen scripts are changed. The
+confirmatory analysis uses the frozen script's own `--root` option with the
+folder the runs were made in:
+`/kaggle/working/adv` -> `results/adv` (a symbolic link), then
+`python scripts/prespec_s2.py --root /kaggle/working/adv`. Every other
+check stays in force.
+
 #### ARL-v3 as frozen for the `s2_*` runs
 
 For each invited client i in round t (S_t = the invited set):
