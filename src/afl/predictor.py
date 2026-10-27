@@ -104,16 +104,28 @@ class SuccessPredictorV2(SuccessPredictor):
         self.k, self.prior, self.c = k, prior, prior_strength
         self.s: dict[tuple[int, str], float] = {}
         self.f: dict[tuple[int, str], float] = {}
+        # policy.pred_decay: each round, a client's own evidence counts this
+        # much less, so a battery or availability change is not hidden by old
+        # outcomes and the uncertainty grows again while evidence ages.
+        self.decay = cfg.policy.pred_decay
+        self.t = 0                          # current round (set by the engine)
+        self.t_last: dict[tuple[int, str], int] = {}
 
     def shared(self, obs: dict, hist: dict, mode: str) -> float:
         z = float(self.features(obs, hist, mode) @ self.w + self.b)
         p = 1.0 / (1.0 + np.exp(-np.clip(z, -30, 30)))
         return (self.seen * p + self.c * self.prior) / (self.seen + self.c)
 
+    def _aged(self, key) -> float:
+        if self.decay >= 1.0 or key not in self.t_last:
+            return 1.0
+        return self.decay ** (self.t - self.t_last[key])
+
     def posterior(self, i: int, obs: dict, hist: dict, mode: str) -> tuple[float, float]:
         p0 = self.shared(obs, hist, mode)
-        a = self.s.get((i, mode), 0.0) + self.k * p0
-        b = self.f.get((i, mode), 0.0) + self.k * (1.0 - p0)
+        w = self._aged((i, mode))
+        a = w * self.s.get((i, mode), 0.0) + self.k * p0
+        b = w * self.f.get((i, mode), 0.0) + self.k * (1.0 - p0)
         return a, b
 
     def predict_client(self, i: int, obs: dict, hist: dict, mode: str) -> tuple[float, float]:
@@ -123,5 +135,9 @@ class SuccessPredictorV2(SuccessPredictor):
 
     def update_client(self, i: int, obs: dict, hist: dict, mode: str, y: int) -> None:
         self.update(obs, hist, mode, y)
+        key = (i, mode)
+        w = self._aged(key)                 # age the stored counts to now, then add
+        self.s[key], self.f[key] = w * self.s.get(key, 0.0), w * self.f.get(key, 0.0)
         d = self.s if y else self.f
-        d[(i, mode)] = d.get((i, mode), 0.0) + 1.0
+        d[key] += 1.0
+        self.t_last[key] = self.t

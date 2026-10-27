@@ -292,6 +292,8 @@ class Experiment:
             }
             for i in range(self.N)
         }
+        if self.pv2:
+            self.predictor.t = t
         if self.cfg.policy.predictor_norm == "round" or self.pv2:
             self.predictor.set_reference(np.array(
                 [self.predictor.client_features(obs[i], hist[i]) for i in range(self.N)]))
@@ -423,7 +425,7 @@ class Experiment:
         """Server-side estimate of a client's round time from observed descriptors."""
         return est_time(self.cfg, {"obs": state["obs"], "n_work": self.env.n_work}, i, mode, frac)
 
-    def _enforce_budget(self, selected, assign, state, fracs):
+    def _enforce_budget(self, selected, assign, state, fracs, cost_cap=None):
         """Eq. (3.64)-(3.65): per-round cost budget C_max and time limit L_max.
 
         Applied to every policy's chosen action, so constrained comparisons are
@@ -435,7 +437,8 @@ class Experiment:
         action projection: the gradient still uses the sampled action.)
         """
         sysc = self.cfg.system
-        if sysc.cost_max >= 1e9 and sysc.latency_max >= 1e9:
+        cost_max = sysc.cost_max if cost_cap is None else min(sysc.cost_max, cost_cap)
+        if cost_max >= 1e9 and sysc.latency_max >= 1e9:
             return selected, assign, 0
         assign = dict(assign)
         keep, dropped = [], 0
@@ -448,7 +451,7 @@ class Experiment:
                 continue
             assign[i] = m
             keep.append(i)
-        while keep and sum(self.env.cost(i, assign[i], fracs.get(i)) for i in keep) > sysc.cost_max:
+        while keep and sum(self.env.cost(i, assign[i], fracs.get(i)) for i in keep) > cost_max:
             for i in reversed(keep):
                 if LIGHTER[assign[i]]:
                     assign[i] = LIGHTER[assign[i]]
@@ -592,7 +595,12 @@ class Experiment:
             dg["busy_removed"] = [i for i in dg["proposed"] if i in busy]
             dg["pre_budget"] = list(selected)
             dg["rule_modes"] = dict(assign)
-        selected, assign, budget_dropped = self._enforce_budget(selected, assign, state, fracs)
+        # policy.hard_budget_mult: a HARD per-round cap (an action projection,
+        # as for system.cost_max) of mult x the Light reference cost; the
+        # Lagrangian target only steers the average.
+        cap = (self.cfg.policy.hard_budget_mult * state["cost_ref"]
+               if self.cfg.policy.hard_budget_mult > 0 else None)
+        selected, assign, budget_dropped = self._enforce_budget(selected, assign, state, fracs, cap)
         self._refresh_losses(selected)
 
         # V^repr_{i,t}(S_t) for every client (Eq. 3.26), not only the selected
@@ -914,23 +922,32 @@ class Experiment:
         rw = self.cfg.reward
         self.cov_peak, self.cov_dur = M.deficit_update(self.cov_ema, self.cov_peak, self.cov_dur, cov)
         arl_v4_deficit = M.deficit_term(self.cov_ema, self.cov_peak, self.cov_dur)
-        per_budget = None
-        if self.cfg.policy.cost_target_mult > 0 and selected:
-            per_budget = self.cfg.policy.cost_target_mult * state["cost_ref"] / max(
-                min(self.cfg.fl.clients_per_round, self.N), 1)
+        # The counterfactual must fit the round's JOINT budget (the safety
+        # layer's target): client i may use what the target leaves after the
+        # other invited clients' planned jobs.
+        target = (self.cfg.policy.cost_target_mult * state["cost_ref"]
+                  if self.cfg.policy.cost_target_mult > 0 else None)
+        planned = {j: self.env.cost(j, assign[j], fracs.get(j)) for j in selected}
+        total_planned = float(sum(planned.values()))
         sd = state.get("p_sd")
         v4: dict[int, float] = {}
         for i in selected:
             p = state["p_succ"][i]
             pc = {m: max(0.0, p[m] - (rw.arl4_z * sd[i][m] if sd else 0.0)) for m in p}
-            afford = (None if per_budget is None else
-                      {m for m in p if self.env.cost(i, m) <= per_budget})
+            afford = None
+            if target is not None:
+                room = target - (total_planned - planned[i])
+                afford = {m for m in p if self.env.cost(i, m, fracs.get(i)) <= room}
             q = 1.0 + max(0.0, float(self.align_ema[i])) if rw.arl4_align else 1.0
             mult = phi[i] * (1.0 + sketch[i] @ deficit) * q
             v4[i] = float(mult * M.arl4_expected_gap(pc, assign[i], ep, thr, afford))
         arl_v4_loss = float(sum(v4.values()))
-        v4_credit = M.difference_credit(sketch, ok_ids, 1.0 + deficit)
-        v4_credit = {i: v4_credit.get(i, 0.0) for i in selected}
+        # The gain ARL-v4 rewards is the deficit-weighted class coverage the
+        # DELIVERED set achieves, f(D) = sum_k w_k max_{i in D} c_ik: adding a
+        # successful client never lowers it (review finding 5). Per-client
+        # difference credits f(D) - f(D minus i) are used only as individual
+        # advantages (no credit_total), never summed into the joint reward.
+        v4_set_gain = float((sketch[ok_ids].max(axis=0) * (1.0 + deficit)).sum()) if ok_ids else 0.0
 
         # Fairness debt (Sec. 3.13): each eligible client accrues its fair share
         # K/N of service per round and pays it off with a successful contribution.
@@ -968,7 +985,7 @@ class Experiment:
                 damage_term = (self.norm["arl"](arl_v4_loss)
                                + r.arl4_mu * self.norm["v4d"](arl_v4_deficit)
                                - r.lambda_cov / max(r.lambda_arl, 1e-9)
-                               * self.norm["v4g"](float(sum(v4_credit.values()))))
+                               * self.norm["v4g"](v4_set_gain))
         else:
             raise ValueError(f"unknown reward.damage_metric {r.damage_metric}")
         fairness_term = cv_sel if r.fairness_metric == "cv_selection" else cv
@@ -1012,8 +1029,15 @@ class Experiment:
             if self.cfg.policy.credit_split:
                 set_adv = -r.lambda_arl * self.norm["v2s"].batch([arl_v2])[0]
         elif r.damage_metric == "arl_v4" and self.cfg.policy.per_client_credit:
-            zl, zg = norm("v4c", v4), norm("v4cg", v4_credit)
-            client_adv = {i: -r.lambda_arl * zl[i] + r.lambda_cov * zg[i] for i in selected}
+            zl = norm("v4c", v4)
+            if self.cfg.policy.credit_total:
+                # one joint objective: summed per-client losses + set-level gain
+                client_adv = {i: -r.lambda_arl * zl[i] for i in selected}
+                reward += r.lambda_cov * self.norm["v4g"](v4_set_gain)
+            else:
+                dc = M.difference_credit(sketch, ok_ids, 1.0 + deficit)
+                zg = norm("v4cg", {i: dc.get(i, 0.0) for i in selected})
+                client_adv = {i: -r.lambda_arl * zl[i] + r.lambda_cov * zg[i] for i in selected}
         elif r.damage_metric == "arl_v3" and self.cfg.policy.per_client_credit:
             zl, zg = norm("v3c", v3_loss), norm("v3cg", v3_gain)
             client_adv = {i: -r.lambda_arl * zl[i] + r.lambda_cov * zg[i] for i in selected}
@@ -1076,7 +1100,8 @@ class Experiment:
                                  "damage_raw": {"fail_ratio": fail_ratio, "arl_selected": arl_sel,
                                                 "arl_online": arl_on, "arl_v2": arl_v2,
                                                 "arl_v3_loss": arl_v3_loss, "arl_v3_gain": arl_v3_gain,
-                                                "arl_v4_loss": arl_v4_loss, "arl_v4_deficit": arl_v4_deficit},
+                                                "arl_v4_loss": arl_v4_loss, "arl_v4_deficit": arl_v4_deficit,
+                                                "arl_v4_set_gain": v4_set_gain},
                                  "fairness_raw": fairness_term, "debt_raw": float(self.debt.mean()),
                                  "z": {"acc": z_acc, "cost": z_cost, "lat": z_lat, "debt": z_debt,
                                        "protect": z_prot,

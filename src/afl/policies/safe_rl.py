@@ -238,17 +238,13 @@ class SafePPOPolicy(RLPolicy):
         K = min(self.cfg.fl.clients_per_round, N)
         x = self._feature_matrix(state)
         allowed, k_s, fill = self._allowed(state, N, K)
-        if k_s == 0 and not fill:
-            return None
-        pm = torch.ones(N, len(self.modes), dtype=torch.bool)
-        if self.cfg.policy.mode_mask != "none":
-            for i in range(N):
-                pm[i] = self._mode_row(state, i, torch.zeros(len(self.modes))) > -1.0
-        if self.level < len(self.modes) - 1:
-            # Trust curriculum: modes above the unlocked level are not allowed;
-            # Light (level 0) always is.
-            pm[:, self.level + 1:] = False
-            pm[:, 0] = True
+        pm, abstain = self._mode_sets(state)
+        if abstain.any():
+            # A client with no allowed job cannot be picked or filled in.
+            allowed = allowed & ~abstain
+            fill = [i for i in fill if not bool(abstain[i])]
+            self.gate_fill, self.gate_filled = list(fill), len(fill)
+            k_s = min(k_s, int(allowed.sum()))
         if self.cfg.policy.cost_target_mult > 0 and self.cost_target is None:
             self.cost_target = self.cfg.policy.cost_target_mult * float(state["cost_ref"])
         pmax = np.array([max(state["p_succ"][i].values()) for i in range(N)])
@@ -261,11 +257,48 @@ class SafePPOPolicy(RLPolicy):
         self._p_round = state["p_succ"]
         cov = (torch.tensor(state["sketch"], dtype=torch.float32),
                torch.tensor(state["cov_deficit"], dtype=torch.float32)) if self.use_cov else None
-        return {"x": x, "allowed": allowed, "k": k_s, "fill": list(fill), "pm": pm, "g": g,
+        act = bool(k_s > 0 or fill)
+        return {"x": x, "allowed": allowed, "k": k_s if act else 0, "fill": list(fill) if act else [],
+                "act": act, "pm": pm, "g": g,
                 "cov": cov,
                 "mem": self._memory_features() if self.use_mem else None,
                 "win": torch.tensor(self.m_win, dtype=torch.float32) if self.use_mem else None,
                 "eligible_share": float(g[2])}
+
+    def _mode_sets(self, state):
+        """Which jobs each client may get (review finding 4: an explicit rule).
+
+        feasible: modes whose confident success (p - mode_mask_z*sd) clears
+        elig_threshold (mode_mask on), else all; curriculum: modes up to the
+        unlocked level. Allowed = feasible AND curriculum. If that is empty:
+        Light, when Light is at least plausibly feasible (optimistic bound
+        p + gate_z*sd clears the threshold) -- the cheapest, shortest job,
+        recorded as an override -- otherwise the client abstains this round
+        (cannot be picked), also recorded. Nothing is silently treated as safe.
+        """
+        N, M = self.cfg.data.num_clients, len(self.modes)
+        pol = self.cfg.policy
+        thr, sd = pol.elig_threshold, state.get("p_sd")
+        pm = torch.ones(N, M, dtype=torch.bool)
+        abstain = torch.zeros(N, dtype=torch.bool)
+        n_light = 0
+        for i in range(N):
+            p = state["p_succ"][i]
+            feas = [True] * M
+            if pol.mode_mask != "none":
+                z = pol.mode_mask_z if sd is not None else 0.0
+                feas = [p[m] - (z * sd[i][m] if sd is not None else 0.0) >= thr for m in self.modes]
+            row = [f and k <= self.level for k, f in enumerate(feas)]
+            if not any(row):
+                opt = p[self.modes[0]] + (pol.gate_z * sd[i][self.modes[0]] if sd is not None else 0.0)
+                if opt >= thr:
+                    row = [k == 0 for k in range(M)]
+                    n_light += 1
+                else:
+                    abstain[i] = True
+            pm[i] = torch.tensor(row)
+        self.mask_stats = {"light_override": n_light, "abstain": int(abstain.sum())}
+        return pm, abstain
 
     def _sample(self, logits: torch.Tensor) -> int:
         if not self.train_mode:
@@ -316,14 +349,16 @@ class SafePPOPolicy(RLPolicy):
         inp = self._inputs(state, t)
         if self.train_mode and len(self.buf) >= self.cfg.policy.ppo_batch:
             # Bootstrap from this round's state value (the batch's next state).
-            self._update(0.0 if inp is None else self._value_only(inp))
-        if inp is None:
-            self._last, self._pred = None, {}
-            return [], {}
+            self._update(self._value_only(inp))
         with torch.no_grad():
             out = self._pass(inp)
-        self._last = {"inp": inp, "picks": out["picks"], "modes": out["modes"],
+        # Every round is a transition, with or without an action (review
+        # finding 6): its reward and elapsed time stay in the returns.
+        self._last = {"inp": inp, "act": inp["act"], "picks": out["picks"], "modes": out["modes"],
                       "logp": float(out["logp"]), "value": float(out["value"])}
+        if not inp["act"]:
+            self._pred = {}
+            return [], {}
         if self.diag:
             self._record_decision(out["chosen"], inp["fill"], out["steps"], out["rows"],
                                   out["mode_lp"], inp["allowed"], inp["k"], None)
@@ -418,7 +453,9 @@ class SafePPOPolicy(RLPolicy):
             self.diag_update = {**(self._update_stats or {"updated": False, "why": "buffered",
                                                            "buffer": len(self.buf)}),
                                 "shaped_reward": float(reward), "lam": self.lam,
-                                "cost_target": self.cost_target, "level": self.level}
+                                "cost_target": self.cost_target, "level": self.level,
+                                "acted": bool(self.buf[-1]["act"]),
+                                **getattr(self, "mask_stats", {})}
         self._update_stats = None
 
     def _ent_coef(self) -> float:
@@ -433,8 +470,10 @@ class SafePPOPolicy(RLPolicy):
         values = [s["value"] for s in buf]
         adv, ret = gae(rewards, values, last_value, p.ppo_gamma, p.ppo_lambda)
         adv_t = torch.tensor(adv, dtype=torch.float32)
-        if p.ppo_norm_adv and len(adv) > 1:
-            adv_t = (adv_t - adv_t.mean()) / (adv_t.std() + 1e-8)
+        acted = torch.tensor([float(s["act"]) for s in buf])
+        if p.ppo_norm_adv and acted.sum() > 1:
+            a = adv_t[acted > 0]
+            adv_t = (adv_t - a.mean()) / (a.std() + 1e-8)
         ret_t = torch.tensor(ret, dtype=torch.float32)
         old_lp = torch.tensor([s["logp"] for s in buf])
         old_v = torch.tensor(values)
@@ -447,10 +486,11 @@ class SafePPOPolicy(RLPolicy):
             v = torch.stack([o["value"] for o in outs])
             ratio = torch.exp(new_lp - old_lp)
             surr = torch.min(ratio * adv_t, torch.clamp(ratio, 1 - p.ppo_clip, 1 + p.ppo_clip) * adv_t)
-            pol_loss = -surr.mean()
+            # actor terms only where an action was taken; the critic learns from all rounds
+            pol_loss = -(surr * acted).sum() / acted.sum().clamp(min=1.0)
             v_clip = old_v + torch.clamp(v - old_v, -p.ppo_clip, p.ppo_clip)
             v_loss = torch.max((v - ret_t) ** 2, (v_clip - ret_t) ** 2).mean()
-            loss = pol_loss + p.ppo_vf_coef * v_loss - ec * ent.mean()
+            loss = pol_loss + p.ppo_vf_coef * v_loss - ec * (ent * acted).sum() / acted.sum().clamp(min=1.0)
             self.opt.zero_grad()
             loss.backward()
             gn = nn.utils.clip_grad_norm_(self.net.parameters(), p.ppo_grad_clip)

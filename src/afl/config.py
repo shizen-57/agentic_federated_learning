@@ -215,11 +215,16 @@ class PolicyCfg:
                                         # thompson: eligibility on p + gate_z*sd and fallback
                                         # by Thompson sampling (needs predictor v2; RL2 C2)
     gate_z: float = 1.0
+    pred_decay: float = 1.0             # predictor v2: per-round weight of a client's own past
+                                        # outcomes (1 = never forgets, the M1 behaviour)
     mode_mask_z: float = 0.0           # feasible-mode mask on p - z*sd (needs predictor v2)
     # SAFE-PPO safety layer (RL2 design C6)
     cost_target_mult: float = 0.0       # 0 = off; else Lagrangian constraint: mean round cost
                                         # <= mult x (K x mean cost of a Light job)
     lagrange_lr: float = 0.05           # dual ascent step on the cost multiplier
+    hard_budget_mult: float = 0.0       # 0 = off; else a HARD per-round cost cap of mult x
+                                        # (K x mean Light cost), enforced by projecting the
+                                        # action (lighter modes, then dropping the last pick)
     curriculum: bool = False            # trust curriculum: Light only, then Standard, then
                                         # Priority, unlocked by the predictor's recent calibration
     curr_err: float = 0.1               # calibration error needed to unlock the next level
