@@ -330,16 +330,23 @@ class RLPolicy(Policy):
             returns.append(g)
         returns.reverse()
         loss = 0.0
+        # policy.prior_baseline: every advantage in the window uses the baseline
+        # from before the window. Folding an earlier return in first would put
+        # later rewards -- which depend on later actions -- into the baseline
+        # of those actions and bias the gradient. Statistics update afterwards.
+        prior = self.baseline
         for (logp, ent, _), g in zip(self._window, returns):
             if self.cfg.policy.prior_baseline:
-                adv = g - self.baseline
-                self.baseline_n += 1
-                self.baseline += (g - self.baseline) / self.baseline_n
+                adv = g - prior
             else:
                 self.baseline_n += 1
                 self.baseline += (g - self.baseline) / self.baseline_n
                 adv = g - self.baseline
             loss = loss - logp * adv - self.cfg.policy.entropy_coef * ent
+        if self.cfg.policy.prior_baseline:
+            for g in returns:
+                self.baseline_n += 1
+                self.baseline += (g - self.baseline) / self.baseline_n
         self.opt.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(self.net.parameters(), 5.0)
