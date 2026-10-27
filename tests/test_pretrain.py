@@ -13,7 +13,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
 PLAN = ("seeds: [0]\nsets: {}\ngroups:\n  g: {config: configs/quick.yaml, set: {fl.val_frac: 0.3, "
-        "fl.clean_rng: true, policy.strict_gate: true}, conditions: [ppo_full]}\n")
+        "fl.clean_rng: true, policy.strict_gate: true}, conditions: [rl_light]}\n")   # ppo_full NOT listed
+HAVE_FEMNIST = all(os.path.exists(os.path.join(ROOT, "data", f))
+                   for f in ("femnist_x.npy", "femnist_y.npy", "femnist_writer.npy"))
+
+
+def _pretrain(*args, cwd=ROOT):
+    return subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "pretrain.py"), *args],
+                          capture_output=True, text=True, cwd=cwd)
 
 
 def test_practice_episode_never_evaluates_on_test_data(tmp_path):
@@ -44,12 +51,39 @@ def checkpoint(tmp_path_factory):
     plan = d / "plan.yaml"
     plan.write_text(PLAN)
     out = d / "ck.pt"
-    r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "pretrain.py"),
-                        "--plan", str(plan), "--group", "g", "--condition", "ppo_full",
-                        "--iterations", "2", "--workers", "2", "--rounds", "4", "--out", str(out)],
-                       capture_output=True, text=True, cwd=ROOT)
+    r = _pretrain("--plan", str(plan), "--group", "g", "--condition", "ppo_full",
+                  "--iterations", "2", "--workers", "2", "--rounds", "4", "--out", str(out))
     assert r.returncode == 0, r.stdout + r.stderr
     return plan, out
+
+
+def test_every_worker_starts_from_one_shared_network(checkpoint):
+    import json
+    _, out = checkpoint
+    log = json.load(open(out.parent / "ck.json"))
+    starts = {e["start_checksum"] for it in log["log"][:1] for e in it["episodes"]}
+    assert starts == {log["meta"]["init_checksum"]}          # iteration 0 too
+    assert log["meta"]["mode"] == "average"
+    tot = log["meta"]["practice_totals"]
+    assert tot["episodes"] == 4 and tot["rounds"] == 16 and tot["cost"] > 0
+
+
+def test_sequential_mode(tmp_path, checkpoint):
+    plan, _ = checkpoint
+    r = _pretrain("--plan", str(plan), "--group", "g", "--condition", "ppo_full", "--mode",
+                  "sequential", "--iterations", "2", "--rounds", "3", "--out", str(tmp_path / "s.pt"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert torch.load(tmp_path / "s.pt", weights_only=False)["meta"]["practice_totals"]["episodes"] == 2
+
+
+@pytest.mark.skipif(not HAVE_FEMNIST, reason="FEMNIST not prepared")
+def test_the_documented_server_command_runs(tmp_path):
+    # exactly what scripts/dept_gpu.sh runs, shortened: s2_femnist does not list ppo_full
+    r = _pretrain("--group", "s2_femnist", "--condition", "ppo_full", "--iterations", "1",
+                  "--workers", "2", "--rounds", "2", "--out", str(tmp_path / "f.pt"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    meta = torch.load(tmp_path / "f.pt", weights_only=False)["meta"]
+    assert meta["group"] == "s2_femnist" and len(meta["split_fingerprint"]) == 64
 
 
 def test_checkpoint_has_provenance_and_loads(checkpoint, tmp_path):
@@ -61,7 +95,8 @@ def test_checkpoint_has_provenance_and_loads(checkpoint, tmp_path):
     m = ck["meta"]
     assert m["code_hash"] == code_hash() and m["practice_only"] and m["seeds"] == [1000, 1003]
     assert (out.parent / "ck.json").exists()
-    raw = {"data": {"dataset": "synthetic", "num_clients": 20}, "out": str(tmp_path),
+    raw = {"data": {"dataset": "synthetic", "num_clients": 20, "split": "persistent"},
+           "out": str(tmp_path),
            "fl": {"rounds": 2, "clients_per_round": 5, "model": "mlp", "val_frac": 0.3,
                   "clean_rng": True},
            "policy": {"name": "safe_ppo", "encoder": "attention", "memory": True,
@@ -78,6 +113,13 @@ def test_checkpoint_has_provenance_and_loads(checkpoint, tmp_path):
     import json
     meta = json.load(open(tmp_path / "run.config.json"))
     assert len(meta["init_checkpoint_sha256"]) == 64
+    assert meta["split_fingerprint"] == m["split_fingerprint"]
+    raw["data"]["split_seed"] = 1                       # another split: refused
+    with pytest.raises(ValueError):
+        Experiment(Cfg.from_dict(raw))
+    raw["data"]["split"], raw["data"]["split_seed"] = "per_seed", 20261027
+    with pytest.raises(ValueError):                    # per-seed split: refused
+        Experiment(Cfg.from_dict(raw))
 
 
 def test_foreign_checkpoints_are_refused(checkpoint, tmp_path):
