@@ -39,7 +39,10 @@ It checks out the frozen commit (or the `s2-frozen` tag, if present) in a tempor
 `/kaggle/working/adv` (the output path recorded in every saved config) at that
 checkout's `results/adv` with a symlink (never replacing a real directory),
 runs the frozen `scripts/prespec_s2.py`, and compares its output with
-`s2_prespecified_tests.md`. Expected: `OK: 58 results ... match`.
+`s2_prespecified_tests.md`, then runs the frozen code's own test suite in that
+checkout. Expected: `OK: 58 results ... match` and `OK: frozen test suite: 153 passed`.
+The validator's verdict-logic tests are skipped in the current tree (its
+pinned inputs changed) and run here instead.
 
 The current tree is **expected** to fail the manifest check once any pinned
 file changes (for example the resume-validation repair to `scripts/sweep.py`).

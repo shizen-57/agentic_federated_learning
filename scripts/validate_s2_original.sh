@@ -56,3 +56,10 @@ else
     diff "$out" results/adv/s2_prespecified_tests.md || true
     echo "MISMATCH against the committed table"; exit 1
 fi
+# The frozen code's own test suite, including the validator's verdict-logic
+# tests that the current tree can no longer run (its pinned inputs changed).
+if [ "${SKIP_FROZEN_TESTS:-0}" != 1 ]; then
+    python -m pytest tests -q -p no:cacheprovider > "$out.tests" 2>&1 \
+        || { tail -20 "$out.tests"; echo "FAILED: frozen test suite"; exit 1; }
+    echo "OK: frozen test suite: $(tail -1 "$out.tests")"
+fi

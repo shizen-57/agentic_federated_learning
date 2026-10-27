@@ -1002,6 +1002,12 @@ def test_confirmatory_report_gives_no_verdict_on_partial_data(tmp_path):
                 {"fl": {"rounds": 1, "val_frac": 0.3, "clean_rng": True}, "code_hash": "x"}))
     out = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "prespec_s2.py"),
                           "--root", str(tmp_path)], capture_output=True, text=True).stdout
+    # Once a pinned file changes (scripts/sweep.py did, after the s2 freeze), the
+    # current tree refuses outright; the frozen commit gives INCOMPLETE. Either
+    # way there is no verdict. (Originals: scripts/validate_s2_original.sh.)
+    if "INVALID PROTOCOL -- no verdict" in out:
+        assert "## Family" not in out
+        return
     fam_a = out.split("## Family A ")[1].split("## Family")[0]
     assert "INCOMPLETE" in fam_a and "| yes |" not in fam_a
 
@@ -1067,6 +1073,25 @@ def test_measured_client_accuracy_uses_each_clients_own_examples():
     assert exp._measured_client_acc() is None             # pooled test set: label-mix instead
 
 
+def _frozen_tree() -> bool:
+    """True while this checkout still matches the frozen s2 manifest."""
+    import prespec_s2
+    try:
+        prespec_s2.validate_manifest()
+        return True
+    except Exception:
+        return False
+
+
+# The pre-specified s2 validator is only valid on the frozen inputs. After the
+# freeze, its verdict-logic tests run in the frozen checkout instead (with the
+# frozen code's whole test suite), via scripts/validate_s2_original.sh.
+FROZEN_ONLY = pytest.mark.skipif(
+    not _frozen_tree(),
+    reason="tests the frozen s2 validator; run in the frozen checkout by "
+           "scripts/validate_s2_original.sh")
+
+
 def _fake_s2_runs(root, plan_jobs, family_tests, value, bad=None):
     """Write valid-looking runs (exact planned config, all rounds) for a family."""
     import json, csv
@@ -1101,6 +1126,7 @@ def _fake_s2_runs(root, plan_jobs, family_tests, value, bad=None):
             json.dump(meta, fh)
 
 
+@FROZEN_ONLY
 @pytest.mark.parametrize("bad", [None, "nan", "short", "nohash", "wronghash", "protocol_off"])
 def test_confirmatory_report_accepts_only_valid_complete_runs(tmp_path, bad):
     import subprocess

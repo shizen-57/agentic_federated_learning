@@ -12,7 +12,7 @@ import sys
 import numpy as np
 import pytest
 
-from test_advanced import ROOT, Experiment, _fake_s2_runs, _tiny
+from test_advanced import FROZEN_ONLY, ROOT, Experiment, _fake_s2_runs, _tiny
 import prespec_s2
 from report import invitation_failure_rate, rounds_to_target
 
@@ -34,6 +34,7 @@ def test_one_sided_superiority_does_not_claim_inferiority():
     assert prespec_s2.conclusion("accuracy", -0.8, 0.001, "greater") == "inconclusive"
 
 
+@FROZEN_ONLY
 @pytest.mark.parametrize("family", ["D", "D2"])
 def test_complete_but_losing_method_is_reported_as_worse(tmp_path, monkeypatch, capsys, family):
     jobs = prespec_s2.load_plan(str(tmp_path))
