@@ -29,8 +29,10 @@ activate() {
 
 # Server rule: never install into (or run from) the base environment.
 in_own_env() {
-    local want; want="$(conda info --base)/envs/$ENV"
-    if [ "${CONDA_DEFAULT_ENV:-}" != "$ENV" ] || [ "$(python -c 'import sys; print(sys.prefix)')" != "$want" ]; then
+    local base; base="$(conda info --base)"
+    if [ "${CONDA_DEFAULT_ENV:-}" != "$ENV" ] || [ -z "${CONDA_PREFIX:-}" ] \
+       || [ "$CONDA_PREFIX" = "$base" ] \
+       || [ "$(python -c 'import sys; print(sys.prefix)')" != "$CONDA_PREFIX" ]; then
         echo "STOP: not inside the '$ENV' conda env (python is $(command -v python)); nothing installed."
         exit 1
     fi
