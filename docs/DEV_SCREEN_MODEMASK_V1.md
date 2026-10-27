@@ -28,3 +28,32 @@ definition, equal-spend budget B = 1,400, and three-part rule with
 `configs/dev_modemask_v1_lockcheck.yaml`: `arl3_full_fm` on the inspected
 seeds 110 and 113, where unchanged ARL-v3 (s113) and c2 (both) locked up.
 Reported: whether either run starves. These seeds are not evidence for the rule.
+
+## Outcome (added after the runs; rule applied as written)
+
+Full table: `results/dev_modemask_v1/full/screen.md`. 20/20 runs on CPU.
+
+| condition | median successes | median final acc | median acc at equal spend | starved seeds |
+|---|---|---|---|---|
+| arl3_full | 1184 | 0.700 | 0.697 | 0/5 |
+| arl3_full_fm | 943 | 0.738 | 0.700 | 0/5 |
+| rl_light | 1340 | 0.707 | 0.737 | 0/5 |
+| v2_rawfail | 1191 | 0.715 | 0.708 | 0/5 |
+
+Rule: (1) no starvation: pass; (2) median successes >= unchanged ARL-v3:
+**fail** (943 vs 1,184); (3) final accuracy within 0.02: pass (+0.038).
+**The screen failed.** Not tuned on these seeds; no confirmation study.
+
+Descriptive (not part of the rule):
+- The mask moved the policy back to Light (64-77% on four of five seeds) and
+  made spend far steadier (1,687-2,254 vs 1,175-4,477); median final
+  accuracy rose by 0.038, equal-spend accuracy was level (0.700 vs 0.697).
+- It delivered fewer successes, with a larger share of fallback invitations
+  on three seeds (0.30-0.37): restricting modes to "predicted feasible"
+  with the still-uncorrected predictor keeps more rounds in the gate's
+  fallback.
+- Again no method starved on these seeds.
+
+Mechanism check (inspected seeds, CPU; `results/dev_modemask_v1_lockcheck/full/lockcheck.md`):
+the mask escapes both lock-ups -- s110 904 successes, acc 0.733; s113 689,
+acc 0.759 (unchanged ARL-v3 s113 on CPU: 4 successes, 0.098).

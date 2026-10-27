@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-27 (collapse diagnosed; no algorithm changed yet)
+Last updated: 2026-10-27 (two revisions screened, both failed their rules)
 
 ---
 
@@ -238,6 +238,16 @@ to run it and send back the results.
 - Dept GPU: user cloned to ~/shifat/agentic_federated_learning (shared
   account -- others use it). dept_gpu.sh refuses to run outside conda env
   `afl`. Planned there: `diag full` + dev screen on GPU as a cross-check.
-- NEXT (user decides): write thesis chapters with the honest result, or try
-  ONE other intervention ((a) longer prior, (c) random fallback, (d)
-  feasible-mode mask) with a new pre-registered screen on new dev seeds.
+- User chose (d): `policy.mode_mask=feasible` (draw only modes with
+  p >= 0.5, log-prob of the masked draw), condition `arl3_full_fm`, on
+  unchanged ARL-v3. Screen (docs/DEV_SCREEN_MODEMASK_V1.md, fresh seeds
+  205-209): **FAILED** rule 2 (successes 943 vs 1,184) but acc +0.038
+  (0.738 vs 0.700), spend much steadier; equal-spend level. It escapes both
+  inspected lock-ups on CPU (s110 0.733, s113 0.759).
+- Dept GPU (RTX 3070, 8 GB, 8 cores, ~0.6 min/FEMNIST run, 8 runs in 139 s):
+  the 8 diagnostic runs did NOT stay stuck -> the lock-up is a tipping point
+  sensitive to device numerics (Kaggle GPU and CPU lock, 3070 escapes).
+- Seeds used now: 0-119, 200-209, 900. Next fresh dev seeds: 210+;
+  confirmation: 300+.
+- NEXT (user decides): thesis chapters (recommended), or a combined
+  (b)+(d) screen on seeds 210-214 on the dept GPU (fast).
