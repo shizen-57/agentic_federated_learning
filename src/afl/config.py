@@ -225,6 +225,16 @@ class PolicyCfg:
     ppo_ent_end: float = 0.001
     ppo_norm_adv: bool = True
     ppo_grad_clip: float = 1.0
+    # SAFE-PPO network and memory (RL2 design C4, C5)
+    encoder: str = "mlp"                # mlp: each client on its own; attention: clients attend
+                                        # to each other + pointer picks (AttnNet)
+    attn_dim: int = 64
+    attn_heads: int = 4
+    attn_layers: int = 2
+    memory: bool = False                # per-client history features + GRU over recent rounds
+    mem_hidden: int = 32
+    mem_window: int = 5
+    mem_ema: float = 0.2
     entropy_coef: float = 0.01
     value_feature: str = "standalone"   # the RL policy's "value" input. standalone: the
                                         # original static prior (number of classes a

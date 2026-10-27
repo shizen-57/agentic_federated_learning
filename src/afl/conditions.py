@@ -111,6 +111,11 @@ CONDITIONS: dict[str, dict] = {
     "ppo_v3":                {"policy.name": "safe_ppo", "fl.aggregator": "fedprox",
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3", "policy.per_client_credit": True},
+    # RL2 M3: PPO with the attention set encoder and memory (C3 + C4 + C5).
+    "ppo_att":               {"policy.name": "safe_ppo", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3", "policy.per_client_credit": True,
+                              "policy.encoder": "attention", "policy.memory": True},
     "arl3_shared":           {"policy.name": "rl", "fl.aggregator": "fedprox",
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3"},

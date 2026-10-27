@@ -35,9 +35,13 @@ def test_gae_matches_a_hand_calculation():
     assert ret == pytest.approx([a0 + 0.5, a1 + 0.2, a2 + 1.0])
 
 
+NETS = [("mlp", False), ("mlp", True), ("attention", False), ("attention", True)]
+
+
 @pytest.mark.parametrize("mask", ["none", "feasible"])
-def test_stored_actions_are_re_evaluated_exactly(mask):
-    pol = _ppo(5, 3, **{"policy.mode_mask": mask})
+@pytest.mark.parametrize("enc,mem", NETS)
+def test_stored_actions_are_re_evaluated_exactly(mask, enc, mem):
+    pol = _ppo(5, 3, **{"policy.mode_mask": mask, "policy.encoder": enc, "policy.memory": mem})
     st = _state(5)
     st["p_succ"][4] = {"light": 0.9, "standard": 0.3, "priority": 0.2}
     torch.manual_seed(0)
@@ -49,15 +53,17 @@ def test_stored_actions_are_re_evaluated_exactly(mask):
         assert float(again["value"].detach()) == pytest.approx(last["value"], abs=1e-6)
         if mask == "feasible" and 4 in assign:
             assert assign[4] == "light"
-        pol._last = None
+        pol.observe_outcome(st, (sel, assign), 0.1, {"success": {i: 1 for i in sel[:1]}})
+        pol.buf = []
 
 
-def test_policy_gradient_is_unbiased():
+@pytest.mark.parametrize("enc,mem", NETS)
+def test_policy_gradient_is_unbiased(enc, mem):
     # One-round batch, gamma irrelevant: A(a) = R(a) - V(s). Summing the clipped
     # surrogate's gradient (ratio = 1) over every action, weighted by its
     # probability, gives exactly -grad E[R].
     N, K = 3, 2
-    pol = _ppo(N, K)
+    pol = _ppo(N, K, **{"policy.encoder": enc, "policy.memory": mem})
     st = _state(N)
     inp = pol._inputs(st, 1)
     params = [p for n, p in pol.net.named_parameters() if not n.startswith("critic")]
@@ -65,9 +71,10 @@ def test_policy_gradient_is_unbiased():
     R = lambda a: table[frozenset(a[0])] + 0.004 * (a[1][0] - a[1][1])  # noqa: E731
     acts = [(list(p), list(m)) for p in itertools.permutations(range(N), K)
             for m in itertools.product(range(3), repeat=K)]
-    v = float(pol._pass(inp, {"picks": acts[0][0], "modes": acts[0][1]})["value"])
+    v = float(pol._pass(inp, {"picks": acts[0][0], "modes": acts[0][1]})["value"].detach())
     exact = sum(torch.exp(pol._pass(inp, {"picks": p, "modes": m})["logp"]) * R((p, m)) for p, m in acts)
-    grads = torch.autograd.grad(exact, params)
+    grads = [torch.zeros_like(p) if g is None else g
+             for p, g in zip(params, torch.autograd.grad(exact, params, allow_unused=True))]
     expected = [torch.zeros_like(p) for p in params]
     for p_, m in acts:
         out = pol._pass(inp, {"picks": p_, "modes": m})
@@ -75,9 +82,10 @@ def test_policy_gradient_is_unbiased():
         old = out["logp"].detach()
         ratio = torch.exp(out["logp"] - old)
         loss = -(ratio * (R((p_, m)) - v))
-        g = torch.autograd.grad(loss, params)
+        g = torch.autograd.grad(loss, params, allow_unused=True)
         for e, gi in zip(expected, g):
-            e += prob * gi
+            if gi is not None:
+                e += prob * gi
     for e, g in zip(expected, grads):
         assert torch.allclose(e, -g, atol=1e-6)
 
@@ -99,3 +107,39 @@ def test_entropy_bonus_decays():
     first = pol._ent_coef()
     pol.n_updates = 10 ** 6
     assert first == pytest.approx(0.01) and pol._ent_coef() == pytest.approx(0.001)
+
+
+def test_attention_is_permutation_equivariant():
+    N = 6
+    pol = _ppo(N, 3, **{"policy.encoder": "attention", "policy.memory": True})
+    st = _state(N)
+    inp = pol._inputs(st, 1)
+    perm = torch.tensor([3, 0, 5, 1, 4, 2])
+    pinp = dict(inp)
+    pinp["x"], pinp["allowed"], pinp["pm"], pinp["mem"] = (inp["x"][perm], inp["allowed"][perm],
+                                                           inp["pm"][perm], inp["mem"][perm])
+    pinp["cov"] = (inp["cov"][0][perm], inp["cov"][1])
+    with torch.no_grad():
+        a, b = pol.net.start(inp), pol.net.start(pinp)
+        la = pol.net.select_logits(inp, [], a)
+        lb = pol.net.select_logits(pinp, [], b)
+        assert torch.allclose(la[perm], lb, atol=1e-5)
+        assert torch.allclose(pol.net.value(inp, a), pol.net.value(pinp, b), atol=1e-5)
+        inv = torch.argsort(perm)
+        ma = pol.net.mode_logits(inp, [0, 2], a)
+        mb = pol.net.mode_logits(pinp, [int(inv[0]), int(inv[2])], b)
+        assert torch.allclose(ma[perm], mb, atol=1e-5)
+
+
+def test_memory_records_observed_outcomes():
+    pol = _ppo(4, 2, **{"policy.memory": True, "policy.mem_ema": 0.5})
+    st = _state(4)
+    sel, assign = pol.act(st, 1)
+    i = sel[0]
+    k = pol.modes.index(assign[i])
+    pol.observe_outcome(st, (sel, assign), 0.0, {"success": {i: 1}})
+    assert pol.m_ema[i, k] == pytest.approx(0.75) and pol.m_last[i, -1] == 1.0
+    assert pol.m_since[i] == 0 and pol.m_count[i] == 1
+    assert pol.m_win[-1, 0] == pytest.approx(1 / len(sel))
+    with pytest.raises(ValueError):
+        _ppo(4, 2, **{"policy.encoder": "lstm"})
