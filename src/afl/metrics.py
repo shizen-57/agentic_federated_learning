@@ -232,3 +232,54 @@ class Normalizer:
         if self.n < max(self.warmup, 2):
             return 0.0
         return self._z(x)
+
+
+# ----------------------------------------------------------------- ARL-v4
+# docs/RL2_DESIGN.md, "ARL-v4". Each piece answers a measured flaw of v1-v3.
+
+def arl4_expected_gap(p_conf: dict, chosen: str, epochs: dict, thr: float,
+                      affordable: set | None = None) -> float:
+    """Expected useful work the chosen mode gives up against the best FEASIBLE
+    alternative: modes whose confident success probability (p - z*sd) clears
+    thr and that fit the round's budget. Work = p_conf x epochs / max epochs.
+    Never compares against an unaffordable or unsafe 'heaviest' mode (v3's
+    overspending), and is 0 when the chosen mode is that best alternative."""
+    ep_max = float(max(epochs.values()))
+    work = {m: p_conf[m] * epochs[m] / ep_max for m in p_conf}
+    ok = [m for m in p_conf if p_conf[m] >= thr and (affordable is None or m in affordable)]
+    if not ok:                        # nothing is confidently feasible: the safest affordable mode
+        pool = [m for m in p_conf if affordable is None or m in affordable] or list(p_conf)
+        ok = [max(pool, key=lambda m: p_conf[m])]
+    best = max(work[m] for m in ok)
+    return float(max(0.0, best - work[chosen]))
+
+
+def deficit_update(cov_ema: np.ndarray, peak: np.ndarray, dur: np.ndarray,
+                   cov_now: np.ndarray, eps: float = 1e-9) -> tuple[np.ndarray, np.ndarray]:
+    """Track each class's best coverage so far and how many rounds in a row it
+    got no new coverage."""
+    peak = np.maximum(peak, cov_ema)
+    dur = np.where(cov_now > eps, 0.0, dur + 1.0)
+    return peak, dur
+
+
+def deficit_term(cov_ema: np.ndarray, peak: np.ndarray, dur: np.ndarray,
+                 eps: float = 1e-9) -> float:
+    """Representation deficit D_t: per class, how far its coverage has fallen
+    below its own best (absolute, so a run where nothing gets through scores
+    high -- v1-v3 normalised by the current maximum and could not see that),
+    growing with how long it has lasted; averaged over classes."""
+    rel = np.where(peak > eps, 1.0 - cov_ema / np.maximum(peak, eps), 1.0)
+    return float(np.mean(np.clip(rel, 0.0, 1.0) * (1.0 + np.log1p(dur))))
+
+
+def difference_credit(sketch: np.ndarray, delivered: list[int],
+                      weights: np.ndarray) -> dict[int, float]:
+    """Per-client difference reward f(D) - f(D minus i) on the deficit-weighted
+    coverage f(S) = sum_k w_k max_{i in S} c_ik of the delivered set D. Two
+    deliverers of the same rare class each get 0 for it (either alone keeps
+    it), a sole deliverer gets all of it."""
+    def f(ids):
+        return float((sketch[ids].max(axis=0) * weights).sum()) if ids else 0.0
+    full = f(delivered)
+    return {i: full - f([j for j in delivered if j != i]) for i in delivered}

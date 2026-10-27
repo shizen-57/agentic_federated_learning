@@ -36,7 +36,7 @@ LOG_FIELDS = [
     "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
     "mode_priority", "weak_selected", "weak_success", "late_delivered",
     "budget_dropped", "debt_mean", "arl_v2", "departed",
-    "arl_v3_loss", "arl_v3_gain",
+    "arl_v3_loss", "arl_v3_gain", "arl_v4_loss", "arl_v4_deficit",
     # protocol-fix diagnostics (docs/ADVANCED_RESULTS.md, "Protocol fix")
     "val_accuracy", "acc_client_worst10", "acc_client_weak", "cov_lost", "cov_lost_avoid",
     "gap_max_all", "gap_max_weak", "ece_light", "ece_standard", "ece_priority",
@@ -133,8 +133,17 @@ class Experiment:
         nkw = dict(floor=1e-3, clip=3.0, warmup=10) if cfg.reward.robust_norm else {}
         self.norm = {k: M.Normalizer(**nkw) for k in ("acc", "cost", "lat", "arl", "faildmg", "debt",
                                                       "v2c", "v3g", "v3c", "v3cg",
-                                                      "v2s", "v3s", "v3sg")}
+                                                      "v2s", "v3s", "v3sg",
+                                                      "v4c", "v4cg", "v4d", "v4g", "prot")}
         self.cov_ema = np.zeros(self.d["num_classes"])   # ARL-v2 class-coverage history
+        self.cov_peak = np.zeros(self.d["num_classes"])  # ARL-v4: best coverage so far
+        self.cov_dur = np.zeros(self.d["num_classes"])   # ARL-v4: rounds without new coverage
+        self.align_ema = np.zeros(self.N)                # ARL-v4: update/validation alignment
+        self._prev_worst_r: float | None = None
+        self.arl4 = cfg.reward.damage_metric == "arl_v4"
+        if (self.arl4 or cfg.reward.protect_weight > 0) and not cfg.fl.val_frac > 0:
+            raise ValueError("ARL-v4 and the protection reward need fl.val_frac > 0 "
+                             "(they use the validation set, never the test set)")
         if cfg.policy.value_feature == "marginal":
             self.value_input = M.expected_marginal_value(
                 self.d["sketch"], cfg.fl.clients_per_round, seed=cfg.seed + 41)
@@ -197,6 +206,18 @@ class Experiment:
                     continue
                 out = self.model(x[:128])
                 self.local_loss[i] = float(F.cross_entropy(out, y[:128]))
+
+    def _val_grad(self, n: int = 512) -> torch.Tensor:
+        """Gradient of the loss on the first n VALIDATION examples at the current
+        global model (ARL-v4's update alignment). Validation data only; reads
+        no test example, changes no parameter and draws no random number."""
+        set_flat(self.model, self.global_flat)
+        self.model.eval()
+        idx = self.val_idx[:n]
+        self._val_grad_idx = idx
+        loss = F.cross_entropy(self.model(self.x_test[idx]), self.y_test[idx])
+        grads = torch.autograd.grad(loss, list(self.model.parameters()))
+        return torch.cat([g.reshape(-1) for g in grads]).detach()
 
     def _evaluate(self, full: bool = True, idx=None) -> tuple[float, float, float]:
         """Accuracy, loss, and mean accuracy over the worst 10% of classes.
@@ -695,6 +716,15 @@ class Experiment:
                 if i not in success and i not in late_ids:
                     self.since_success[i] += 1
 
+        if self.arl4 and self.cfg.reward.arl4_align and updates:
+            # ARL-v4: how well each delivered update points downhill on the
+            # VALIDATION loss of the model it was trained from.
+            g = self._val_grad()
+            gn = float(g.norm()) + 1e-12
+            for i, u in zip(recv_ids, updates):
+                cos = float(-(u @ g) / (gn * (float(u.norm()) + 1e-12)))
+                self.align_ema[i] = 0.7 * self.align_ema[i] + 0.3 * cos
+
         agg = self.cfg.fl.aggregator
         base_flat = self.global_flat
         agg_w = getattr(self.policy, "agg_weights", None)
@@ -740,7 +770,7 @@ class Experiment:
         if self.val_idx is not None:
             # Reward and learning baselines see the validation set only; the
             # reported accuracy is computed afterwards and never fed back.
-            acc_r, _, _ = self._evaluate(idx=self.val_idx)
+            acc_r, _, worst_r = self._evaluate(idx=self.val_idx)
             acc, test_loss, acc_worst = self._evaluate(full=False)
         else:
             acc_r, loss_r, worst_r = self._evaluate(full=False)
@@ -846,6 +876,31 @@ class Experiment:
         b = self.cfg.reward.arl_v2_ema
         self.cov_ema = (1 - b) * self.cov_ema + b * cov
 
+        # ARL-v4 (docs/RL2_DESIGN.md): expected work the chosen mode gave up
+        # against the best confidently feasible, affordable mode; a deficit
+        # term that grows while classes go uncovered; per-client difference
+        # credit on deficit-weighted delivered coverage.
+        rw = self.cfg.reward
+        self.cov_peak, self.cov_dur = M.deficit_update(self.cov_ema, self.cov_peak, self.cov_dur, cov)
+        arl_v4_deficit = M.deficit_term(self.cov_ema, self.cov_peak, self.cov_dur)
+        per_budget = None
+        if self.cfg.policy.cost_target_mult > 0 and selected:
+            per_budget = self.cfg.policy.cost_target_mult * state["cost_ref"] / max(
+                min(self.cfg.fl.clients_per_round, self.N), 1)
+        sd = state.get("p_sd")
+        v4: dict[int, float] = {}
+        for i in selected:
+            p = state["p_succ"][i]
+            pc = {m: max(0.0, p[m] - (rw.arl4_z * sd[i][m] if sd else 0.0)) for m in p}
+            afford = (None if per_budget is None else
+                      {m for m in p if self.env.cost(i, m) <= per_budget})
+            q = 1.0 + max(0.0, float(self.align_ema[i])) if rw.arl4_align else 1.0
+            mult = phi[i] * (1.0 + sketch[i] @ deficit) * q
+            v4[i] = float(mult * M.arl4_expected_gap(pc, assign[i], ep, thr, afford))
+        arl_v4_loss = float(sum(v4.values()))
+        v4_credit = M.difference_credit(sketch, ok_ids, 1.0 + deficit)
+        v4_credit = {i: v4_credit.get(i, 0.0) for i in selected}
+
         # Fairness debt (Sec. 3.13): each eligible client accrues its fair share
         # K/N of service per round and pays it off with a successful contribution.
         rho = len(selected) / self.N if selected else 0.0
@@ -875,6 +930,14 @@ class Experiment:
             else:
                 damage_term = (self.norm["arl"](arl_v3_loss)
                                - r.lambda_cov / max(r.lambda_arl, 1e-9) * self.norm["v3g"](arl_v3_gain))
+        elif r.damage_metric == "arl_v4":
+            if self.cfg.policy.per_client_credit:
+                damage_term = r.arl4_mu * self.norm["v4d"](arl_v4_deficit)
+            else:
+                damage_term = (self.norm["arl"](arl_v4_loss)
+                               + r.arl4_mu * self.norm["v4d"](arl_v4_deficit)
+                               - r.lambda_cov / max(r.lambda_arl, 1e-9)
+                               * self.norm["v4g"](float(sum(v4_credit.values()))))
         else:
             raise ValueError(f"unknown reward.damage_metric {r.damage_metric}")
         fairness_term = cv_sel if r.fairness_metric == "cv_selection" else cv
@@ -893,6 +956,14 @@ class Experiment:
         if r.lambda_debt > 0:
             z_debt = self.norm["debt"](float(self.debt.mean()))
             reward -= r.lambda_debt * z_debt
+        z_prot = None
+        if r.protect_weight > 0:
+            # Reward v2 protection term: gain in the worst-10%-class accuracy
+            # on the validation set (never the test set).
+            d_worst = worst_r - (self._prev_worst_r if self._prev_worst_r is not None else worst_r)
+            self._prev_worst_r = worst_r
+            z_prot = self.norm["prot"](d_worst)
+            reward += r.protect_weight * z_prot
         shared_reward = reward
         client_adv = None
         if r.batch_client_norm:
@@ -909,6 +980,9 @@ class Experiment:
             client_adv = {i: -r.lambda_arl * z[i] for i in selected}
             if self.cfg.policy.credit_split:
                 set_adv = -r.lambda_arl * self.norm["v2s"].batch([arl_v2])[0]
+        elif r.damage_metric == "arl_v4" and self.cfg.policy.per_client_credit:
+            zl, zg = norm("v4c", v4), norm("v4cg", v4_credit)
+            client_adv = {i: -r.lambda_arl * zl[i] + r.lambda_cov * zg[i] for i in selected}
         elif r.damage_metric == "arl_v3" and self.cfg.policy.per_client_credit:
             zl, zg = norm("v3c", v3_loss), norm("v3cg", v3_gain)
             client_adv = {i: -r.lambda_arl * zl[i] + r.lambda_cov * zg[i] for i in selected}
@@ -955,6 +1029,7 @@ class Experiment:
             "arl_v2": arl_v2,
             "departed": int(self.env.departed.sum()),
             "arl_v3_loss": arl_v3_loss, "arl_v3_gain": arl_v3_gain,
+            "arl_v4_loss": arl_v4_loss, "arl_v4_deficit": arl_v4_deficit,
             "val_accuracy": acc_r, "cov_lost": cov_lost, "cov_lost_avoid": cov_lost_avoid,
             **self._client_metrics(success, late_ids),
             "gate_filled": int(getattr(self.policy, "gate_filled", 0)),
@@ -968,9 +1043,11 @@ class Experiment:
                                  "latency": latency, "damage_metric": r.damage_metric,
                                  "damage_raw": {"fail_ratio": fail_ratio, "arl_selected": arl_sel,
                                                 "arl_online": arl_on, "arl_v2": arl_v2,
-                                                "arl_v3_loss": arl_v3_loss, "arl_v3_gain": arl_v3_gain},
+                                                "arl_v3_loss": arl_v3_loss, "arl_v3_gain": arl_v3_gain,
+                                                "arl_v4_loss": arl_v4_loss, "arl_v4_deficit": arl_v4_deficit},
                                  "fairness_raw": fairness_term, "debt_raw": float(self.debt.mean()),
                                  "z": {"acc": z_acc, "cost": z_cost, "lat": z_lat, "debt": z_debt,
+                                       "protect": z_prot,
                                        "damage_term": damage_term},
                                  "norm": {"acc": norm_state(self.norm["acc"], z_acc),
                                           "cost": norm_state(self.norm["cost"], z_cost),

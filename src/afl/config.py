@@ -170,7 +170,13 @@ class RewardCfg:
                                         # work (success prob x local epochs) the chosen
                                         # mode gave up, plus credit (lambda_cov) for
                                         # useful work delivered on under-covered data
-    lambda_cov: float = 0.5             # ARL-v3 success-credit weight
+    lambda_cov: float = 0.5             # ARL-v3 / ARL-v4 success-credit weight
+    arl4_mu: float = 1.0                # ARL-v4: weight of the representation-deficit term
+    arl4_z: float = 1.0                 # ARL-v4: confident success = p - z*sd (predictor v2)
+    arl4_align: bool = True             # ARL-v4: weight clients by how well their delivered
+                                        # updates align with the validation gradient
+    protect_weight: float = 0.0         # reward v2 (RL2 C7): weight of the gain in the
+                                        # worst-10%-class accuracy on the VALIDATION set
     arl_v2_ema: float = 0.1             # rate of the class-coverage moving average that
                                         # ARL-v2 uses to tell short gaps from long ones
     robust_norm: bool = False           # protocol fix: every reward normaliser uses a

@@ -125,6 +125,27 @@ CONDITIONS: dict[str, dict] = {
                               "policy.predictor": "v2", "policy.gate_mode": "thompson",
                               "policy.mode_mask": "feasible", "policy.mode_mask_z": 0.5,
                               "policy.cost_target_mult": 1.25, "policy.curriculum": True},
+    # RL2 M5/M5b: everything -- SAFE-PPO (attention, memory, predictor v2, Thompson
+    # gate, safety layer) with reward v2 (validation worst-class protection) and
+    # ARL-v4; cost handled by the constraint, not a fixed reward weight (beta 0).
+    "ppo_full":              {"policy.name": "safe_ppo", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v4", "policy.per_client_credit": True,
+                              "policy.encoder": "attention", "policy.memory": True,
+                              "policy.predictor": "v2", "policy.gate_mode": "thompson",
+                              "policy.mode_mask": "feasible", "policy.mode_mask_z": 0.5,
+                              "policy.cost_target_mult": 1.25, "policy.curriculum": True,
+                              "reward.protect_weight": 0.5, "reward.beta": 0.0},
+    # The same with MimiC aggregation (RL + MimiC was the best pair in the early
+    # sweep; its confirmation narrowly failed -- docs/ADVANCED_RESULTS.md item 9).
+    "ppo_full_mimic":        {"policy.name": "safe_ppo", "fl.aggregator": "mimic",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v4", "policy.per_client_credit": True,
+                              "policy.encoder": "attention", "policy.memory": True,
+                              "policy.predictor": "v2", "policy.gate_mode": "thompson",
+                              "policy.mode_mask": "feasible", "policy.mode_mask_z": 0.5,
+                              "policy.cost_target_mult": 1.25, "policy.curriculum": True,
+                              "reward.protect_weight": 0.5, "reward.beta": 0.0},
     "arl3_shared":           {"policy.name": "rl", "fl.aggregator": "fedprox",
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3"},

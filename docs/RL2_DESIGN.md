@@ -48,6 +48,15 @@ p_i(m) and uncertainty sd_i(m) from C1, and the round's cost constraint from C6:
 - ARL-v4_t = sum_i L_i + mu * D_t. ARL* (the simulator oracle) stays
   evaluation-only.
 
+## Aggregation
+
+The scheduler choices above are independent of how updates are combined.
+RL selection + MimiC aggregation was the best pair in the early sweep, but its
+pre-registered confirmation narrowly failed (docs/ADVANCED_RESULTS.md item 9),
+so it is carried as a candidate, not assumed: condition `ppo_full_mimic`
+(= `ppo_full` with `fl.aggregator: mimic`) is in the ablation (M8) and enters
+the confirmation only if it helps there on fresh dev seeds.
+
 ## Protocol
 
 Seeds: `configs/seed_registry.yaml` (guarded by `scripts/seeds.py`). Each
