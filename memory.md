@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-28 (M7 done: c34 selected, no ARL; next: screen C pre-training on the GPU)
+Last updated: 2026-10-28 (pre-training attempt 1 ran out of GPU memory; fixed, resumable; re-run)
 
 ---
 
@@ -349,6 +349,15 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   methods (tuned, tuned_arl4) x 2 datasets = 4 checkpoints, 240 runs.
   Re-check fix: tune --report-only compares the recorded ranking (Python 3.11
   vs 3.13 float sums differ in the 16th digit) instead of rewriting it.
+- Screen C pre-training attempt 1: CUDA out of memory at FEMNIST iteration
+  11/20 with 8 episodes at once (~1 GB each on the 8 GB RTX 3070, mostly
+  per-process overhead + eval batches, not data). Nothing saved. Fixed in
+  scripts only (simulator hash unchanged a442febc89a1a7d3): procs femnist 4 /
+  cifar 3 (same result), pretrain.py resumable (.partial after each
+  iteration; same weights), MAXPROCS=2 cap if needed,
+  PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True, screen-c / confirm
+  default JOBS=3 (CIFAR ~1.8 GB per run). LESSON: budget ~1 GB GPU per
+  FEMNIST process and ~1.8 GB per CIFAR process on the 8 GB card.
 - **M7-M10 built** (all rules written before any run):
   - shared library scripts/rl2lib.py (plan groups with an `override` applied
     after the condition -- new in sweep.build_jobs; manifests; evidence

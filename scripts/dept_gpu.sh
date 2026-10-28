@@ -32,6 +32,8 @@ activate() {
     source "$(conda info --base)/etc/profile.d/conda.sh"
     conda activate "$ENV"
     in_own_env
+    # less GPU memory lost to fragmentation when several runs share the card
+    export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 }
 
 # Server rule: never install into (or run from) the base environment.
@@ -142,16 +144,18 @@ tune)
     ;;
 screen-c-pretrain)
     activate; mkdir -p "$OUT"
-    python scripts/screen_c_rl2.py pretrain --set fl.device=auto 2>&1 | tee -a "$OUT/rl2_screen_c_pretrain.log"
+    # resumable: run it again after an interruption. MAXPROCS=2 if the GPU runs out of memory.
+    python scripts/screen_c_rl2.py pretrain --set fl.device=auto ${MAXPROCS:+--max-procs "$MAXPROCS"} \
+        2>&1 | tee -a "$OUT/rl2_screen_c_pretrain.log"
     ;;
 screen-c)
-    activate; jobs_default; mkdir -p "$OUT"
+    activate; JOBS=${JOBS:-3}; mkdir -p "$OUT"     # 3: four CIFAR-10 runs do not fit the 8 GB GPU
     python scripts/screen_c_rl2.py run --out "$OUT/rl2_screen_c" --jobs "$JOBS" --set fl.device=auto \
         2>&1 | tee -a "$OUT/rl2_screen_c.log"
     ;;
 confirm)
     # without "go": every check, nothing run. "confirm go" = the user's go-ahead.
-    activate; jobs_default; mkdir -p "$OUT"
+    activate; JOBS=${JOBS:-3}; mkdir -p "$OUT"     # 3: four CIFAR-10 runs do not fit the 8 GB GPU
     python scripts/confirm_rl2.py --out "$OUT/rl2_confirm" --jobs "$JOBS" --set fl.device=auto \
         $( [ "${2:-}" = go ] && echo --go ) 2>&1 | tee -a "$OUT/rl2_confirm.log"
     ;;

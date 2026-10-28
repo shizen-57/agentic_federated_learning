@@ -167,10 +167,33 @@ def main() -> int:
     init_sum = checksum(weights)
     log, fps = [], set()
     totals = {"episodes": 0, "rounds": 0, "cost": 0.0, "invites": 0, "episode_seconds": 0.0}
+    # Resumable: after every iteration the progress is saved next to the
+    # output; a restart with the same settings continues from it, with an
+    # identical result (an iteration depends only on the weights and its
+    # practice seeds). How many episodes run at once (--procs) may differ.
+    import hashlib
+    with open(args.plan, "rb") as fh:
+        plan_sha = hashlib.sha256(fh.read()).hexdigest()
+    key = {"code_hash": code_hash(), "plan_sha256": plan_sha, "group": args.group,
+           "condition": args.condition, "iterations": args.iterations, "workers": args.workers,
+           "rounds": args.rounds, "seed_start": args.seed_start, "mode": args.mode,
+           "randomise": randomise, "overrides": overrides, "set": list(args.set), "init_checksum": init_sum}
+    partial = args.out + ".partial"
+    start_it, wall_before = 0, 0.0
+    if os.path.exists(partial):
+        saved = torch.load(partial, map_location="cpu", weights_only=False)
+        if saved.get("key") == key:
+            weights, log, fps, totals = saved["weights"], saved["log"], set(saved["fps"]), saved["totals"]
+            start_it, wall_before = saved["it_done"], saved["wall"]
+            print(f"resuming after iteration {start_it} of {args.iterations} ({partial})", flush=True)
+        else:
+            os.replace(partial, partial + ".stale")
+            print(f"{partial} was made with other settings: kept as .stale, starting afresh", flush=True)
+    stop_after = int(os.environ.get("AFL_PRETRAIN_STOP_AFTER", "0"))   # tests: simulate an interruption
     t0 = time.time()
     ctx = mp.get_context("spawn")
     with ProcessPoolExecutor(min(args.procs or per_it, per_it), mp_context=ctx) as pool:
-        for it in range(args.iterations):
+        for it in range(start_it, args.iterations):
             raws = [config(s) for s in seeds[it * per_it:(it + 1) * per_it]]
             expect = checksum(weights)
             res = list(pool.map(episode, raws, [weights] * len(raws)))
@@ -190,6 +213,13 @@ def main() -> int:
             print(f"[{it + 1}/{args.iterations}] success rate {mean('successes') / max(mean('invites'), 1):.3f} "
                   f"val acc {mean('val_acc_last'):.3f} reward {mean('mean_reward'):+.3f} "
                   f"cost {mean('cost'):.0f}  ({time.time() - t0:.0f}s)", flush=True)
+            os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+            torch.save({"key": key, "weights": weights, "it_done": it + 1, "log": log, "fps": sorted(fps),
+                        "totals": totals, "wall": wall_before + time.time() - t0}, partial + ".tmp")
+            os.replace(partial + ".tmp", partial)
+            if stop_after and it + 1 >= stop_after and it + 1 < args.iterations:
+                print(f"stopping after iteration {it + 1} (AFL_PRETRAIN_STOP_AFTER)", flush=True)
+                return 3
 
     if len(fps) != 1 or None in fps:
         raise RuntimeError(f"practice episodes did not share one persistent split: {fps}")
@@ -203,12 +233,15 @@ def main() -> int:
             "init_checksum": init_sum, "split_fingerprint": fps.pop(),
             "overrides": overrides,
             # what pre-training itself cost, to report next to deployment cost
-            "practice_totals": {**totals, "wall_seconds": round(time.time() - t0, 1)},
+            "practice_totals": {**totals, "wall_seconds": round(wall_before + time.time() - t0, 1)},
+            "resumed_after": start_it,
             "practice_only": True, "created": time.strftime("%Y-%m-%d %H:%M:%S %Z")}
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     torch.save({"state_dict": weights, "meta": meta}, args.out)
     with open(os.path.splitext(args.out)[0] + ".json", "w") as fh:
         json.dump({"meta": meta, "log": log}, fh, indent=1)
+    if os.path.exists(partial):
+        os.remove(partial)
     print(f"saved {args.out}")
     return 0
 

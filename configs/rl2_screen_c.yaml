@@ -24,7 +24,8 @@ p2_reference: arl3_full_pg           # the second P2 comparator (the repaired or
 pretrain:
   iterations: 20
   workers: 8                         # episodes per iteration, averaged
-  procs: {femnist: 8, cifar: 4}      # run at once: a CIFAR-10 episode keeps ~0.7 GB on the GPU (8 GB card)
+  procs: {femnist: 4, cifar: 3}      # run at once (same result): ~1 GB per FEMNIST and ~1.8 GB per
+                                     # CIFAR-10 episode on the 8 GB GPU (8 at once ran out of memory)
   mode: average
   rounds: 200
   seed_start: {femnist: 1000, cifar: 1200}   # practice seeds (1000-1999), never evaluated

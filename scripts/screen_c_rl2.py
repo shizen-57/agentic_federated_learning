@@ -141,7 +141,7 @@ def cmd_pretrain(spec: dict, tuned: dict, args) -> int:
         cmd = [sys.executable, os.path.join(ROOT, "scripts", "pretrain.py"), "--group", group,
                "--condition", spec["base"], "--overrides", ov_path,
                "--iterations", str(pt["iterations"]), "--workers", str(pt["workers"]),
-               "--procs", str((pt.get("procs") or {}).get(d, pt["workers"])),
+               "--procs", str(min((pt.get("procs") or {}).get(d, pt["workers"]), args.max_procs or 99)),
                "--rounds", str(pt["rounds"]), "--seed-start", str(pt["seed_start"][d]),
                "--mode", pt["mode"], "--out", path] + [x for s in args.set for x in ("--set", s)]
         print(f"\n== pre-training {name}: {' '.join(cmd)}", flush=True)
@@ -271,6 +271,8 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--set", action="append", default=[], help="operational override, e.g. fl.device=auto")
     ap.add_argument("--no-smoke", action="store_true")
+    ap.add_argument("--max-procs", type=int, default=0,
+                    help="pretrain: at most this many episodes at once (GPU memory; same result)")
     args = ap.parse_args()
     if rl2lib.non_operational(args.set):
         raise SystemExit(f"--set may only be operational; put {rl2lib.non_operational(args.set)} in the spec")

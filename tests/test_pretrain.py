@@ -155,3 +155,23 @@ def test_fewer_processes_give_the_same_checkpoint(checkpoint, tmp_path):
     a, b = torch.load(out, weights_only=False), torch.load(one, weights_only=False)
     assert b["meta"]["procs"] == 1
     assert all(torch.equal(a["state_dict"][k], b["state_dict"][k]) for k in a["state_dict"])
+
+
+def test_an_interrupted_pretraining_resumes_to_the_same_checkpoint(checkpoint, tmp_path):
+    """Progress is saved after every iteration; a restart continues from it
+    and ends with exactly the weights of an uninterrupted run."""
+    import torch
+    plan, out = checkpoint
+    res = tmp_path / "res.pt"
+    args = ["--plan", str(plan), "--group", "g", "--condition", "ppo_full", "--iterations", "2",
+            "--workers", "2", "--rounds", "4", "--out", str(res)]
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "pretrain.py"), *args],
+                       capture_output=True, text=True, cwd=ROOT,
+                       env={**os.environ, "AFL_PRETRAIN_STOP_AFTER": "1"})
+    assert r.returncode == 3 and os.path.exists(str(res) + ".partial") and not res.exists()
+    r = _pretrain(*args, "--procs", "1")
+    assert r.returncode == 0 and "resuming after iteration 1" in r.stdout, r.stdout + r.stderr
+    a, b = torch.load(out, weights_only=False), torch.load(res, weights_only=False)
+    assert all(torch.equal(a["state_dict"][k], b["state_dict"][k]) for k in a["state_dict"])
+    assert b["meta"]["resumed_after"] == 1 and b["meta"]["practice_totals"]["episodes"] == 4
+    assert not os.path.exists(str(res) + ".partial")

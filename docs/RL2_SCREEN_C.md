@@ -14,8 +14,10 @@ once):
 
 **Pre-training** (`screen-c-pretrain`): every method gets its own checkpoint
 per dataset. That is 20 iterations x 8 practice episodes of 200 rounds from the
-same weights, parameters averaged after each iteration (CIFAR-10 runs 4 of the
-8 at a time to fit the 8 GB GPU; the result is identical). Practice seeds only (FEMNIST
+same weights, parameters averaged after each iteration. To fit the 8 GB GPU,
+FEMNIST runs 4 and CIFAR-10 3 of the 8 at a time (8 at once ran out of memory
+on the first attempt); the result is identical. Pre-training is resumable after
+an interruption, again with an identical result. Practice seeds only (FEMNIST
 1000-1159, CIFAR-10 1200-1359), on the persistent split's practice pool,
 rewards from the validation pool, and the test set never evaluated. A
 checkpoint is accepted only if it was made by this simulator code, from
