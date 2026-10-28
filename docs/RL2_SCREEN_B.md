@@ -36,19 +36,29 @@ is recorded in MANIFEST.json. Run it from a clean checkout and do not edit the
 code while it runs.
 
 **Measures:** as in docs/DEV_SCREEN_PREDICTOR_V1.md, plus the final worst-10%
-client accuracy (`acc_client_worst10`, the P2 measure).
+client accuracy (`acc_client_worst10`, the P2 measure). Starvation (changed
+before any run, third external review): the longest run of rounds with NO
+successful contribution -- all invitations failed, or nobody was invited
+(the safety layer may abstain). A round with no client online (`n_online` 0)
+is skipped: it neither extends nor breaks a run. The failed-invitation and
+empty-round runs, the number of empty rounds and of offline rounds are
+reported per seed as well.
 
 **Evidence check (before any decision).** `scripts/report_dev_screen.py --spec`
 rebuilds all 100 expected runs from the spec and checks each: the exact
 expected config, rounds 1-200 all present with finite values, no source change
 during the run; all runs from one code version, made from a clean checkout,
-and the report run with that same code. If anything is missing or invalid it
-prints "INCOMPLETE -- no decision" and nothing below is applied.
+and the report run with that same code. The spec file, the source plan and the
+generated plan.yaml must match the hashes recorded in MANIFEST.json, and the
+runner may only have been given operational overrides (`fl.device`): no
+override can replace a spec setting such as the data split. If anything is
+missing or invalid it prints "INCOMPLETE -- no decision" and nothing below is
+applied.
 
 **Rule** (also in the spec's `rule` block):
 
 1. *Gate*, for `ppo_full` and `ppo_full_mimic`: no seed starves (50+ rounds
-   with invitations and no success); median accuracy at equal spend
+   in a row with no successful contribution, as defined above); median accuracy at equal spend
    (B = 1,400) >= median of `rl_light` - 0.02; median final accuracy >= median
    of `arl3_full` - 0.02.
 2. *Carried forward* to pre-training (M6) and tuning (M7): the passing one

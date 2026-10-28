@@ -243,13 +243,18 @@ def arl4_expected_gap(p_conf: dict, chosen: str, epochs: dict, thr: float,
     alternative: modes whose confident success probability (p - z*sd) clears
     thr and that fit the round's budget. Work = p_conf x epochs / max epochs.
     Never compares against an unaffordable or unsafe 'heaviest' mode (v3's
-    overspending), and is 0 when the chosen mode is that best alternative."""
+    overspending), and is 0 when the chosen mode is that best alternative.
+
+    If no mode is both confidently feasible and affordable there is no
+    alternative to have chosen, so the opportunity loss is 0 (third external
+    review, finding 4: it used to reopen every mode). Overspending is charged
+    by the cost constraint and the hard cap, a stuck client by the deficit
+    term -- not here."""
     ep_max = float(max(epochs.values()))
     work = {m: p_conf[m] * epochs[m] / ep_max for m in p_conf}
     ok = [m for m in p_conf if p_conf[m] >= thr and (affordable is None or m in affordable)]
-    if not ok:                        # nothing is confidently feasible: the safest affordable mode
-        pool = [m for m in p_conf if affordable is None or m in affordable] or list(p_conf)
-        ok = [max(pool, key=lambda m: p_conf[m])]
+    if not ok:
+        return 0.0
     best = max(work[m] for m in ok)
     return float(max(0.0, best - work[chosen]))
 

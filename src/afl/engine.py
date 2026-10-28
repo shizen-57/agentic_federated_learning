@@ -32,7 +32,8 @@ from .diagnostics import DiagWriter, norm_state
 
 LOG_FIELDS = [
     "round", "accuracy", "accuracy_fixed", "eval_fixed_n", "acc_worst10", "test_loss", "reward", "cost", "latency",
-    "n_selected", "n_success", "fail_ratio", "empty_round", "arl_online", "arl_selected", "arl_oracle",
+    "n_selected", "n_success", "fail_ratio", "empty_round", "n_online",
+    "arl_online", "arl_selected", "arl_oracle",
     "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
     "mode_priority", "weak_selected", "weak_success", "late_delivered",
     "budget_dropped", "debt_mean", "arl_v2", "departed",
@@ -425,7 +426,7 @@ class Experiment:
         """Server-side estimate of a client's round time from observed descriptors."""
         return est_time(self.cfg, {"obs": state["obs"], "n_work": self.env.n_work}, i, mode, frac)
 
-    def _enforce_budget(self, selected, assign, state, fracs, cost_cap=None):
+    def _enforce_budget(self, selected, assign, state, fracs, cost_cap=None, allowed=None):
         """Eq. (3.64)-(3.65): per-round cost budget C_max and time limit L_max.
 
         Applied to every policy's chosen action, so constrained comparisons are
@@ -435,17 +436,29 @@ class Experiment:
         is moved to a lighter mode, or dropped once it is already on Light.
         Only observable quantities are used. (For the RL policy this is an
         action projection: the gradient still uses the sampled action.)
+
+        allowed: {client: modes} the policy's safety layer permits (SAFE-PPO's
+        mask). A projection may then only move a client to a lighter mode it
+        permits; with none left, the client is dropped this round (third
+        external review, finding 1). None = every mode, as before.
         """
         sysc = self.cfg.system
         cost_max = sysc.cost_max if cost_cap is None else min(sysc.cost_max, cost_cap)
         if cost_max >= 1e9 and sysc.latency_max >= 1e9:
             return selected, assign, 0
+
+        def lighter(i, m):
+            m = LIGHTER[m]
+            while m is not None and allowed is not None and m not in allowed.get(i, (m,)):
+                m = LIGHTER[m]
+            return m
+
         assign = dict(assign)
         keep, dropped = [], 0
         for i in selected:
             m = assign[i]
-            while self._est_time(i, m, state, fracs.get(i)) > sysc.latency_max and LIGHTER[m]:
-                m = LIGHTER[m]
+            while self._est_time(i, m, state, fracs.get(i)) > sysc.latency_max and lighter(i, m):
+                m = lighter(i, m)
             if self._est_time(i, m, state, fracs.get(i)) > sysc.latency_max:
                 dropped += 1
                 continue
@@ -453,8 +466,8 @@ class Experiment:
             keep.append(i)
         while keep and sum(self.env.cost(i, assign[i], fracs.get(i)) for i in keep) > cost_max:
             for i in reversed(keep):
-                if LIGHTER[assign[i]]:
-                    assign[i] = LIGHTER[assign[i]]
+                if lighter(i, assign[i]):
+                    assign[i] = lighter(i, assign[i])
                     break
             else:
                 keep.pop()
@@ -600,7 +613,8 @@ class Experiment:
         # Lagrangian target only steers the average.
         cap = (self.cfg.policy.hard_budget_mult * state["cost_ref"]
                if self.cfg.policy.hard_budget_mult > 0 else None)
-        selected, assign, budget_dropped = self._enforce_budget(selected, assign, state, fracs, cap)
+        selected, assign, budget_dropped = self._enforce_budget(
+            selected, assign, state, fracs, cap, getattr(self.policy, "allowed_modes", None))
         self._refresh_losses(selected)
 
         # V^repr_{i,t}(S_t) for every client (Eq. 3.26), not only the selected
@@ -1070,6 +1084,9 @@ class Experiment:
             "cost": round_cost, "latency": latency,
             "n_selected": len(selected), "n_success": n_succ,
             "fail_ratio": fail_ratio, "empty_round": int(not selected),
+            # clients reachable this round: a round with nobody online is not a
+            # scheduler's starvation (review 3, finding 3)
+            "n_online": int(self.env._draw["available"].sum()),
             "arl_online": arl_on, "arl_selected": arl_sel, "arl_oracle": arl_or,
             "cv": cv, "cv_selection": cv_sel, "jain": M.jain(self.x_succ),
             "ece": M.calibration_error(self.cal_probs[-200:], self.cal_out[-200:]),

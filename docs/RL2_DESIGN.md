@@ -1,7 +1,7 @@
 # RL2 design: SAFE-PPO scheduler with ARL-v4
 
 Written before any RL2 code or run; revised after the second external review
-(what changed and why: "Revision 2" at the end). Plan summarised in `memory.md`
+(what changed and why: "Revision 2" and "Revision 3" at the end). Plan summarised in `memory.md`
 section 12. Every component is a switch (default off), so the original
 behaviour and the frozen s2 evaluation stay reproducible.
 
@@ -41,7 +41,9 @@ p_i(m) and uncertainty sd_i(m) from C1, and the round's cost constraint from C6:
   the round's JOINT remaining budget -- the spend target minus the other
   invited clients' planned cost -- and with p - z*sd >= threshold (never
   "heaviest"; never a per-client allowance that the set as a whole could not
-  afford).
+  afford). If no mode is both, there was no alternative and L_i = 0;
+  overspending is charged by the constraint and the cap, a stuck client by
+  the deficit term.
 - **Loss**: L_i = v_i * max(0, E[contribution | m*] - E[contribution | chosen]),
   using confident probabilities (p - z*sd), so uncertain predictions are not punished.
 - **Deficit term**: D_t = sum over classes of the coverage deficit EMA, times
@@ -131,3 +133,30 @@ Research points from the same review:
   simulated cost and time. Results report deployment cost (the evaluated run)
   and total cost (practice + deployment) side by side; a pre-trained
   scheduler is never compared on deployment cost alone without saying so.
+
+## Revision 3 (after the third external review)
+
+1. **Budget projection vs the safety mask.** The engine's budget step (hard
+   cap, `system.cost_max`, `latency_max`) used to move a client to the next
+   lighter mode whatever the mask said, so a masked job (e.g. Light at
+   p = 0.1) could run. SAFE-PPO now publishes its allowed modes each round;
+   the projection only moves a client to a lighter ALLOWED mode and otherwise
+   drops it for the round. Policies without a mask are unchanged.
+   The curriculum's calibration now uses the prediction for the job that
+   actually ran, not the one first sampled; PPO still learns from the
+   sampled action (an action projection).
+2. **Report overrides.** The report used to apply any `--set` recorded in the
+   manifest when rebuilding the expected runs, so `data.split=per_seed`
+   could silently replace the spec's persistent split. Now the runner and the
+   report accept only operational overrides (`fl.device`), none is applied,
+   and the spec, source plan and generated plan must match their recorded
+   hashes.
+3. **Starvation includes abstention.** A scheduler that stops inviting used to
+   pass "no starvation". Starvation is now the longest run of rounds with no
+   successful contribution, invited or not; rounds with nobody online
+   (new log column `n_online`) are skipped. Re-checked on screen A: no empty
+   rounds there, the same two runs starve under either definition, so its
+   decision is unchanged.
+4. **ARL-v4 with no alternative.** With no feasible, affordable mode the
+   opportunity loss is now 0 (it used to reopen every mode, and when nothing
+   was confidently feasible it compared against an unsafe one).

@@ -221,7 +221,9 @@ class SafePPOPolicy(RLPolicy):
         self.cost_ema = 0.0
         self.level = 0 if p.curriculum else len(self.modes) - 1
         self.cal: list[tuple[float, int]] = []   # (predicted, observed) of recent invitations
-        self._pred = {}                   # this round's predicted success of the chosen modes
+        # this round's permitted modes per client; the engine's budget
+        # projection may only move a client to one of these (review 3, finding 1)
+        self.allowed_modes: dict[int, frozenset] | None = None
 
     # ------------------------------------------------------------- inputs
 
@@ -239,6 +241,8 @@ class SafePPOPolicy(RLPolicy):
         x = self._feature_matrix(state)
         allowed, k_s, fill = self._allowed(state, N, K)
         pm, abstain = self._mode_sets(state)
+        self.allowed_modes = {i: frozenset(m for k, m in enumerate(self.modes) if bool(pm[i, k]))
+                              for i in range(N)}
         if abstain.any():
             # A client with no allowed job cannot be picked or filled in.
             allowed = allowed & ~abstain
@@ -357,13 +361,11 @@ class SafePPOPolicy(RLPolicy):
         self._last = {"inp": inp, "act": inp["act"], "picks": out["picks"], "modes": out["modes"],
                       "logp": float(out["logp"]), "value": float(out["value"])}
         if not inp["act"]:
-            self._pred = {}
             return [], {}
         if self.diag:
             self._record_decision(out["chosen"], inp["fill"], out["steps"], out["rows"],
                                   out["mode_lp"], inp["allowed"], inp["k"], None)
         assign = {i: self.modes[m] for i, m in zip(out["chosen"], out["modes"])}
-        self._pred = {i: float(self._p_round[i][assign[i]]) for i in out["chosen"]}
         return list(out["chosen"]), assign
 
     def _value_only(self, inp) -> float:
@@ -426,8 +428,12 @@ class SafePPOPolicy(RLPolicy):
         p = self.cfg.policy
         if not p.curriculum or not action:
             return
+        # Calibration of the job that actually RAN (after any budget
+        # projection), not of the one the policy first sampled (review 3,
+        # finding 1); the sampled action stays in self._last for PPO.
+        sel, executed = action
         success = (info or {}).get("success", {})
-        self.cal.extend((self._pred[i], int(success.get(i, 0))) for i in action[0] if i in self._pred)
+        self.cal.extend((float(self._p_round[i][executed[i]]), int(success.get(i, 0))) for i in sel)
         self.cal = self.cal[-p.curr_min:]
         err = self.calibration_error(self.cal)
         if len(self.cal) >= p.curr_min and err < p.curr_err and self.level < len(self.modes) - 1:

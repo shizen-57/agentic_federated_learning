@@ -48,15 +48,17 @@ def test_curriculum_unlocks_on_calibration_and_locks_again():
     st = _state(4)
     inp = pol._inputs(st, 1)
     assert not inp["pm"][:, 1:].any() and inp["pm"][:, 0].all()     # Light only
-    pol._pred = {0: 0.5, 1: 0.5}
+    # calibration is scored on the prediction of the job that ran
+    pol._p_round = {i: {"light": 0.5, "standard": 0.9, "priority": 0.9} for i in (0, 1)}
+    ran_light = ([0, 1], {0: "light", 1: "light"})
     for k in range(10):                                  # 20 well-calibrated outcomes
-        pol._curriculum(([0, 1], {}), {"success": {0: k % 2, 1: (k + 1) % 2}})
+        pol._curriculum(ran_light, {"success": {0: k % 2, 1: (k + 1) % 2}})
     assert pol.level == 1
     inp = pol._inputs(st, 2)
     assert inp["pm"][:, :2].all() and not inp["pm"][:, 2].any()
-    pol._pred = {0: 0.9, 1: 0.9}
-    for _ in range(5):                                   # predicted 0.9, all fail
-        pol._curriculum(([0, 1], {}), {"success": {}})
+    pol._p_round = {i: {"light": 0.5, "standard": 0.9, "priority": 0.9} for i in (0, 1)}
+    for _ in range(5):                                   # Standard predicted 0.9, all fail
+        pol._curriculum(([0, 1], {0: "standard", 1: "standard"}), {"success": {}})
     assert pol.level == 0
 
 

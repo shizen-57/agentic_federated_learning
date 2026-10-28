@@ -18,7 +18,7 @@ import report_dev_screen as rep  # noqa: E402
 from afl.conditions import CONDITIONS  # noqa: E402
 from afl.engine import LOG_FIELDS  # noqa: E402
 from afl.provenance import code_hash  # noqa: E402
-from diagnose_collapse import plan_for  # noqa: E402
+from diagnose_collapse import _sha, plan_for  # noqa: E402
 from sweep import build_jobs, expected_config  # noqa: E402
 
 ROUNDS = 3
@@ -34,14 +34,17 @@ SPEC = {"version": 1, "title": "test screen", "purpose": "dev",
                  "ablations": {"ppo_full_mlp": "attention set encoder"}}}
 
 
-def _screen(tmp_path, spec=SPEC, acc=0.5):
-    """Fake, valid results for every run the spec asks for. Returns
+def _screen(tmp_path, spec=SPEC, acc=0.5, overrides=("fl.device=auto",)):
+    """Fake, valid results for every run the spec asks for (made with the
+    given runner overrides), as diagnose_collapse.py writes them. Returns
     (spec path, group dir, jobs)."""
     spec_path = tmp_path / "spec.yaml"
     spec_path.write_text(yaml.safe_dump(spec))
     variant_dir = tmp_path / "out" / "full"
     plan, _ = plan_for(spec, "full")
-    jobs = build_jobs(plan, None, None, str(variant_dir), ["fl.device=auto"])
+    os.makedirs(variant_dir, exist_ok=True)
+    (variant_dir / "plan.yaml").write_text(yaml.safe_dump(plan, sort_keys=True))
+    jobs = build_jobs(plan, None, None, str(variant_dir), list(overrides))
     for j in jobs:
         os.makedirs(j["raw"]["out"], exist_ok=True)
         base = os.path.join(j["raw"]["out"], j["raw"]["tag"])
@@ -53,13 +56,15 @@ def _screen(tmp_path, spec=SPEC, acc=0.5):
             w.writerow(LOG_FIELDS)
             for r in range(1, ROUNDS + 1):
                 row = dict.fromkeys(LOG_FIELDS, 0.0)
-                row.update(round=r, n_selected=10, n_success=6, cost=10.0, mode_light=10,
+                row.update(round=r, n_selected=10, n_success=6, n_online=40, cost=10.0, mode_light=10,
                            accuracy=acc, accuracy_fixed=acc, acc_client_worst10=acc / 2)
                 w.writerow([row[k] for k in LOG_FIELDS])
     (variant_dir / "MANIFEST.json").write_text(json.dumps(
         {"variant": "full", "rounds": ROUNDS, "code_hash": code_hash(), "git_commit": "c0ffee",
-         "git_dirty": False, "overrides_vs_source": ["fl.rounds", "diag.enabled", "out",
-                                                     "data.split", "fl.device=auto"]}))
+         "git_dirty": False,
+         "plan_sha256": {"diagnostic": _sha(str(spec_path)), "generated": _sha(str(variant_dir / "plan.yaml")),
+                         "source": _sha(os.path.join(ROOT, spec["source_plan"]))},
+         "overrides_vs_source": ["fl.rounds", "diag.enabled", "out", "data.split", *overrides]}))
     return str(spec_path), str(variant_dir / "s2_femnist"), jobs
 
 
@@ -201,3 +206,28 @@ def test_screen_b_spec_is_unbundled_and_runnable():
     assert {"rl_light_pg", "ppo_full_rawfail", "ppo_full_arl3"} <= set(spec["conditions"])
     import seeds as seedreg
     seedreg.check(spec["seeds"], spec["purpose"])
+
+
+def test_a_runner_override_cannot_replace_a_spec_setting(tmp_path, monkeypatch, capsys):
+    # third review, finding 2: spec data.split=persistent, manifest override
+    # data.split=per_seed, configs saved with per_seed -> must not validate
+    spec, group, _ = _screen(tmp_path, overrides=("fl.device=auto", "data.split=per_seed"))
+    code, out = _report(monkeypatch, capsys, group, spec)
+    assert code == 2 and "overrides that change the experiment: ['data.split=per_seed']" in out
+    assert "rl_light seed 215: different config" in out and "Carried forward" not in out
+
+
+@pytest.mark.parametrize("what", ["spec", "plan"])
+def test_spec_and_plan_must_be_the_recorded_ones(tmp_path, monkeypatch, capsys, what):
+    spec, group, _ = _screen(tmp_path)
+    if what == "spec":          # the rule edited after the runs
+        d = yaml.safe_load(open(spec))
+        d["rule"]["margin"] = 0.5
+        open(spec, "w").write(yaml.safe_dump(d))
+        why = "the spec"
+    else:
+        path = os.path.join(os.path.dirname(group), "plan.yaml")
+        open(path, "a").write("# edited\n")
+        why = "the generated plan"
+    code, out = _report(monkeypatch, capsys, group, spec)
+    assert code == 2 and why in out and "does not match the hash" in out

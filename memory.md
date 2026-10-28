@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-27 (screen A passed; second review fixed; screen B v2 ready, unrun)
+Last updated: 2026-10-28 (third review's 4 findings fixed; screen B v2 ready, unrun)
 
 ---
 
@@ -273,7 +273,7 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   protection reward, `ppo_full`; `ppo_full_mimic` = + MimiC, user asked),
   M6 (practice mode, scripts/pretrain.py, checkpoints with provenance).
   Every switch defaults off; defaults row-identical to earlier runs.
-  Suite 306 tests pass (8 frozen-validator tests skip; they run in the
+  Suite 315 tests pass (8 frozen-validator tests skip; they run in the
   frozen checkout).
 - LESSON: never edit src/afl while a screen runs here -- runs get flagged
   "source changed while it ran" (happened once to screen A; restarted).
@@ -296,6 +296,14 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   "INCOMPLETE -- no decision" (exit 2). Also: counterfactual on the joint
   budget, hard per-round cap (`hard_budget_mult` 2.0), predictor evidence
   ageing (`pred_decay` 0.98), pre-training cost recorded.
+- Third external review (of 4c69be3), all 4 findings confirmed and fixed
+  (docs/RL2_DESIGN.md "Revision 3"): (1) budget projection only moves a
+  client to a mode SAFE-PPO allows, else drops it; curriculum calibrates on
+  the executed job; PPO keeps the sampled action; (2) report/runner accept
+  only `fl.device` overrides, spec/source/plan hashes checked; (3) starvation
+  = 50+ rounds with no successful contribution, invited or not (new log
+  column `n_online`; offline rounds skipped) -- screen A unchanged by this;
+  (4) ARL-v4 gap = 0 when no feasible affordable alternative exists.
 - Screen B **version 2** (docs/RL2_SCREEN_B.md, configs/rl2_screen_b.yaml,
   seeds 215-219, persistent split, 100 runs): ppo_full, each component
   removed one at a time (12 leave-one-out), ppo_full_mimic, ppo_v3, and

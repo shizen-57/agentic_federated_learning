@@ -33,20 +33,40 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
-STARVE = 50          # rounds with invitations and zero successes, in a row
+STARVE = 50          # rounds in a row with no successful contribution (see measures)
 BUDGET = 1400.0      # simulated cost units, fixed before the runs
 NAN = float("nan")
 
 
+def _longest(flags: list[bool | None]) -> int:
+    """Longest run of True; None (a round that cannot count) neither extends
+    nor breaks a run."""
+    run = best = 0
+    for x in flags:
+        if x is None:
+            continue
+        run = run + 1 if x else 0
+        best = max(best, run)
+    return best
+
+
 def measures(path: str) -> dict:
+    """Starvation (review 3, finding 3) is the longest run of rounds with NO
+    successful contribution -- invitations that all failed and rounds with no
+    invitation (abstention) alike. A round in which no client was online
+    (`n_online` = 0) cannot be the scheduler's fault: it is skipped, neither
+    extending nor breaking a run. The two parts are also reported apart."""
     rows = list(csv.DictReader(open(path)))
     f = lambda r, k: float(r[k])  # noqa: E731
-    streak = longest = 0
+    online = [f(r, "n_online") > 0 if "n_online" in r else True for r in rows]
+    dry = [None if not on else not f(r, "n_success") for r, on in zip(rows, online)]
+    inv_fail = [None if not on else bool(f(r, "n_selected")) and not f(r, "n_success")
+                for r, on in zip(rows, online)]
+    empty = [None if not on else not f(r, "n_selected") for r, on in zip(rows, online)]
+    longest = _longest(dry)
     spend = 0.0
     at_budget = None
     for r in rows:
-        streak = streak + 1 if f(r, "n_selected") and not f(r, "n_success") else 0
-        longest = max(longest, streak)
         if spend + f(r, "cost") <= BUDGET:
             spend += f(r, "cost")
             at_budget = (f(r, "accuracy_fixed"), int(f(r, "round")))
@@ -57,17 +77,20 @@ def measures(path: str) -> dict:
     return {"succ": int(sum(f(r, "n_success") for r in rows)), "inv": int(inv),
             "fallback": sum(f(r, "gate_filled") for r in rows) / max(inv, 1),
             "longest": longest, "starved": longest >= STARVE,
+            "longest_fail": _longest(inv_fail), "longest_empty": _longest(empty),
+            "empty": int(sum(1 for x in empty if x)), "offline": int(sum(1 for on in online if not on)),
             "modes": "/".join(f"{100 * m / max(sum(modes), 1):.0f}" for m in modes),
             "acc": f(rows[-1], "accuracy"), "spend": sum(f(r, "cost") for r in rows),
             "worst10": f(rows[-1], "acc_client_worst10") if "acc_client_worst10" in rows[-1] else NAN,
             "acc_budget": at_budget, "eq": at_budget[0] if at_budget else NAN}
 
 
-def validate(spec: dict, variant_dir: str) -> tuple[list[str], list[dict], list[str]]:
+def validate(spec: dict, variant_dir: str, spec_path: str) -> tuple[list[str], list[dict], list[str]]:
     """(problems, expected jobs, CSV paths of the valid ones). No problems =
     complete, valid evidence."""
+    import yaml
     from afl.provenance import code_hash
-    from diagnose_collapse import plan_for
+    from diagnose_collapse import _sha, non_operational, plan_for
     from sweep import build_jobs, run_status
     problems: list[str] = []
     try:
@@ -87,9 +110,28 @@ def validate(spec: dict, variant_dir: str) -> tuple[list[str], list[dict], list[
         return problems + [f"this checkout's simulator code ({code_hash()}) is not the code that "
                            f"made the runs ({man.get('code_hash')}, commit {man.get('git_commit')}); "
                            "run the report from that commit"], [], []
+    # The spec, the source plan and the plan actually run must be the recorded ones.
     plan, _ = plan_for(spec, variant)
-    extra = [o for o in man.get("overrides_vs_source", []) if "=" in o]   # --set given to the runner
-    jobs = build_jobs(plan, None, None, variant_dir, extra)
+    shas = man.get("plan_sha256") or {}
+    plan_path = os.path.join(variant_dir, "plan.yaml")
+    for what, path in (("spec", spec_path), ("source plan", os.path.join(ROOT, spec["source_plan"])),
+                       ("generated plan", plan_path)):
+        key = {"spec": "diagnostic", "source plan": "source", "generated plan": "generated"}[what]
+        if _sha(path) is None or _sha(path) != shas.get(key):
+            problems.append(f"the {what} ({path}) does not match the hash recorded in MANIFEST.json")
+    try:
+        with open(plan_path) as fh:
+            if yaml.safe_load(fh) != plan:
+                problems.append("plan.yaml is not the plan this spec generates")
+    except (OSError, yaml.YAMLError):
+        problems.append("no readable plan.yaml")
+    # Runner overrides may only be operational (the device, which the config
+    # check ignores); none is applied, so nothing can replace a spec setting.
+    bad = non_operational([o for o in man.get("overrides_vs_source", []) if "=" in o])
+    if bad:
+        problems.append(f"the runs used overrides that change the experiment: {bad} "
+                        "(only the spec may set those)")
+    jobs = build_jobs(plan, None, None, variant_dir, [])
     hashes, valid = set(), []
     for j in jobs:
         status = run_status(j["raw"])
@@ -136,7 +178,8 @@ def paired(runs, a, b, k):
 def screen_b(runs: dict, rule: dict) -> None:
     eq_ref, acc_ref, margin = rule["equal_spend_ref"], rule["accuracy_ref"], rule["margin"]
     full, flag = rule["full"], rule["flag_delta"]
-    print(f"\n## Rule (docs/RL2_SCREEN_B.md)\n\nGate: no seed starves; median equal-spend acc >= "
+    print(f"\n## Rule (docs/RL2_SCREEN_B.md)\n\nGate: no seed starves ({STARVE}+ rounds in a row "
+          f"with no successful contribution, invited or not); median equal-spend acc >= "
           f"{eq_ref} - {margin}; median final acc >= {acc_ref} - {margin}.\n")
     passing = []
     for c in rule["gate"]:
@@ -186,7 +229,7 @@ def main() -> int:
         check_rule(spec)
         if os.path.basename(group_dir) != spec["source_group"]:
             raise SystemExit(f"{args.dir} is not a {spec['source_group']} folder")
-        problems, jobs, paths = validate(spec, os.path.dirname(group_dir))
+        problems, jobs, paths = validate(spec, os.path.dirname(group_dir), args.spec)
         extra = sorted(set(glob.glob(os.path.join(group_dir, "*_s*.csv")))
                        - {os.path.join(j["raw"]["out"], j["raw"]["tag"] + ".csv") for j in jobs}
                        ) if jobs else []
@@ -199,15 +242,18 @@ def main() -> int:
 
     title = spec.get("title", os.path.basename(args.spec)) if spec else os.path.basename(group_dir)
     print(f"# Development screen: {title} (exploratory)\n")
-    print(f"Starved = {STARVE}+ rounds in a row with invitations and no success. "
+    print(f"Starved = {STARVE}+ rounds in a row with no successful contribution (all invitations "
+          "failed, or nobody invited); rounds with no client online are skipped. "
           f"Equal spend: fixed-set accuracy at the last round with cumulative cost <= {BUDGET:.0f}.\n")
-    print("| condition | seed | successes/invites | fallback share | longest zero streak | starved "
+    print("| condition | seed | successes/invites | fallback share | longest no-contribution run "
+          "(failed invites / no invites) | empty rounds | offline rounds | starved "
           "| modes % L/S/P | final acc | worst-10% acc | total spend | acc at equal spend (round) |")
-    print("|---|---|---|---|---|---|---|---|---|---|---|")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for cond in sorted(runs):
         for seed, m in sorted(runs[cond].items()):
             ab = m["acc_budget"]
-            print(f"| {cond} | {seed} | {m['succ']}/{m['inv']} | {m['fallback']:.2f} | {m['longest']} | "
+            print(f"| {cond} | {seed} | {m['succ']}/{m['inv']} | {m['fallback']:.2f} | {m['longest']} "
+                  f"({m['longest_fail']} / {m['longest_empty']}) | {m['empty']} | {m['offline']} | "
                   f"{'YES' if m['starved'] else 'no'} | {m['modes']} | {m['acc']:.3f} | "
                   f"{m['worst10']:.3f} | {m['spend']:.0f} | "
                   + (f"{ab[0]:.3f} (r{ab[1]})" if ab else "-") + " |")

@@ -38,6 +38,15 @@ import yaml  # noqa: E402
 from afl.run import _load  # noqa: E402
 from sweep import build_jobs, expected_config  # noqa: E402
 
+# --set may only change HOW a screen runs, never WHAT it tests: anything else
+# belongs in the spec (its `set`), where the report rebuilds it from
+# (third external review, finding 2). The device is not part of the config check.
+OPERATIONAL_OVERRIDES = ("fl.device",)
+
+
+def non_operational(overrides: list[str]) -> list[str]:
+    return [o for o in overrides if o.split("=", 1)[0].strip() not in OPERATIONAL_OVERRIDES]
+
 
 def _sha(path: str, limit: int | None = None) -> str | None:
     if not os.path.exists(path):
@@ -143,7 +152,8 @@ def main() -> int:
     ap.add_argument("--out", default=None, help="default: the spec's out")
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--set", action="append", default=[],
-                    help="extra override passed to sweep.py, e.g. fl.device=auto (recorded)")
+                    help="operational override passed to sweep.py, e.g. fl.device=auto (recorded); "
+                         "experimental settings go in the spec's `set`")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -151,6 +161,9 @@ def main() -> int:
         spec = yaml.safe_load(fh)
     if args.variant not in spec["variants"]:
         raise SystemExit(f"unknown variant {args.variant}; have {list(spec['variants'])}")
+    if non_operational(args.set):
+        raise SystemExit(f"--set may only change {OPERATIONAL_OVERRIDES}; put "
+                         f"{non_operational(args.set)} in the spec's `set` instead")
     import seeds as seedreg
     seedreg.check(spec["seeds"], spec.get("purpose", "diagnostic"), spec.get("frozen_manifest"))
     out = os.path.join(args.out or os.path.join(ROOT, spec["out"]), args.variant)
