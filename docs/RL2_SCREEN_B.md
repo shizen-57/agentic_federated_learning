@@ -81,3 +81,17 @@ Results are reported for every seed either way; nothing is tuned on seeds
 
 Report: `python scripts/report_dev_screen.py <out>/full/s2_femnist --spec
 configs/rl2_screen_b.yaml` (the GPU script writes it to `<out>/full/report.md`).
+
+## Run log
+
+- **Attempt 1 (2026-10-28, dept RTX 3070, commit ec4866f): void.** 65 of 100
+  runs crashed at their first round -- every condition with the feasible-mode
+  mask -- because the server's torch (2.5.1, the newest build for its CUDA
+  12.1 driver) cannot build a tensor from a list of numpy bools; newer torch
+  can, so the tests here passed. The 35 runs that finished were not looked
+  at. Fix: the masks are built from plain bools; a test now fails if numpy
+  bools reach `torch.tensor`; the GPU script runs every condition for two
+  rounds (`scripts/smoke_screen.py`, seed 900) before a screen starts; the
+  suite is also run on torch 2.5.1. The whole screen is re-run from scratch
+  with the fixed code (one code version for all 100 runs, as the evidence
+  check requires); attempt 1's folder is kept aside, unused.

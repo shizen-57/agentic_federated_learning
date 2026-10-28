@@ -294,11 +294,11 @@ class RLPolicy(Policy):
             # Safety margin (RL2 C6): trust a mode only if it clears the bar
             # even after subtracting z posterior standard deviations.
             p = {m: p[m] - z * sd[i][m] for m in self.modes}
-        ok = [p[m] >= thr for m in self.modes]
+        ok = [bool(p[m] >= thr) for m in self.modes]   # plain bools (torch < 2.6)
         if not any(ok):
             best = max(self.modes, key=lambda m: p[m])
             ok = [m == best for m in self.modes]
-        return logits.masked_fill(~torch.tensor(ok), -1e9)
+        return logits.masked_fill(~torch.tensor(ok, dtype=torch.bool), -1e9)
 
     def _record_decision(self, picked, fill, step_logp, mode_rows, mode_lp, allowed, k_sampled,
                          sel_entropy, cov_at=None):

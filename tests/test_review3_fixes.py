@@ -134,3 +134,27 @@ def test_runner_refuses_experimental_overrides():
                         "full", "--dry-run", "--set", "fl.device=auto"],
                        capture_output=True, text=True, cwd=ROOT)
     assert r.returncode == 0, r.stderr
+
+
+def test_masks_never_build_tensors_from_numpy_bools(tmp_path, monkeypatch):
+    # torch < 2.6 (the server's 2.5.1) cannot make a tensor from a list of
+    # numpy bools: screen B's first attempt crashed on every masked condition.
+    # Newer torch accepts them, so check the inputs, not the outcome.
+    import numpy as np
+    import torch
+    real = torch.tensor
+
+    def strict(data, *a, **k):
+        if isinstance(data, (list, tuple)) and any(isinstance(x, np.bool_) for x in data):
+            raise TypeError("list of numpy bools passed to torch.tensor")
+        return real(data, *a, **k)
+    monkeypatch.setattr(torch, "tensor", strict)
+    exp = _engine(tmp_path, mode_mask="feasible", mode_mask_z=0.5, curriculum=True,
+                  hard_budget_mult=2.0)
+    exp.run(verbose=False)                                  # SAFE-PPO's mask
+    from test_mode_mask import _policy                      # the original RL policy's mask
+    from test_sixth_review import _state
+    pol, st = _policy(4, 4), _state(4)
+    for i in range(4):
+        st["p_succ"][i] = {m: np.float64(v) for m, v in zip(MODES, (0.9, 0.4, 0.2))}
+    pol.act(st, 1)

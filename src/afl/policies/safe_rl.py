@@ -291,8 +291,10 @@ class SafePPOPolicy(RLPolicy):
             feas = [True] * M
             if pol.mode_mask != "none":
                 z = pol.mode_mask_z if sd is not None else 0.0
-                feas = [p[m] - (z * sd[i][m] if sd is not None else 0.0) >= thr for m in self.modes]
-            row = [f and k <= self.level for k, f in enumerate(feas)]
+                # plain bools: torch < 2.6 cannot build a tensor from numpy bools
+                feas = [bool(p[m] - (z * sd[i][m] if sd is not None else 0.0) >= thr)
+                        for m in self.modes]
+            row = [bool(f) and k <= self.level for k, f in enumerate(feas)]
             if not any(row):
                 opt = p[self.modes[0]] + (pol.gate_z * sd[i][self.modes[0]] if sd is not None else 0.0)
                 if opt >= thr:
@@ -300,7 +302,7 @@ class SafePPOPolicy(RLPolicy):
                     n_light += 1
                 else:
                     abstain[i] = True
-            pm[i] = torch.tensor(row)
+            pm[i] = torch.tensor(row, dtype=torch.bool)
         self.mask_stats = {"light_override": n_light, "abstain": int(abstain.sum())}
         return pm, abstain
 

@@ -111,6 +111,9 @@ screen)
     activate; jobs_default; mkdir -p "$OUT"
     spec=${2:?give the screen spec, e.g. configs/rl2_screen_b.yaml}
     name=$(basename "$spec" .yaml)
+    # pre-flight: every condition runs 2 rounds on this machine first (~1 min)
+    python scripts/smoke_screen.py --spec "$spec" --set fl.device=auto \
+        || { echo "STOP: a condition crashed in the 2-round check; send the output above"; exit 1; }
     python scripts/diagnose_collapse.py --spec "$spec" --variant full --jobs "$JOBS" \
         --set fl.device=auto --out "$OUT/$name" 2>&1 | tee -a "$OUT/$name.log"
     # the pre-registered rule, applied only if every expected run is complete and valid
