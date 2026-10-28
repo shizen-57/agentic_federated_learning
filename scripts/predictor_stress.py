@@ -15,7 +15,10 @@ mean predicted vs observed) overall, by mode, weak vs strong clients, a
 client's first 3 invitations vs later ones, and before / during / after the
 shock for hit and untouched clients; the exceptions per period; and recovery
 -- how soon restored clients are invited again and how they then fare, and
-how many clients are never invited again (avoided for good).
+how many clients are never invited again (avoided for good). For those, the
+simulator's ground truth (env.oracle_eligible, before any job runs, same
+random numbers) says how often they could have succeeded: avoided rightly or
+wrongly.
 """
 from __future__ import annotations
 

@@ -70,7 +70,61 @@ shocked one. In the shocked world, at round 80 half the devices lose 98% of
 their bandwidth and 95% of their battery; at round 140 they are restored.
 Every executed job's predicted success is compared with what happened.
 
-Results: added when the 200-round run finishes (`results/predictor_stress`).
+**Calibration** (predicted success of the executed job vs what happened;
+ECE = expected calibration error, 0 is perfect):
+
+| group (stable world) | jobs | predicted | observed | ECE |
+|---|---|---|---|---|
+| all | 6,000 | 0.615 | 0.597 | 0.038 |
+| Light | 4,880 | 0.591 | 0.583 | 0.034 |
+| Standard | 541 | 0.722 | 0.680 | 0.050 |
+| Priority | 579 | 0.719 | 0.639 | 0.080 |
+| weak clients | 1,615 | 0.475 | 0.436 | 0.069 |
+| strong clients | 4,385 | 0.667 | 0.657 | 0.051 |
+| a client's first 3 invitations (cold start) | 877 | 0.529 | 0.465 | 0.064 |
+| later invitations | 5,123 | 0.630 | 0.620 | 0.039 |
+
+- Well calibrated overall. It is somewhat **too optimistic** for heavy
+  jobs (Priority by 0.08), for weak clients (0.04) and at cold start (0.06).
+- **After an abrupt change** (shock world, hit clients, rounds 80-139): it
+  predicted 0.378 for the jobs that still ran, against 0.042 observed. It
+  learns quickly, though: only 259 such jobs ran (about 1.4 per round), and
+  abstentions rose from 16 to 54 clients per round. Untouched clients
+  stayed calibrated (0.600 vs 0.582).
+
+**Exceptions** (logged every round as `n_abstain` and `n_light_override`):
+- stable world: 16-26 of 100 clients ruled out per round; 23-34 given a
+  Light-only override; the gate never had to fill;
+- shock world: abstentions rise to 54 during the shock and fall back to 30
+  after it.
+
+**Recovery after the shock** (round 140 on): 91% of the hit clients were
+invited again, after a median of 9 rounds. From round 160 on, their success
+rate was 0.655, against 0.556 before the shock.
+
+**Are clients avoided for good, and rightly?** In the last 60 rounds, 43
+clients (of 300 across the 3 seeds) in the stable world, and 53 in the
+shock world, were never invited. Most of them were ruled out by the safety
+layer in at least 90% of their online rounds: 35 and 47. Only 14-15% of
+them are weak clients. The simulator's ground truth answers whether they
+could have succeeded:
+- a job would have succeeded in a median **21%** of their online rounds;
+- only **1** of the 35 (and 1 of the 47) could have succeeded in at least
+  half of them;
+- over every client-round the safety layer ruled out, a job was possible in
+  23-24%, against 63-64% for the rounds it allowed.
+
+So the safety layer mostly avoids clients that would usually fail. That is
+the rule's design: eligibility needs a success chance of about 0.5. It still
+means about 12-16% of clients contribute nothing late in a run.
+
+**Decision:** no change to the method now. Recovery works, there is no sign
+of wrongful avoidance at scale, and the reviewer asked for changes only where
+a check shows a specific need. The existing exceptions are logged every round.
+If the thesis wants more inclusion of rarely-successful clients, the
+candidate is an explicit probe budget: at most one Light probe per round for
+the longest-excluded client, logged in its own column. That would be a new
+method version and would need its own development screen first.
 
 ## 6. Resources compared precisely (finding 6)
 
@@ -119,3 +173,16 @@ difference: accuracy by more than 0.03, or successes or cost by more than
 15%. Small differences are expected (GPU arithmetic is not bit-identical to
 CPU). The CPU result is `results/devicecheck/cpu.json`; the GPU one comes from
 `bash scripts/dept_gpu.sh devicecheck`.
+
+CPU result (here, torch 2.14, 30 rounds; short runs, so accuracy is still
+low):
+
+| run | last-10 acc | worst-10% | successes / invited | cost | heavy share |
+|---|---|---|---|---|---|
+| FEMNIST tuned | 0.464 | 0.212 | 156 / 300 | 278 | 0.17 |
+| FEMNIST always-Light | 0.465 | 0.208 | 182 / 300 | 214 | 0 |
+| CIFAR-10 tuned | 0.269 | 0.087 | 149 / 300 | 284 | 0.19 |
+| CIFAR-10 always-Light | 0.233 | 0.050 | 213 / 300 | 197 | 0 |
+
+The GPU run is compared with `python scripts/check_devices.py --compare
+results/devicecheck/cpu.json <gpu.json>`.

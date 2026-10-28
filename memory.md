@@ -426,8 +426,17 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
     configs/rl2_sensitivity.yaml + docs/RL2_SENSITIVITY.md (FEMNIST, seeds
     270-279, deadline/availability/battery/bandwidth low+high, 180 runs);
     new knobs system.energy_scale / bandwidth_scale.
-  - (5) scripts/predictor_stress.py (seeds 290-292): results in
-    results/predictor_stress and docs/VALIDATION.md section 5.
+  - (5) scripts/predictor_stress.py (seeds 290-292, results/predictor_stress,
+    docs/VALIDATION.md section 5): calibrated overall (0.615 predicted vs
+    0.597 observed, ECE 0.038); too optimistic for Priority (0.72 vs 0.64),
+    weak clients (0.48 vs 0.44), cold start (0.53 vs 0.47); after a shock
+    0.38 vs 0.04 for the few jobs that still ran, abstentions 16 -> 54.
+    Recovery: 91% of hit clients re-invited, median 9 rounds, then success
+    0.655. Avoided for good (ruled out >= 90% of last 60 online rounds): 35
+    stable / 47 shock of 300 clients; ground truth: they could succeed in a
+    median 21% of rounds, only 1 in >= half -> mostly right (threshold 0.5).
+    DECISION: no method change; a budgeted Light probe is the candidate if
+    more inclusion is wanted (new version, needs its own dev screen).
   - (6) scripts/cost_curves.py: accuracy at budgets 500-2000 with actual
     spend; spends within ~2% at each checkpoint; rl_light ahead at 500,
     tuned ahead from ~800; rl_light only spends ~1,371 in total.

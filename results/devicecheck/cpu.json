@@ -1,0 +1,44 @@
+{
+ "code_hash": "49285187452c69be",
+ "device": "cpu",
+ "python": "3.13.17",
+ "runs": {
+  "cifar_light": {
+   "acc10": 0.2331355504587156,
+   "cost": 196.87439418416795,
+   "heavy_share": 0.0,
+   "invites": 300,
+   "seconds": 86.5,
+   "successes": 213,
+   "w10": 0.050396623338610363
+  },
+  "cifar_tuned": {
+   "acc10": 0.26887981651376147,
+   "cost": 283.8012924071083,
+   "heavy_share": 0.19333333333333333,
+   "invites": 300,
+   "seconds": 89.0,
+   "successes": 149,
+   "w10": 0.08694330625966402
+  },
+  "femnist_light": {
+   "acc10": 0.46487951807228917,
+   "cost": 214.45707130932502,
+   "heavy_share": 0.0,
+   "invites": 300,
+   "seconds": 97.9,
+   "successes": 182,
+   "w10": 0.20814842730760574
+  },
+  "femnist_tuned": {
+   "acc10": 0.46397590361445784,
+   "cost": 277.6175172907226,
+   "heavy_share": 0.17,
+   "invites": 300,
+   "seconds": 502.7,
+   "successes": 156,
+   "w10": 0.21172041893005372
+  }
+ },
+ "torch": "2.14.1+cpu"
+}
