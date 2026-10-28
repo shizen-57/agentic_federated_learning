@@ -8,9 +8,11 @@ Runs only with --go (the user's explicit go-ahead), and only if: the frozen
 manifest is the one pinned in scripts/prespec_rl2.py; this checkout's
 simulator code is the frozen code and has no uncommitted changes; every
 pinned input and checkpoint is byte-identical; the seeds are confirmation
-seeds run from this frozen manifest. Then: a 2-round pre-flight of every
-condition (seed 900), the runs (resumable), and scripts/prespec_rl2.py's
-pre-specified tests on the complete evidence.
+seeds run from this frozen manifest. Then: pre-training of the
+methods under the frozen code (practice data only), a 2-round pre-flight of
+every condition (seed 900), the runs on the reserved confirmation pool
+(resumable), and scripts/prespec_rl2.py's pre-specified tests on the
+complete evidence.
 """
 from __future__ import annotations
 
@@ -50,12 +52,14 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--set", action="append", default=[], help="operational override, e.g. fl.device=auto")
     ap.add_argument("--go", action="store_true", help="the user's go-ahead: actually run")
+    ap.add_argument("--max-procs", type=int, default=0, help="pre-training: episodes at once (GPU memory)")
     args = ap.parse_args()
     if rl2lib.non_operational(args.set):
         raise SystemExit(f"--set may only be operational, not {rl2lib.non_operational(args.set)}")
     frozen = pre.verify_frozen(args.frozen)
     problems = preconditions(frozen, args.frozen)
     plan = frozen["plan"]
+    rl2lib.check_pool(plan, "confirmation")
     n = sum(len(g["conditions"]) * len(g["seeds"]) for g in plan["groups"].values())
     print(f"frozen confirmation: final method {frozen['final']['name']}, seeds {frozen['seeds'][0]}-"
           f"{frozen['seeds'][-1]}, {len(plan['groups'])} groups, {n} runs")
@@ -65,15 +69,21 @@ def main() -> int:
     if not args.go:
         print("all checks pass; nothing run (add --go to start, with the user's go-ahead)")
         return 0
+    import screen_c_rl2 as sc
+    spec, tuned = frozen["spec"], pre.tuned_of(frozen)
+    # 1. pre-train the methods under the frozen code (practice data only;
+    #    resumable; a valid checkpoint is kept)
+    if sc.pretrain_methods(spec, tuned, args.max_procs, args.set):
+        return 1
     cwd = os.getcwd()
     os.chdir(ROOT)                          # checkpoints are found relative to the repository
     try:
-        if rl2lib.smoke(plan, args.set):
+        if rl2lib.smoke(plan, args.set):    # 2. every condition, 2 rounds, seed 900
             return 1
     finally:
         os.chdir(cwd)
-    rl2lib.write_plan(plan, args.out)
-    rl2lib.write_manifest(args.out, pre.inputs_of(frozen, args.frozen),
+    rl2lib.write_plan(plan, args.out)       # 3. the runs, on the confirmation pool
+    rl2lib.write_manifest(args.out, {**pre.inputs_of(frozen, args.frozen), **sc.checkpoint_inputs(spec, tuned)},
                           ["fl.rounds", "diag.enabled", "out", *args.set], stage="confirmation")
     rl2lib.run_sweep(os.path.join(args.out, "plan.yaml"), args.out, args.jobs, args.set)
     code, report, results = pre.evaluate(frozen, args.frozen, args.out)

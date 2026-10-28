@@ -157,7 +157,7 @@ confirm)
     # without "go": every check, nothing run. "confirm go" = the user's go-ahead.
     activate; JOBS=${JOBS:-3}; mkdir -p "$OUT"     # 3: four CIFAR-10 runs do not fit the 8 GB GPU
     python scripts/confirm_rl2.py --out "$OUT/rl2_confirm" --jobs "$JOBS" --set fl.device=auto \
-        $( [ "${2:-}" = go ] && echo --go ) 2>&1 | tee -a "$OUT/rl2_confirm.log"
+        ${MAXPROCS:+--max-procs "$MAXPROCS"} $( [ "${2:-}" = go ] && echo --go ) 2>&1 | tee -a "$OUT/rl2_confirm.log"
     ;;
 packsmall)
     # what Claude needs to check a stage: tables, configs, manifests, reports and

@@ -30,6 +30,13 @@ class DataCfg:
                                         # (afl.data.persistent_*; RL2 review finding 1)
     split_seed: int = 20261027          # fixes the persistent split; never a run seed
     practice_writer_share: float = 0.5  # FEMNIST: share of writers kept for practice
+    eval_pool: str = "dev"              # persistent split only: which reserved evaluation pool a
+                                        # run is measured on. dev: development (screens, tuning).
+                                        # confirm: the final confirmation only (FEMNIST: writers
+                                        # never seen in practice or development; pooled test sets:
+                                        # test examples never measured in development)
+    confirm_share: float = 0.5          # share of the evaluation writers / test examples reserved
+                                        # for the confirmation
 
 
 @dataclass

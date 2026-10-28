@@ -220,8 +220,9 @@ def load_femnist(root: str, num_clients: int, seed: int, min_samples: int,
     starts = np.concatenate([[0], np.cumsum(counts)[:-1]])
     eligible = np.where(counts >= min_samples)[0]
     if persistent is not None:
-        prac, evl = femnist_writer_pools(len(counts), persistent["split_seed"], persistent["share"])
-        pool = prac if persistent["pool"] == "practice" else evl
+        prac, dev, conf = femnist_role_writers(len(counts), persistent["split_seed"], persistent["share"],
+                                               persistent["confirm_share"])
+        pool = {"practice": prac, "dev": dev, "confirm": conf}[persistent["pool"]]
         eligible = np.intersect1d(eligible, pool)
     if len(eligible) < num_clients:
         raise ValueError(f"only {len(eligible)} FEMNIST writers have >= {min_samples} "
@@ -261,12 +262,16 @@ def load_femnist(root: str, num_clients: int, seed: int, min_samples: int,
     out = out + (np.concatenate(owner),) if return_owner else out
     if persistent is not None:
         roles = femnist_example_roles(len(y_all), persistent["split_seed"], persistent["val_frac"])
-        prac, evl = femnist_writer_pools(len(counts), persistent["split_seed"], persistent["share"])
-        fp = split_fingerprint(prac, np.packbits(roles), dataset="femnist",
+        prac, dev, conf = femnist_role_writers(len(counts), persistent["split_seed"], persistent["share"],
+                                               persistent["confirm_share"])
+        fp = split_fingerprint(prac, dev, conf, np.packbits(roles), dataset="femnist",
                                split_seed=persistent["split_seed"], val_frac=persistent["val_frac"],
-                               share=persistent["share"], max_samples=max_samples, test_frac=test_frac)
+                               share=persistent["share"], confirm_share=persistent["confirm_share"],
+                               max_samples=max_samples, test_frac=test_frac)
+        # every held-out example of a confirmation writer is confirmation data
         out = out + ({"test_global": te_all, "train_global": tr_all, "val_role": roles[te_all],
-                      "writers": writers, "fingerprint": fp},)
+                      "confirm_role": np.full(len(te_all), persistent["pool"] == "confirm"),
+                      "pool": persistent["pool"], "writers": writers, "fingerprint": fp},)
     return out
 
 
@@ -287,6 +292,27 @@ def femnist_writer_pools(n_writers: int, split_seed: int, practice_share: float)
     perm = np.random.default_rng([split_seed, 11]).permutation(n_writers)
     k = int(round(practice_share * n_writers))
     return np.sort(perm[:k]), np.sort(perm[k:])
+
+
+def femnist_role_writers(n_writers: int, split_seed: int, practice_share: float, confirm_share: float):
+    """(practice, development, confirmation) writers: disjoint and fixed for
+    every seed. Practice writers are exactly femnist_writer_pools' practice
+    pool; the evaluation writers are split once more, so a confirmation
+    writer is never seen in pre-training or in any development run (third
+    external review of the protocol, finding 2)."""
+    prac, evl = femnist_writer_pools(n_writers, split_seed, practice_share)
+    perm = np.random.default_rng([split_seed, 19]).permutation(len(evl))
+    k = int(round(confirm_share * len(evl)))
+    conf, dev = np.sort(evl[perm[:k]]), np.sort(evl[perm[k:]])
+    assert not (set(prac) & set(dev) or set(prac) & set(conf) or set(dev) & set(conf))
+    return prac, dev, conf
+
+
+def pooled_confirm_roles(n_test: int, split_seed: int, confirm_share: float) -> np.ndarray:
+    """Pooled test sets: True = reserved for the confirmation, False =
+    development; the same for every run seed (applies to non-validation
+    examples)."""
+    return np.random.default_rng([split_seed, 23]).random(n_test) < confirm_share
 
 
 def femnist_example_roles(n_examples: int, split_seed: int, val_frac: float) -> np.ndarray:
@@ -399,6 +425,10 @@ def build(cfg) -> dict:
     pers = d.split == "persistent"
     if pers and not cfg.fl.val_frac > 0:
         raise ValueError("data.split=persistent needs fl.val_frac > 0")
+    if d.eval_pool not in ("dev", "confirm"):
+        raise ValueError(f"unknown data.eval_pool {d.eval_pool}")
+    if d.eval_pool == "confirm" and (not pers or cfg.fl.practice):
+        raise ValueError("data.eval_pool=confirm needs the persistent split and is never practice")
     if d.dataset == "mnist":
         xtr, ytr, xte, yte = load_mnist()
         num_classes = 10
@@ -409,8 +439,8 @@ def build(cfg) -> dict:
         res = load_femnist(
             "data", d.num_clients, d.seed, d.min_samples, d.max_samples, return_owner=True,
             persistent=({"split_seed": d.split_seed, "val_frac": cfg.fl.val_frac,
-                         "share": d.practice_writer_share,
-                         "pool": "practice" if cfg.fl.practice else "evaluation"} if pers else None))
+                         "share": d.practice_writer_share, "confirm_share": d.confirm_share,
+                         "pool": "practice" if cfg.fl.practice else d.eval_pool} if pers else None))
         xtr, ytr, xte, yte, parts, owner = res[:6]
         if pers:
             split = res[6]
@@ -427,9 +457,12 @@ def build(cfg) -> dict:
     if pers and split is None:
         # pooled test set: one validation/test role per test example, all seeds
         roles = pooled_roles(len(yte), d.split_seed, cfg.fl.val_frac)
-        split = {"test_global": np.arange(len(yte)), "val_role": roles,
-                 "fingerprint": split_fingerprint(np.packbits(roles), dataset=d.dataset,
-                                                  split_seed=d.split_seed, val_frac=cfg.fl.val_frac)}
+        conf = pooled_confirm_roles(len(yte), d.split_seed, d.confirm_share)
+        split = {"test_global": np.arange(len(yte)), "val_role": roles, "confirm_role": conf,
+                 "pool": "practice" if cfg.fl.practice else d.eval_pool,
+                 "fingerprint": split_fingerprint(np.packbits(roles), np.packbits(conf), dataset=d.dataset,
+                                                  split_seed=d.split_seed, val_frac=cfg.fl.val_frac,
+                                                  confirm_share=d.confirm_share)}
     return {
         "split": split,
         "x_train": xtr, "y_train": ytr, "x_test": xte, "y_test": yte,

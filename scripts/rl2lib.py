@@ -80,6 +80,22 @@ def resolve(entry: dict, overrides: dict) -> dict:
     return out
 
 
+def check_pool(plan: dict, purpose: str) -> None:
+    """Development runs may never measure on the confirmation pool, and the
+    confirmation must (data.eval_pool; docs/RL2_CONFIRMATION.md)."""
+    from sweep import build_jobs
+    want = "confirm" if purpose == "confirmation" else "dev"
+    for j in build_jobs(plan, None, None, "/x", []):
+        d = j["raw"].get("data", {})
+        got = d.get("eval_pool", "dev") if d.get("split") == "persistent" else None
+        if purpose == "confirmation" and got != "confirm":
+            raise SystemExit(f"{j['group']}/{j['cond']}: the confirmation must use data.eval_pool=confirm")
+        if purpose != "confirmation" and got == "confirm":
+            raise SystemExit(f"{j['group']}/{j['cond']}: a {purpose} run may not use the confirmation pool")
+        if got is not None and got != want:
+            raise SystemExit(f"{j['group']}/{j['cond']}: data.eval_pool {got}, expected {want}")
+
+
 def write_plan(plan: dict, out: str) -> str:
     os.makedirs(out, exist_ok=True)
     path = os.path.join(out, "plan.yaml")

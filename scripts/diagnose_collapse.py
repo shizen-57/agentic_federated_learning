@@ -169,6 +169,8 @@ def main() -> int:
     out = os.path.join(args.out or os.path.join(ROOT, spec["out"]), args.variant)
     plan, src = plan_for(spec, args.variant)
     rows = compare(spec, plan, src, out)
+    if any(j["raw"].get("data", {}).get("eval_pool") == "confirm" for j, _ in rows):
+        raise SystemExit("a screen may not use the confirmation pool (data.eval_pool=confirm)")
 
     print(f"diagnostic v{spec['version']} / {args.variant}: {len(rows)} runs of "
           f"{spec['variants'][args.variant]} rounds -> {out}")

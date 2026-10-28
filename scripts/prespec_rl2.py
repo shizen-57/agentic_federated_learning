@@ -53,20 +53,26 @@ def inputs_of(frozen: dict, frozen_path: str) -> dict[str, str]:
 
 def runs_by_condition(frozen: dict, mg: dict) -> dict:
     import screen_c_rl2 as sc
-    return sc.by_condition(frozen["spec"], {"overrides": frozen["tuned_overrides"],
-                                            "base": frozen["spec"]["base"]}, mg)
+    return sc.by_condition(frozen["spec"], tuned_of(frozen), mg)
+
+
+def tuned_of(frozen: dict) -> dict:
+    return {"overrides": frozen["tuned_overrides"], "base": frozen["spec"]["base"]}
 
 
 def evaluate(frozen: dict, frozen_path: str, root: str) -> tuple[int, str, dict]:
-    problems, jobs, valid = rl2lib.check_evidence(root, frozen["plan"], inputs_of(frozen, frozen_path))
+    import screen_c_rl2 as sc
+    # every run, every checkpoint (made by this code, for its method; each
+    # pre-trained run started from it) and every pinned input
+    problems, mg = sc.evidence(frozen["spec"], tuned_of(frozen), root, frozen["plan"],
+                               inputs_of(frozen, frozen_path))
     for p, sha in frozen["inputs"].items():
         if rl2lib._sha(os.path.join(ROOT, p)) != sha:
             problems.append(f"{p} has changed since the freeze")
     if problems:
         return 2, "**INCOMPLETE -- no verdict.**\n\n" + "\n".join(f"- {p}" for p in problems) + "\n", {}
-    ok = set(valid)
-    mg = rl2lib.measures_by_group([j for j in jobs if os.path.join(j["raw"]["out"], j["raw"]["tag"] + ".csv") in ok])
     runs = runs_by_condition(frozen, mg)
+    n_runs = sum(len(g["conditions"]) * len(g["seeds"]) for g in frozen["plan"]["groups"].values())
     final = frozen["final"]["name"]
     res = []
     for t in frozen["primary_tests"]:
@@ -83,7 +89,7 @@ def evaluate(frozen: dict, frozen_path: str, root: str) -> tuple[int, str, dict]
         d = [a[s][t["endpoint"]] - b[s][t["endpoint"]] for s in sorted(a) if s in b]
         sec.append({**t, "n": len(d), "mean_diff": st.mean(d), "p_two_sided": rl2lib.signflip_p(d, "two-sided")})
     lines = ["# RL2 confirmation: pre-specified tests", "",
-             f"Evidence complete: {len(jobs)} runs, frozen manifest verified. Final method: **{final}**.", "",
+             f"Evidence complete: {n_runs} runs, frozen manifest verified. Final method: **{final}**.", "",
              "## Primary (one-sided, Holm over all 8)", "",
              "| family | dataset | vs | endpoint | n | mean diff | wins | p | Holm p | supported |",
              "|---|---|---|---|---|---|---|---|---|---|"]

@@ -121,4 +121,63 @@ def test_engine_records_the_fingerprint_and_reuses_the_run(tmp_path):
     assert run_status(raw, code_hash()) == "ok"
     roles = exp.d["split"]["val_role"]
     assert set(exp.val_idx.tolist()) == set(np.where(roles)[0])
-    assert set(exp.test_idx.tolist()) == set(np.where(~roles)[0])
+    # a development run (the default pool) is measured on development examples only
+    dev = ~roles & ~exp.d["split"]["confirm_role"]
+    assert set(exp.test_idx.tolist()) == set(np.where(dev)[0])
+
+
+# ---- reserved confirmation data (third external review of the protocol, finding 2)
+
+def test_femnist_practice_development_and_confirmation_are_disjoint_by_id():
+    if not HAVE_FEMNIST:
+        pytest.skip("FEMNIST not prepared")
+    w = np.load(os.path.join(ROOT, "data", "femnist_writer.npy"))
+    prac, dev, conf = D.femnist_role_writers(int(w.max()) + 1, 20261027, 0.5, 0.5)
+    prac0, _ = D.femnist_writer_pools(int(w.max()) + 1, 20261027, 0.5)
+    assert np.array_equal(prac, prac0)                    # practice writers unchanged
+    runs = {}
+    for s, prac_run, pool in ((240, False, "dev"), (241, False, "dev"), (300, False, "confirm"),
+                              (301, False, "confirm"), (1000, True, "dev")):
+        sp = D.build(_cfg("femnist", s, practice=prac_run, eval_pool=pool))["split"]
+        runs[(s, pool)] = (set(sp["writers"].tolist()),
+                           set(sp["train_global"].tolist()) | set(sp["test_global"].tolist()), sp["fingerprint"])
+    for (s, pool), (writers, _, _) in runs.items():
+        assert writers <= set((prac if s >= 1000 else dev if pool == "dev" else conf).tolist())
+    ids = {k: set().union(*(v[1] for (s, p), v in runs.items() if (s >= 1000) == (k == "practice")
+                            and (k == "practice" or p == k)))
+           for k in ("practice", "dev", "confirm")}
+    assert not (ids["practice"] & ids["dev"] or ids["practice"] & ids["confirm"] or ids["dev"] & ids["confirm"])
+    assert len({v[2] for v in runs.values()}) == 1         # one split: a practice checkpoint fits both pools
+
+
+def test_pooled_development_and_confirmation_test_examples_are_disjoint(tmp_path):
+    from afl.engine import Experiment
+    idx = {}
+    for pool in ("dev", "confirm"):
+        c = _cfg("synthetic", 240 if pool == "dev" else 300, eval_pool=pool)
+        c.out, c.fl.rounds = str(tmp_path), 1
+        e = Experiment(c)
+        idx[pool] = (set(e.test_idx.tolist()), set(e.val_idx.tolist()), len(e.d["y_test"]))
+    (dev, val, n), (conf, val2, _) = idx["dev"], idx["confirm"]
+    assert dev and conf and not dev & conf and val == val2 and not (dev | conf) & val
+    assert len(dev | conf | val) == n                     # every test example has exactly one role
+
+
+def test_the_confirmation_pool_is_never_practice_or_per_seed():
+    with pytest.raises(ValueError, match="never practice"):
+        D.build(_cfg("synthetic", 0, practice=True, eval_pool="confirm"))
+    with pytest.raises(ValueError, match="persistent split"):
+        D.build(_cfg("synthetic", 0, split="per_seed", eval_pool="confirm"))
+    with pytest.raises(ValueError, match="unknown data.eval_pool"):
+        D.build(_cfg("synthetic", 0, eval_pool="test"))
+
+
+def test_recorded_data_roles_match_the_code():
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import json
+
+    import data_roles
+    saved = json.load(open(data_roles.PATH))
+    now = data_roles.roles()
+    assert now["cifar10_disjoint"] and now.get("femnist_disjoint", True)
+    assert {k: v for k, v in saved.items() if k in now} == now

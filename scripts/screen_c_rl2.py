@@ -125,6 +125,12 @@ def checkpoint_problem(path: str, group: str, base: str, overrides: dict) -> str
 
 
 def cmd_pretrain(spec: dict, tuned: dict, args) -> int:
+    return pretrain_methods(spec, tuned, args.max_procs, args.set)
+
+
+def pretrain_methods(spec: dict, tuned: dict, max_procs: int, sets: list[str]) -> int:
+    """Make every checkpoint the spec's pre-trained methods need (a valid one
+    is kept); also used by the confirmation, under the frozen code."""
     pt = spec["pretrain"]
     todo = []
     for name, (path, group, ov) in checkpoints(spec, tuned).items():
@@ -141,9 +147,9 @@ def cmd_pretrain(spec: dict, tuned: dict, args) -> int:
         cmd = [sys.executable, os.path.join(ROOT, "scripts", "pretrain.py"), "--group", group,
                "--condition", spec["base"], "--overrides", ov_path,
                "--iterations", str(pt["iterations"]), "--workers", str(pt["workers"]),
-               "--procs", str(min((pt.get("procs") or {}).get(d, pt["workers"]), args.max_procs or 99)),
+               "--procs", str(min((pt.get("procs") or {}).get(d, pt["workers"]), max_procs or 99)),
                "--rounds", str(pt["rounds"]), "--seed-start", str(pt["seed_start"][d]),
-               "--mode", pt["mode"], "--out", path] + [x for s in args.set for x in ("--set", s)]
+               "--mode", pt["mode"], "--out", path] + [x for s in sets for x in ("--set", s)]
         print(f"\n== pre-training {name}: {' '.join(cmd)}", flush=True)
         rc = subprocess.run(cmd, cwd=ROOT).returncode
         if rc:
@@ -156,12 +162,16 @@ def cmd_pretrain(spec: dict, tuned: dict, args) -> int:
     return 0
 
 
-def evidence(spec: dict, tuned: dict, args, plan: dict) -> tuple[list[str], dict]:
-    inputs = {"spec": args.spec, "source": os.path.join(ROOT, spec["source_plan"]),
-              "tuned": os.path.join(ROOT, spec["tuned"])}
-    for name, (path, _, _) in checkpoints(spec, tuned).items():
-        inputs[f"checkpoint {name}"] = os.path.join(ROOT, path)
-    problems, jobs, valid = rl2lib.check_evidence(args.out, plan, inputs)
+def checkpoint_inputs(spec: dict, tuned: dict) -> dict[str, str]:
+    return {f"checkpoint {name}": os.path.join(ROOT, path) for name, (path, _, _) in checkpoints(spec, tuned).items()}
+
+
+def evidence(spec: dict, tuned: dict, out: str, plan: dict, inputs: dict) -> tuple[list[str], dict]:
+    """Every run (rl2lib.check_evidence, with `inputs` and every checkpoint
+    by hash) and every checkpoint (made by this code, for exactly its
+    method), and every pre-trained run started from its checkpoint."""
+    inputs = {**inputs, **checkpoint_inputs(spec, tuned)}
+    problems, jobs, valid = rl2lib.check_evidence(out, plan, inputs)
     for name, (path, group, ov) in checkpoints(spec, tuned).items():
         why = checkpoint_problem(path, group, spec["base"], ov)
         if why:
@@ -280,6 +290,7 @@ def main() -> int:
     import seeds as seedreg
     seedreg.check(spec["seeds"], spec.get("purpose", "dev"))
     plan = build_plan(spec, tuned)
+    rl2lib.check_pool(plan, spec.get("purpose", "dev"))
     n = sum(len(g["conditions"]) * len(g["seeds"]) for g in plan["groups"].values())
     if args.command == "plan":
         for g, e in plan["groups"].items():
@@ -289,6 +300,8 @@ def main() -> int:
     if args.command == "pretrain":
         return cmd_pretrain(spec, tuned, args)
     ck = checkpoints(spec, tuned)
+    inputs = {"spec": args.spec, "source": os.path.join(ROOT, spec["source_plan"]),
+              "tuned": os.path.join(ROOT, spec["tuned"])}
     if args.command == "run":
         bad = {k: checkpoint_problem(p, g, spec["base"], ov) for k, (p, g, ov) in ck.items()}
         if any(bad.values()):
@@ -301,14 +314,11 @@ def main() -> int:
         finally:
             os.chdir(cwd)
         rl2lib.write_plan(plan, args.out)
-        inputs = {"spec": args.spec, "source": os.path.join(ROOT, spec["source_plan"]),
-                  "tuned": os.path.join(ROOT, spec["tuned"]),
-                  **{f"checkpoint {k}": os.path.join(ROOT, p) for k, (p, _, _) in ck.items()}}
-        rl2lib.write_manifest(args.out, inputs, ["fl.rounds", "diag.enabled", "out",
-                                                 *sorted(spec.get("set") or {}), *args.set],
+        rl2lib.write_manifest(args.out, {**inputs, **checkpoint_inputs(spec, tuned)},
+                              ["fl.rounds", "diag.enabled", "out", *sorted(spec.get("set") or {}), *args.set],
                               title=spec.get("title"))
         rl2lib.run_sweep(os.path.join(args.out, "plan.yaml"), args.out, args.jobs, args.set)
-    problems, mg = evidence(spec, tuned, args, plan)
+    problems, mg = evidence(spec, tuned, args.out, plan, inputs)
     if problems:
         print("\n**INCOMPLETE -- no decision.**\n\n" + "\n".join(f"- {p}" for p in problems))
         return 2

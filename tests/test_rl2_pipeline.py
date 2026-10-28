@@ -211,19 +211,15 @@ def test_screen_c_decision_rule(tmp_path, monkeypatch):
 def _frozen(tmp_path, monkeypatch):
     """A freeze made from a fabricated screen C decision (one dataset), with
     the pins written into a COPY of prespec_rl2.py."""
+    if not os.path.exists(os.path.join(ROOT, "data", "femnist_writer.npy")):
+        pytest.skip("the recorded data roles need the FEMNIST data")
     import freeze_rl2
-    from afl.provenance import code_hash
     spec_path, s = _screen_c(tmp_path)
-    ck = {}
-    os.makedirs(tmp_path / "ckpt")
-    for m in ("tuned", "tuned_noarl"):
-        p = tmp_path / "ckpt" / f"{m}_femnist.pt"
-        p.write_bytes(m.encode())
-        ck[f"femnist_{m}"] = {"path": os.path.relpath(p, ROOT), "sha256": rl2lib._sha(str(p))}
+    ck = {"femnist_tuned": {"path": "x", "sha256": "0" * 64}}      # screen C's: not used by the freeze
     tests = [{"family": f, "dataset": "femnist", "vs": v, "endpoint": e, "sd": 0.02, "mean_diff": 0.01, "n": 10}
              for f, e, vs in (("P1", "eq5", ("rl_light", "b_oort_ew")), ("P2", "w10", ("rl_light", "arl3_full_pg")))
              for v in vs]
-    dec = {"code_hash": code_hash(), "spec": os.path.relpath(spec_path, ROOT), "spec_sha256": rl2lib._sha(spec_path),
+    dec = {"code_hash": "screen-C-code", "spec": os.path.relpath(spec_path, ROOT), "spec_sha256": rl2lib._sha(spec_path),
            "tuned": s["tuned"], "tuned_sha256": rl2lib._sha(os.path.join(ROOT, s["tuned"])),
            "final": {"name": "tuned_pt", "method": "tuned", "pretrained": True}, "best_baseline": "b_oort_ew",
            "p2_reference": "arl3_full_pg", "tests": tests, "checkpoints": ck}
@@ -245,6 +241,10 @@ def test_freeze_pins_seeds_power_and_tests(tmp_path, monkeypatch):
     assert len(frozen["primary_tests"]) == 4 and {t["alternative"] for t in frozen["primary_tests"]} == {"greater"}
     refs = frozen["plan"]["groups"]["femnist_ref"]["conditions"]
     assert refs == ["rl_light", "b_oort_ew", "arl3_full_pg", "rl_light_mimic"]
+    # measured on the reserved confirmation pool, pre-trained afresh in M10
+    assert all(g["set"]["data.eval_pool"] == "confirm" for g in frozen["plan"]["groups"].values())
+    assert frozen["spec"]["pretrain"]["checkpoints"].endswith(os.path.join("ckpt", "confirm"))
+    assert "configs/rl2_data_roles.json" in frozen["inputs"] and frozen["screen_c_code_hash"] == "screen-C-code"
     import seeds as seedreg
     seedreg.check(frozen["seeds"], "confirmation", path)
     with pytest.raises(ValueError):
@@ -266,16 +266,28 @@ def _fake_confirmation(tmp_path, frozen, frozen_path, gap):
     from sweep import build_jobs, expected_config
     from afl.provenance import code_hash
     import prespec_rl2 as pre
+    import screen_c_rl2 as sc
+    import torch
     out = tmp_path / "confirm"
     rl2lib.write_plan(frozen["plan"], str(out))
+    ck = sc.checkpoints(frozen["spec"], pre.tuned_of(frozen))
+    for name, (p, group, ov) in ck.items():             # checkpoints as M10's pre-training makes them
+        os.makedirs(os.path.dirname(os.path.join(ROOT, p)), exist_ok=True)
+        torch.save({"state_dict": {}, "meta": {"code_hash": code_hash(), "practice_only": True, "group": group,
+                                               "condition": frozen["spec"]["base"], "overrides": ov}},
+                   os.path.join(ROOT, p))
     for j in build_jobs(frozen["plan"], None, None, str(out), []):
         os.makedirs(j["raw"]["out"], exist_ok=True)
         base = os.path.join(j["raw"]["out"], j["raw"]["tag"])
-        json.dump({**expected_config(j["raw"]), "code_hash": code_hash()}, open(base + ".config.json", "w"))
+        sha = (rl2lib._sha(os.path.join(ROOT, ck[j["group"][:-3]][0])) if j["group"].endswith("_pt") else None)
+        json.dump({**expected_config(j["raw"]), "code_hash": code_hash(), "init_checkpoint_sha256": sha},
+                  open(base + ".config.json", "w"))
         top = j["group"] == "femnist_tuned_pt"
         acc = 0.7 + (gap if top else 0.0) + 0.001 * (j["seed"] % 7)
         _csv(base + ".csv", [(acc, acc - 0.25, 50.0)] * frozen["spec"]["rounds"])
-    man = rl2lib.write_manifest(str(out), pre.inputs_of(frozen, frozen_path), ["fl.device=auto"])
+    man = rl2lib.write_manifest(str(out), {**pre.inputs_of(frozen, frozen_path),
+                                           **sc.checkpoint_inputs(frozen["spec"], pre.tuned_of(frozen))},
+                                ["fl.device=auto"])
     man["git_dirty"] = False
     json.dump(man, open(out / "MANIFEST.json", "w"))
     return str(out)
@@ -306,6 +318,21 @@ def test_confirmation_needs_the_pins_and_go(tmp_path, monkeypatch):
     monkeypatch.setattr(pre, "FROZEN_CODE", frozen["code_hash"])
     assert confirm_rl2.main() == 0                      # all checks pass, nothing run without --go
     assert not (tmp_path / "c").exists()
-    ck = os.path.join(ROOT, next(p for p in frozen["inputs"] if p.endswith(".pt")))
-    open(ck, "ab").write(b"!")                          # a changed checkpoint blocks it
+    spec = os.path.join(ROOT, next(p for p in frozen["inputs"] if p.endswith("spec_c.yaml")))
+    open(spec, "a").write("# changed\n")               # a changed pinned input blocks it
     assert confirm_rl2.main() == 1
+
+
+def test_development_runs_cannot_touch_the_confirmation_pool(tmp_path):
+    import screen_c_rl2 as sc
+    import tune_rl2 as t
+    spec = yaml.safe_load(open(SPEC_T))
+    spec["set"] = {"data.split": "persistent", "data.eval_pool": "confirm"}
+    cs = t.sample_configs(spec)
+    with pytest.raises(SystemExit, match="may not use the confirmation pool"):
+        rl2lib.check_pool(t.stage_plan(spec, 1, [0], cs), "dev")
+    _, s = _screen_c(tmp_path)
+    plan = sc.build_plan(s, {"base": "ppo_full_mimic", "overrides": {}})
+    rl2lib.check_pool(plan, "dev")                       # the default: development pool
+    with pytest.raises(SystemExit, match="must use data.eval_pool=confirm"):
+        rl2lib.check_pool(plan, "confirmation")

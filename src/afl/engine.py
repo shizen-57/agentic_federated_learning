@@ -112,9 +112,12 @@ class Experiment:
             # data.split = persistent: every example's role is fixed for all
             # seeds (afl.data), so no run's test example is ever another run's
             # validation (reward) example.
+            # Test examples are those of the run's evaluation pool only:
+            # development runs never measure on confirmation data.
             roles = self.d["split"]["val_role"]
             self.val_idx = torch.from_numpy(np.where(roles)[0]).to(self.dev)
-            pool = np.where(~roles)[0]
+            confirm = self.d["split"]["confirm_role"] == (self.d["split"]["pool"] == "confirm")
+            pool = np.where(~roles & confirm)[0]
             self.test_idx = torch.from_numpy(pool).to(self.dev)
             self.split_fp = self.d["split"]["fingerprint"]
         elif cfg.fl.val_frac > 0:

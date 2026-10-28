@@ -152,6 +152,7 @@ def main() -> int:
     seedreg.check(spec["stage1_seeds"] + spec["stage2_seeds"], spec.get("purpose", "dev"))
     configs = sample_configs(spec)
     plan1 = stage_plan(spec, 1, list(range(len(configs))), configs)
+    rl2lib.check_pool(plan1, spec.get("purpose", "dev"))
     n2 = (spec["top_k"] + 1) * len(spec["stage2_seeds"]) + len(spec.get("references", [])) * len(spec["stage2_seeds"])
     n1 = sum(len(g["conditions"]) * len(g["seeds"]) for g in plan1["groups"].values())
     print(f"{spec.get('title')}: stage 1 {n1} runs ({len(configs)} candidates x {len(spec['stage1_seeds'])} seeds"
