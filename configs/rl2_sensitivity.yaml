@@ -1,0 +1,36 @@
+# RL2 sensitivity screen: does "tuned beats always-Light" depend on one chosen
+# world setting? Each factor moved low and high, one at a time.
+# Rule: docs/RL2_SENSITIVITY.md and the `rule` block, written before any run.
+# Runner: scripts/screen_rl2.py.
+version: 1
+title: RL2 sensitivity screen (one world setting at a time)
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+datasets: {femnist: s2_femnist}
+tuned: configs/rl2_tuned.json
+set: {data.split: persistent}
+rounds: 200
+seeds: [270, 271, 272, 273, 274, 275, 276, 277, 278, 279]
+arms:
+  tuned: {tuned: true}
+  rl_light: {condition: rl_light}
+settings:
+  base: {}
+  deadline_low: {system.deadline: 0.8}
+  deadline_high: {system.deadline: 1.2}
+  avail_low: {system.availability_p: 0.7}
+  avail_high: {system.availability_p: 0.95}
+  battery_low: {system.energy_scale: 0.5}
+  battery_high: {system.energy_scale: 2.0}
+  bandwidth_low: {system.bandwidth_scale: 0.5}
+  bandwidth_high: {system.bandwidth_scale: 2.0}
+rule:
+  kind: sensitivity
+  arm: tuned
+  reference: rl_light
+  factors:
+    deadline: [deadline_low, base, deadline_high]
+    availability: [avail_low, base, avail_high]
+    battery: [battery_low, base, battery_high]
+    bandwidth: [bandwidth_low, base, bandwidth_high]
+out: results/rl2_sensitivity

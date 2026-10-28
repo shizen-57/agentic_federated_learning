@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-28 (pre-training attempt 1 ran out of GPU memory; fixed, resumable; re-run)
+Last updated: 2026-10-28 (fourth review: reserved data pools, validation matrix, ARL and sensitivity screens built; screen C must be re-run on the new code)
 
 ---
 
@@ -389,8 +389,51 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   ppo_full_rawfail / ppo_full_arl3 (the stack without ARL-v4). Rule is in the
   spec. Version 1 was never run.
 - Seed plan: 210-214 screen A (used), 215-219 screen B, 220-239 tuning (M7),
-  240-259 screen C / ablation (M8), confirmation 300+ (user go-ahead).
-- Next: on the dept RTX 3070, after `git pull`: `bash scripts/dept_gpu.sh
-  screen configs/rl2_screen_b.yaml` (report written to
-  runs/rl2_screen_b/full/report.md), then pre-training of the carried-forward
-  condition, then screen C (pre-trained vs from scratch).
+  240-249 screen C (M8), 250-269 ARL screen, 270-279 sensitivity, 290-292
+  predictor stress, confirmation 300+ (user go-ahead).
+- **Fourth external review (2026-10-28)**: user agreed "make the simulator
+  trustworthy and find which parts of the method help; postpone framework
+  migration (Flower etc.)". Milestone = verified repairs + genuinely reserved
+  confirmation data + controlled ARL-vs-plain comparison; no architecture
+  change unless a check shows a specific need. Done:
+  - (1)+(7) tests/test_validation_matrix.py: integrated select -> budget
+    change/drop -> learn case with spies (oracle calls excluded); nobody
+    online; everyone abstains then recovers; all updates fail / rejected;
+    cap too tight; sudden bandwidth+battery drop and recovery; cost/time/
+    energy equations; sensitivity scales. Map of every matrix row to its
+    test: docs/VALIDATION.md. LESSON: the ARL* oracle calls env.outcome for
+    every client every round -- any spy on outcome must skip calls made
+    inside env.oracle_eligible (the recovery test was passing vacuously).
+  - (2) reserved pools: `data.eval_pool: dev|confirm` (default dev).
+    FEMNIST writers practice 1,798 / dev 899 / confirm 900; CIFAR-10 test
+    examples validation 3,006 / dev 3,488 / confirm 3,506; pinned in
+    configs/rl2_data_roles.json (scripts/data_roles.py); dev runners refuse
+    confirm (rl2lib.check_pool); confirmation pre-trains afresh in M10 under
+    the frozen code. HISTORY (disclose in thesis): old-code screens drew from
+    the whole eval pool -- 715 of 799 usable FEMNIST confirm writers were
+    used (screen B 234, M7 552, screen C 385); old screen C read all CIFAR
+    confirm examples. So M7 = development evidence; **screen C must be
+    re-run on the new code** (same spec and seeds); the freeze refuses a
+    DECISION.json without `eval_pool: dev` + matching `data_roles_sha256`.
+  - (3) ARL screen: configs/rl2_arl_screen.yaml + docs/RL2_ARL_SCREEN.md,
+    tuned c34 with only the damage term changed (plain / arl3 / arl4), both
+    datasets, seeds 250-269, 120 runs, two-sided sign-flip + Holm over 8
+    tests. Matched tuning budget from M7 (expected best of 9): v3 0.6404,
+    v4 0.6441, plain 0.6486. Runner scripts/screen_rl2.py (generic).
+  - (4) docs/SIMULATOR_MODEL.md (equations, units, sources, not calibrated);
+    timing check (results/simulator_checks/timing.md): real time ~ n x E,
+    R^2 0.997 FEMNIST / 0.999 CIFAR; sensitivity screen
+    configs/rl2_sensitivity.yaml + docs/RL2_SENSITIVITY.md (FEMNIST, seeds
+    270-279, deadline/availability/battery/bandwidth low+high, 180 runs);
+    new knobs system.energy_scale / bandwidth_scale.
+  - (5) scripts/predictor_stress.py (seeds 290-292): results in
+    results/predictor_stress and docs/VALIDATION.md section 5.
+  - (6) scripts/cost_curves.py: accuracy at budgets 500-2000 with actual
+    spend; spends within ~2% at each checkpoint; rl_light ahead at 500,
+    tuned ahead from ~800; rl_light only spends ~1,371 in total.
+  - New log columns n_abstain, n_light_override (simulator hash changed).
+- Next (dept GPU, after `git pull`; the old-code screen C may finish first,
+  it is exploratory): `devicecheck`, `screen2 configs/rl2_arl_screen.yaml`,
+  `screen2 configs/rl2_sensitivity.yaml`, then screen C again on the new code
+  (move the old results/rl2_screen_c and checkpoints folders aside first),
+  then freeze, then confirm only with the user's go-ahead.

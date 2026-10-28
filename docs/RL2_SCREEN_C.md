@@ -4,6 +4,16 @@ Written and committed before any run. Development step; exploratory.
 Spec: `configs/rl2_screen_c.yaml`. Runner: `scripts/screen_c_rl2.py`
 (`bash scripts/dept_gpu.sh screen-c-pretrain`, then `screen-c`).
 
+**Re-run on the development pool (added 2026-10-28, before any screen C
+result was read).** The first screen C ran on the old code (a442febc), which
+drew FEMNIST clients from the whole evaluation pool and evaluated CIFAR-10 on
+every non-validation test example, so it read data that is now reserved for
+the confirmation (`docs/RL2_CONFIRMATION.md`, "History"). Its results are
+exploratory only. Screen C is run again, unchanged (same spec, same seeds),
+on the new code, which evaluates on the development pool; only that run's
+`DECISION.json` can feed the freeze (`scripts/freeze_rl2.py` checks it). It
+runs after the ARL screen, so that screen's verdict is known first.
+
 **Methods** (each = M7's tuned settings, `configs/rl2_tuned.json`, with the
 following on top; a method whose full config equals an earlier one is run
 once):

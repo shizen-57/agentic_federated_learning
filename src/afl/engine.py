@@ -32,7 +32,7 @@ from .diagnostics import DiagWriter, norm_state
 
 LOG_FIELDS = [
     "round", "accuracy", "accuracy_fixed", "eval_fixed_n", "acc_worst10", "test_loss", "reward", "cost", "latency",
-    "n_selected", "n_success", "fail_ratio", "empty_round", "n_online",
+    "n_selected", "n_success", "fail_ratio", "empty_round", "n_online", "n_abstain", "n_light_override",
     "arl_online", "arl_selected", "arl_oracle",
     "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
     "mode_priority", "weak_selected", "weak_success", "late_delivered",
@@ -1090,6 +1090,11 @@ class Experiment:
             # clients reachable this round: a round with nobody online is not a
             # scheduler's starvation (review 3, finding 3)
             "n_online": int(self.env._draw["available"].sum()),
+            # the safety layer's exceptions, logged every round (fourth review,
+            # finding 5): clients ruled out this round, and clients allowed
+            # Light only on their optimistic bound (0 for other policies)
+            "n_abstain": int(getattr(self.policy, "mask_stats", {}).get("abstain", 0)),
+            "n_light_override": int(getattr(self.policy, "mask_stats", {}).get("light_override", 0)),
             "arl_online": arl_on, "arl_selected": arl_sel, "arl_oracle": arl_or,
             "cv": cv, "cv_selection": cv_sel, "jain": M.jain(self.x_succ),
             "ece": M.calibration_error(self.cal_probs[-200:], self.cal_out[-200:]),

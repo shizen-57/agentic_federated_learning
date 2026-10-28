@@ -12,7 +12,8 @@ and the simulator code hash into scripts/prespec_rl2.py, both at once.
 The confirmation runs on the reserved confirmation pool (data.eval_pool
 confirm; configs/rl2_data_roles.json, pinned) and pre-trains its methods
 afresh under the frozen code. Refuses: a checkout with uncommitted changes,
-data roles other than the recorded ones, or an earlier freeze (pins set).
+data roles other than the recorded ones, a screen C decision not made on
+the development pool of those roles, or an earlier freeze (pins set).
 Seeds: confirmation seeds 300 upward; never run before (configs/seed_registry.yaml).
 """
 from __future__ import annotations
@@ -70,6 +71,12 @@ def main() -> int:
     with open(data_roles.PATH) as fh:
         if json.load(fh) != data_roles.roles():
             raise SystemExit(f"{data_roles.PATH} does not match the data roles this code makes")
+    # The method must be chosen on development data only. Screen C runs made
+    # before the reserved pools existed read the whole evaluation pool (now
+    # largely confirmation data): they stay exploratory and cannot be frozen.
+    if dec.get("eval_pool") != "dev" or dec.get("data_roles_sha256") != rl2lib._sha(data_roles.PATH):
+        raise SystemExit("screen C's decision was not made on the development pool of the recorded data "
+                         "roles (a screen C from before the reserved pools?); re-run screen C on this code")
     spec_path = os.path.join(ROOT, dec["spec"])
     with open(spec_path) as fh:
         spec = yaml.safe_load(fh)

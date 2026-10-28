@@ -7,8 +7,8 @@
 Runs only with --go (the user's explicit go-ahead), and only if: the frozen
 manifest is the one pinned in scripts/prespec_rl2.py; this checkout's
 simulator code is the frozen code and has no uncommitted changes; every
-pinned input and checkpoint is byte-identical; the seeds are confirmation
-seeds run from this frozen manifest. Then: pre-training of the
+pinned input is byte-identical; the seeds are confirmation seeds run from
+this frozen manifest. Then: pre-training of the
 methods under the frozen code (practice data only), a 2-round pre-flight of
 every condition (seed 900), the runs on the reserved confirmation pool
 (resumable), and scripts/prespec_rl2.py's pre-specified tests on the

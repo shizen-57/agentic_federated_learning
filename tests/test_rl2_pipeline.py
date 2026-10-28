@@ -208,7 +208,7 @@ def test_screen_c_decision_rule(tmp_path, monkeypatch):
 
 # --------------------------------------------------------------- M9 / M10
 
-def _frozen(tmp_path, monkeypatch):
+def _frozen(tmp_path, monkeypatch, dec_extra=None):
     """A freeze made from a fabricated screen C decision (one dataset), with
     the pins written into a COPY of prespec_rl2.py."""
     if not os.path.exists(os.path.join(ROOT, "data", "femnist_writer.npy")):
@@ -222,7 +222,9 @@ def _frozen(tmp_path, monkeypatch):
     dec = {"code_hash": "screen-C-code", "spec": os.path.relpath(spec_path, ROOT), "spec_sha256": rl2lib._sha(spec_path),
            "tuned": s["tuned"], "tuned_sha256": rl2lib._sha(os.path.join(ROOT, s["tuned"])),
            "final": {"name": "tuned_pt", "method": "tuned", "pretrained": True}, "best_baseline": "b_oort_ew",
-           "p2_reference": "arl3_full_pg", "tests": tests, "checkpoints": ck}
+           "p2_reference": "arl3_full_pg", "tests": tests, "checkpoints": ck,
+           "eval_pool": "dev", "data_roles_sha256": rl2lib._sha(os.path.join(ROOT, "configs", "rl2_data_roles.json")),
+           **(dec_extra or {})}
     (tmp_path / "DECISION.json").write_text(json.dumps(dec))
     pre_copy = tmp_path / "prespec_copy.py"
     pre_copy.write_text(open(os.path.join(ROOT, "scripts", "prespec_rl2.py")).read())
@@ -249,6 +251,14 @@ def test_freeze_pins_seeds_power_and_tests(tmp_path, monkeypatch):
     seedreg.check(frozen["seeds"], "confirmation", path)
     with pytest.raises(ValueError):
         seedreg.check(frozen["seeds"], "confirmation", None)
+
+
+def test_freeze_refuses_a_screen_c_from_before_the_reserved_pools(tmp_path, monkeypatch):
+    # an old screen C decision has no pool record: its runs read the whole
+    # evaluation pool, so it may choose nothing for the confirmation
+    for extra in ({"eval_pool": None}, {"data_roles_sha256": "0" * 64}):
+        with pytest.raises(SystemExit, match="development pool"):
+            _frozen(tmp_path, monkeypatch, extra)
 
 
 def test_freeze_refuses_a_second_freeze_and_other_code(tmp_path, monkeypatch):
@@ -336,3 +346,55 @@ def test_development_runs_cannot_touch_the_confirmation_pool(tmp_path):
     rl2lib.check_pool(plan, "dev")                       # the default: development pool
     with pytest.raises(SystemExit, match="must use data.eval_pool=confirm"):
         rl2lib.check_pool(plan, "confirmation")
+
+
+# ------------------------------------------ controlled screens (ARL, sensitivity)
+
+def _m2(eq, w):
+    return {"eq5": eq, "w10": w, "acc10": eq, "starved": False}
+
+
+def test_arl_rule_verdicts():
+    import screen_rl2 as sc2
+    spec = {"datasets": {"femnist": "s2_femnist"}, "rule": {"kind": "arl", "plain": "plain",
+                                                             "contrasts": ["arl3", "arl4"], "alpha": 0.05}}
+    seeds = range(250, 270)
+    R = {("femnist", None, "plain"): {s: _m2(0.70, 0.50) for s in seeds},
+         ("femnist", None, "arl3"): {s: _m2(0.70 + 0.001 * (s % 3 - 1), 0.50) for s in seeds},   # no effect
+         ("femnist", None, "arl4"): {s: _m2(0.72 + 0.001 * (s % 3), 0.52) for s in seeds}}       # clearly better
+    text = "\n".join(sc2.rule_arl(spec, R))
+    assert "**arl3: no evidence that it adds value**" in text and "**arl4: adds value**" in text
+    R[("femnist", None, "arl4")] = {s: _m2(0.68 - 0.001 * (s % 3), 0.48) for s in seeds}
+    assert "**arl4: makes it worse**" in "\n".join(sc2.rule_arl(spec, R))
+
+
+def test_sensitivity_rule_reports_reversals():
+    import screen_rl2 as sc2
+    spec = {"datasets": {"femnist": "s2_femnist"}, "settings": {"base": {}, "lo": {}, "hi": {}},
+            "rule": {"kind": "sensitivity", "arm": "tuned", "reference": "rl_light",
+                     "factors": {"deadline": ["lo", "base", "hi"]}}}
+    seeds = range(270, 280)
+    R = {("femnist", s, "rl_light"): {k: _m2(0.70, 0.50) for k in seeds} for s in ("base", "lo", "hi")}
+    R.update({("femnist", s, "tuned"): {k: _m2(0.73, 0.55) for k in seeds} for s in ("base", "hi")})
+    R[("femnist", "lo", "tuned")] = {k: _m2(0.69, 0.55) for k in seeds}       # loses at a short deadline
+    text = "\n".join(sc2.rule_sensitivity(spec, R))
+    assert "**deadline: NOT robust** -- reversed at femnist lo eq5" in text
+
+
+def test_controlled_screen_end_to_end_tiny(tmp_path):
+    """The real runner at tiny size: smoke, runs, evidence, rule."""
+    if not os.path.exists(os.path.join(ROOT, "data", "femnist_x.npy")):
+        pytest.skip("needs the FEMNIST data")
+    s = yaml.safe_load(open(os.path.join(ROOT, "configs", "rl2_arl_screen.yaml")))
+    s.update(purpose="diagnostic", seeds=[900], rounds=2, datasets={"femnist": "s2_femnist"})
+    spec = tmp_path / "spec.yaml"
+    spec.write_text(yaml.safe_dump(s))
+    out = os.path.relpath(tmp_path / "out", ROOT)
+    r = subprocess.run([sys.executable, "scripts/screen_rl2.py", "run", "--spec", str(spec), "--out", out,
+                        "--jobs", "2", "--set", "fl.device=cpu"], capture_output=True, text=True, cwd=ROOT)
+    dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True,
+                           text=True, cwd=ROOT).stdout.strip()
+    if dirty:
+        assert r.returncode == 2 and "uncommitted changes" in r.stdout, r.stdout[-3000:]
+    else:
+        assert r.returncode == 0 and "Verdict" in r.stdout, r.stdout[-3000:]

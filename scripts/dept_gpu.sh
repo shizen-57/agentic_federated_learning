@@ -15,6 +15,8 @@
 #   bash scripts/dept_gpu.sh screen-c-pretrain   # RL2 M8: the checkpoints screen C needs
 #   bash scripts/dept_gpu.sh screen-c   # RL2 M8: screen C (docs/RL2_SCREEN_C.md)
 #   bash scripts/dept_gpu.sh confirm    # RL2 M10: checks only; "confirm go" runs it (user's go-ahead)
+#   bash scripts/dept_gpu.sh screen2 configs/rl2_arl_screen.yaml   # a controlled screen (ARL, sensitivity)
+#   bash scripts/dept_gpu.sh devicecheck  # short real-data runs to compare with the CPU
 #   bash scripts/dept_gpu.sh packsmall rl2_tune   # small results file to send (no big logs)
 #   bash scripts/dept_gpu.sh pack       # pack the results to copy back home
 #
@@ -159,6 +161,18 @@ confirm)
     python scripts/confirm_rl2.py --out "$OUT/rl2_confirm" --jobs "$JOBS" --set fl.device=auto \
         ${MAXPROCS:+--max-procs "$MAXPROCS"} $( [ "${2:-}" = go ] && echo --go ) 2>&1 | tee -a "$OUT/rl2_confirm.log"
     ;;
+screen2)
+    # a controlled development screen: bash scripts/dept_gpu.sh screen2 configs/<spec>.yaml
+    activate; JOBS=${JOBS:-3}; mkdir -p "$OUT"     # 3: CIFAR-10 runs need ~1.8 GB each
+    spec=${2:?give the spec, e.g. configs/rl2_arl_screen.yaml}
+    name=$(basename "$spec" .yaml)
+    python scripts/screen_rl2.py run --spec "$spec" --out "$OUT/$name" --jobs "$JOBS" --set fl.device=auto \
+        2>&1 | tee -a "$OUT/$name.log"
+    ;;
+devicecheck)
+    activate; mkdir -p "$OUT/devicecheck"
+    python scripts/check_devices.py --out "$OUT/devicecheck/gpu.json" --set fl.device=auto 2>&1 | tee -a "$OUT/devicecheck.log"
+    ;;
 packsmall)
     # what Claude needs to check a stage: tables, configs, manifests, reports and
     # the (small) checkpoints; no diagnostic sidecars, no quarantined runs
@@ -176,6 +190,6 @@ pack)
     echo "  scp -P <port> <user>@<server>:$(pwd)/results_$stamp.tar.gz ."
     ;;
 *)
-    sed -n '2,25p' "$0"; exit 1
+    sed -n '2,27p' "$0"; exit 1
     ;;
 esac

@@ -101,6 +101,10 @@ class ClientEnv:
             self.bandwidth[self.weak] = sysc.weak_bandwidth * rng_w.uniform(0.85, 1.15, n_weak)
             self.reliability[self.weak] = np.clip(
                 sysc.weak_reliability + rng_w.normal(0, 0.05, n_weak), 0.1, 0.98)
+        # Sensitivity scales (1.0 = unchanged; docs/SIMULATOR_MODEL.md): applied
+        # last, to every device, without drawing anything.
+        self.energy_cap = self.energy_cap * sysc.energy_scale
+        self.bandwidth = self.bandwidth * sysc.bandwidth_scale
         self.avail_shift = np.where(self.weak, -sysc.weak_avail_drop, 0.0)
         self._prev_available: np.ndarray | None = None
 

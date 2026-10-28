@@ -231,6 +231,7 @@ def decide(spec: dict, tuned: dict, runs: dict, ck: dict) -> tuple[dict, list[st
         meta = torch.load(os.path.join(ROOT, path), map_location="cpu", weights_only=False)["meta"]
         cost[name] = meta.get("practice_totals")
     from afl.provenance import code_hash
+    import data_roles
     decision = {"final": {"name": final, "method": "tuned", "pretrained": final == "tuned_pt"},
                 "pt_minus_scratch_median_score": st.median(pt_vs), "best_baseline": best,
                 "best_baseline_eq5": eq, "p2_reference": spec["p2_reference"], "tests": tests,
@@ -238,6 +239,9 @@ def decide(spec: dict, tuned: dict, runs: dict, ck: dict) -> tuple[dict, list[st
                 "checkpoints": {n: {"path": p, "sha256": rl2lib._sha(os.path.join(ROOT, p))}
                                 for n, (p, _, _) in ck.items()},
                 "pretrain_cost": cost, "code_hash": code_hash(),
+                # measured on the development pool of these recorded data roles
+                # (the freeze accepts no screen C run before the pools existed)
+                "eval_pool": "dev", "data_roles_sha256": rl2lib._sha(data_roles.PATH),
                 "starved_final_seeds": {d: sum(m["starved"] for m in runs[d][final].values()) for d in runs}}
     lines = [f"# {spec['title']}", "", "Evidence complete: every run and checkpoint checked.", "",
              f"**Final method: {final}** (median paired score, pre-trained minus scratch, over "

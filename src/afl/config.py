@@ -98,6 +98,8 @@ class SystemCfg:
                                         # round, as real FL servers do. Off = the
                                         # original runs, where only policies that read
                                         # the availability signal avoided offline clients
+    energy_scale: float = 1.0           # sensitivity: multiplies every device's battery capacity
+    bandwidth_scale: float = 1.0        # sensitivity: multiplies every device's bandwidth
     device_trace: str = "tiers"         # tiers: the three guessed device tiers;
                                         # fedscale: real per-device speed and
                                         # bandwidth from FedScale's trace
