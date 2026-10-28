@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-28 (screen B attempt 2: 100/100 runs done; report path bug fixed; report re-run pending)
+Last updated: 2026-10-28 (screen B done: ppo_full + mimic PASS; mimic carried forward; 8 drop candidates)
 
 ---
 
@@ -318,6 +318,16 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   (report ignores "out"); simulator hash unchanged, so the runs stand and
   only the report is re-run. LESSON: unit tests used absolute paths on both
   sides; tests/test_screen_e2e.py now runs runner + report for real.
+- **Screen B OUTCOME** (report re-run with the fix; evidence complete,
+  100/100): ppo_full PASS, ppo_full_mimic PASS -> **ppo_full_mimic carried
+  forward**. Paired vs ppo_full (eq-spend / final / worst10): rl_light
+  +0.016/-0.004/+0.028 (always-Light still slightly ahead of ppo_full);
+  ppo_full_mimic +0.013/+0.021/+0.034 (closes most of the gap). Removing
+  predictor v2 + Thompson gate: -0.587/-0.459, 3/5 starve (essential).
+  8 of 12 components are drop candidates (attention, evidence ageing, cost
+  constraint, hard cap, curriculum, protection, ARL-v4->v3, ARL-v4->rawfail):
+  ARL-v4 shows no benefit yet. Decide in M7 on seeds 220-239. Tarball of
+  the runs not yet received (copy into results/rl2_screen_b when it comes).
 - Screen B **version 2** (docs/RL2_SCREEN_B.md, configs/rl2_screen_b.yaml,
   seeds 215-219, persistent split, 100 runs): ppo_full, each component
   removed one at a time (12 leave-one-out), ppo_full_mimic, ppo_v3, and

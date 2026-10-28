@@ -106,3 +106,30 @@ configs/rl2_screen_b.yaml` (the GPU script writes it to `<out>/full/report.md`).
   in scripts/ only, so the simulator code (and its hash) is unchanged and the
   runs stand; only the report is run again. A new end-to-end test runs the
   real runner with a relative folder, then the report.
+
+## Outcome (attempt 2; rule applied as written, report re-run with the fix)
+
+Evidence complete: all 100 runs present, valid, one code version.
+
+- Gate: `ppo_full` PASS, `ppo_full_mimic` PASS (no starvation; equal spend
+  and final accuracy within the margins). **Carried forward:
+  `ppo_full_mimic`** (higher median equal-spend accuracy).
+- Paired vs `ppo_full` (median over seeds, condition - full; equal-spend /
+  final / worst-10%): `rl_light` +0.016 / -0.004 / +0.028; `rl_light_pg`
+  -0.025 / -0.049 / -0.062; `arl3_full` -0.029 / -0.023 / -0.067;
+  `arl3_full_pg` -0.029 / +0.008 / +0.004; `v2_rawfail` -0.047 / -0.026 /
+  -0.047; `ppo_v3` -0.031 / -0.043 / -0.051; `ppo_full_mimic` +0.013 /
+  +0.021 / +0.034.
+- Leave-one-out (removed: equal-spend / worst-10%): predictor v2 + Thompson
+  gate -0.587 / -0.459, 3/5 seeds starve (kept); Thompson gate -0.026 /
+  -0.016 (kept); mask -0.019 / -0.016 (kept); memory +0.008 / -0.024 (kept).
+  Drop candidates (8): attention +0.017 / +0.020; evidence ageing -0.007 /
+  +0.031; cost constraint +0.001 / +0.017; hard cap +0.009 / +0.024;
+  curriculum +0.009 / +0.010; protection reward -0.009 / +0.024; ARL-v4 ->
+  ARL-v3 +0.014 / -0.004; ARL-v4 -> failure count -0.001 / +0.013.
+- Reading: exploratory, 5 seeds, from scratch. The predictor/gate repair is
+  essential (without it the collapse returns). Always-Light is still a
+  little ahead of `ppo_full` on equal spend and worst-10%; the MimiC version
+  closes most of that gap. ARL-v4 shows no benefit over ARL-v3 or the plain
+  failure count here. Drop candidates are decided in tuning (M7) on seeds
+  220-239, as pre-registered; nothing is tuned on 215-219.
