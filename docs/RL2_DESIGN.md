@@ -75,12 +75,17 @@ the confirmation only if it helps there on fresh dev seeds.
 Seeds: `configs/seed_registry.yaml` (guarded by `scripts/seeds.py`). Each
 milestone ends with a development screen whose rule is committed before it
 runs, in its spec, and is applied by `scripts/report_dev_screen.py --spec`
-only to complete, valid evidence. Screen A 210-214 (done), screen B 215-219,
-tuning 220-239, ablation and screen C 240-259, confirmation on 300+ from a
-frozen manifest, after the user's go-ahead. Primary endpoints
+only to complete, valid evidence. Screen A 210-214 (done), screen B 215-219
+(done), tuning 220-239 (docs/RL2_M7_TUNING.md), screen C 240-249
+(docs/RL2_SCREEN_C.md), confirmation on 300+ from a frozen manifest, after
+the user's go-ahead (docs/RL2_CONFIRMATION.md). From M7 on the endpoints are
+steadier means (equal-spend accuracy over the last 5 rounds within budget,
+worst-10% over the last 10 rounds); tuning comes before pre-training, so only
+the winner (and its ARL contrast) is pre-trained. Primary endpoints
 (both, Holm across): P1 accuracy at a pre-fixed equal-spend budget vs
 always-Light and vs the best baseline; P2 final worst-10% client accuracy vs
-always-Light and ARL-v3. Results reported for every seed, pass or fail.
+always-Light and ARL-v3 (in its repaired form `arl3_full_pg`, the
+stronger of the two: screen A). Results reported for every seed, pass or fail.
 
 ## Revision 2 (after the second external review)
 

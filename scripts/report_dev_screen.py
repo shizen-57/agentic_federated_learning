@@ -66,12 +66,16 @@ def measures(path: str) -> dict:
     longest = _longest(dry)
     spend = 0.0
     at_budget = None
+    within = []                       # fixed-set accuracy of every round within the budget
     for r in rows:
         if spend + f(r, "cost") <= BUDGET:
             spend += f(r, "cost")
             at_budget = (f(r, "accuracy_fixed"), int(f(r, "round")))
+            within.append(f(r, "accuracy_fixed"))
         else:
             spend = float("inf")
+    tail = lambda k, n: (sum(f(r, k) for r in rows[-n:]) / len(rows[-n:])  # noqa: E731
+                         if rows and k in rows[-1] else NAN)
     inv = sum(f(r, "n_selected") for r in rows)
     modes = [sum(f(r, f"mode_{m}") for r in rows) for m in ("light", "standard", "priority")]
     return {"succ": int(sum(f(r, "n_success") for r in rows)), "inv": int(inv),
@@ -82,17 +86,19 @@ def measures(path: str) -> dict:
             "modes": "/".join(f"{100 * m / max(sum(modes), 1):.0f}" for m in modes),
             "acc": f(rows[-1], "accuracy"), "spend": sum(f(r, "cost") for r in rows),
             "worst10": f(rows[-1], "acc_client_worst10") if "acc_client_worst10" in rows[-1] else NAN,
-            "acc_budget": at_budget, "eq": at_budget[0] if at_budget else NAN}
+            "acc_budget": at_budget, "eq": at_budget[0] if at_budget else NAN,
+            # steadier versions (from M7 on; screen B showed one round can
+            # decide a last-round value): equal spend = mean of the last 5
+            # rounds within the budget; final = mean of the last 10 rounds
+            "eq5": sum(within[-5:]) / len(within[-5:]) if within else NAN,
+            "acc10": tail("accuracy", 10), "w10": tail("acc_client_worst10", 10)}
 
 
 def validate(spec: dict, variant_dir: str, spec_path: str) -> tuple[list[str], list[dict], list[str]]:
     """(problems, expected jobs, CSV paths of the valid ones). No problems =
-    complete, valid evidence."""
-    import yaml
-    from afl.provenance import code_hash
-    from diagnose_collapse import _sha, non_operational, plan_for
-    from sweep import build_jobs, run_status
-    problems: list[str] = []
+    complete, valid evidence (the check itself: rl2lib.check_evidence)."""
+    import rl2lib
+    from diagnose_collapse import plan_for
     try:
         with open(os.path.join(variant_dir, "MANIFEST.json")) as fh:
             man = json.load(fh)
@@ -101,55 +107,14 @@ def validate(spec: dict, variant_dir: str, spec_path: str) -> tuple[list[str], l
     variant = man.get("variant")
     if variant not in spec["variants"]:
         return [f"MANIFEST variant {variant!r} is not one of the spec's {list(spec['variants'])}"], [], []
+    problems = []
     if man.get("rounds") != spec["variants"][variant]:
         problems.append(f"MANIFEST rounds {man.get('rounds')} != spec {spec['variants'][variant]}")
-    if man.get("git_dirty") is not False:
-        problems.append("the runs were made from a checkout with uncommitted changes (or unknown)")
-    if man.get("code_hash") != code_hash():
-        # the expected configs are rebuilt with this checkout's code
-        return problems + [f"this checkout's simulator code ({code_hash()}) is not the code that "
-                           f"made the runs ({man.get('code_hash')}, commit {man.get('git_commit')}); "
-                           "run the report from that commit"], [], []
-    # The spec, the source plan and the plan actually run must be the recorded ones.
     plan, _ = plan_for(spec, variant)
-    shas = man.get("plan_sha256") or {}
-    plan_path = os.path.join(variant_dir, "plan.yaml")
-    for what, path in (("spec", spec_path), ("source plan", os.path.join(ROOT, spec["source_plan"])),
-                       ("generated plan", plan_path)):
-        key = {"spec": "diagnostic", "source plan": "source", "generated plan": "generated"}[what]
-        if _sha(path) is None or _sha(path) != shas.get(key):
-            problems.append(f"the {what} ({path}) does not match the hash recorded in MANIFEST.json")
-    try:
-        with open(plan_path) as fh:
-            if yaml.safe_load(fh) != plan:
-                problems.append("plan.yaml is not the plan this spec generates")
-    except (OSError, yaml.YAMLError):
-        problems.append("no readable plan.yaml")
-    # Runner overrides may only be operational (the device, which the config
-    # check ignores); none is applied, so nothing can replace a spec setting.
-    bad = non_operational([o for o in man.get("overrides_vs_source", []) if "=" in o])
-    if bad:
-        problems.append(f"the runs used overrides that change the experiment: {bad} "
-                        "(only the spec may set those)")
-    jobs = build_jobs(plan, None, None, variant_dir, [])
-    hashes, valid = set(), []
-    for j in jobs:
-        # "out" is where the files are, which is checked by finding them
-        # there; the runner may have recorded it relative to its working
-        # folder, or the folder may have been moved or unpacked elsewhere.
-        status = run_status(j["raw"], ignore=("out",))
-        if status != "ok":
-            problems.append(f"{j['cond']} seed {j['seed']}: {status}")
-            continue
-        base = os.path.join(j["raw"]["out"], j["raw"]["tag"])
-        valid.append(base + ".csv")
-        with open(base + ".config.json") as fh:
-            hashes.add(json.load(fh).get("code_hash"))
-    if len(hashes) > 1:
-        problems.append(f"runs made by different code versions: {sorted(map(str, hashes))}")
-    elif hashes and hashes != {man.get("code_hash")}:
-        problems.append(f"runs' code {hashes.pop()} != MANIFEST code {man.get('code_hash')}")
-    return problems, jobs, valid
+    more, jobs, valid = rl2lib.check_evidence(
+        variant_dir, plan, {"diagnostic": spec_path, "source": os.path.join(ROOT, spec["source_plan"])},
+        manifest_key="plan_sha256")
+    return problems + more, jobs, valid
 
 
 def check_rule(spec: dict) -> None:

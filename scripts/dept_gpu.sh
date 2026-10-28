@@ -11,6 +11,11 @@
 #   bash scripts/dept_gpu.sh diag full  # the same 8 runs at the full 200 rounds
 #   bash scripts/dept_gpu.sh pretrain femnist ppo_full   # RL2 pre-training -> checkpoints/
 #   bash scripts/dept_gpu.sh screen configs/rl2_screen_b.yaml   # a development screen
+#   bash scripts/dept_gpu.sh tune       # RL2 M7: tuning (docs/RL2_M7_TUNING.md)
+#   bash scripts/dept_gpu.sh screen-c-pretrain   # RL2 M8: the checkpoints screen C needs
+#   bash scripts/dept_gpu.sh screen-c   # RL2 M8: screen C (docs/RL2_SCREEN_C.md)
+#   bash scripts/dept_gpu.sh confirm    # RL2 M10: checks only; "confirm go" runs it (user's go-ahead)
+#   bash scripts/dept_gpu.sh packsmall rl2_tune   # small results file to send (no big logs)
 #   bash scripts/dept_gpu.sh pack       # pack the results to copy back home
 #
 # Server rules this script follows: everything goes into our own conda env
@@ -130,6 +135,35 @@ pretrain)
         --workers "${WORKERS:-8}" --set fl.device=auto --out "checkpoints/${cond}_${ds}.pt" \
         2>&1 | tee -a "$OUT/pretrain_${cond}_${ds}.log"
     ;;
+tune)
+    activate; jobs_default; mkdir -p "$OUT"
+    python scripts/tune_rl2.py --spec configs/rl2_tune.yaml --out "$OUT/rl2_tune" --jobs "$JOBS" \
+        --set fl.device=auto 2>&1 | tee -a "$OUT/rl2_tune.log"
+    ;;
+screen-c-pretrain)
+    activate; mkdir -p "$OUT"
+    python scripts/screen_c_rl2.py pretrain --set fl.device=auto 2>&1 | tee -a "$OUT/rl2_screen_c_pretrain.log"
+    ;;
+screen-c)
+    activate; jobs_default; mkdir -p "$OUT"
+    python scripts/screen_c_rl2.py run --out "$OUT/rl2_screen_c" --jobs "$JOBS" --set fl.device=auto \
+        2>&1 | tee -a "$OUT/rl2_screen_c.log"
+    ;;
+confirm)
+    # without "go": every check, nothing run. "confirm go" = the user's go-ahead.
+    activate; jobs_default; mkdir -p "$OUT"
+    python scripts/confirm_rl2.py --out "$OUT/rl2_confirm" --jobs "$JOBS" --set fl.device=auto \
+        $( [ "${2:-}" = go ] && echo --go ) 2>&1 | tee -a "$OUT/rl2_confirm.log"
+    ;;
+packsmall)
+    # what Claude needs to check a stage: tables, configs, manifests, reports and
+    # the (small) checkpoints; no diagnostic sidecars, no quarantined runs
+    name=${2:?give the runs folder, e.g. rl2_tune}
+    tar --exclude='*.diag_*' --exclude='*/quarantine/*' -czf "${name}_small.tar.gz" "$OUT/$name" \
+        $( [ -d checkpoints ] && echo checkpoints )
+    ls -la "${name}_small.tar.gz"
+    echo "Copy it home (on YOUR computer): scp -P <port> <user>@<server>:$(pwd)/${name}_small.tar.gz ."
+    ;;
 pack)
     stamp=$(date +%Y%m%d_%H%M)
     tar -czf "results_$stamp.tar.gz" "$OUT" $( [ -d checkpoints ] && echo checkpoints )
@@ -138,6 +172,6 @@ pack)
     echo "  scp -P <port> <user>@<server>:$(pwd)/results_$stamp.tar.gz ."
     ;;
 *)
-    sed -n '2,19p' "$0"; exit 1
+    sed -n '2,25p' "$0"; exit 1
     ;;
 esac

@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-28 (screen B results saved + re-validated here; next: build M7)
+Last updated: 2026-10-28 (M7-M10 built and tested; next: M7 tuning on the dept GPU)
 
 ---
 
@@ -336,6 +336,30 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   worse than rl_light (0.720 vs 0.767).
   Small results pack for upload: tar MANIFEST/plan/report/sweep.log + CSVs
   + config.json (5 MB) instead of the 110 MB full pack.
+- **M7-M10 built** (all rules written before any run):
+  - shared library scripts/rl2lib.py (plan groups with an `override` applied
+    after the condition -- new in sweep.build_jobs; manifests; evidence
+    check; 2-round smoke on seed 900; score; sign-flip/Holm; seed count);
+  - M7 scripts/tune_rl2.py + configs/rl2_tune.yaml + docs/RL2_M7_TUNING.md:
+    40 candidates of ppo_full_mimic (8 drop candidates as switches + PPO and
+    reward settings), seeds 220-224, top 5 (+c00) on 225-239, winner ->
+    runs/rl2_tune/SELECTED.json -> commit as configs/rl2_tuned.json;
+  - M8 scripts/screen_c_rl2.py + configs/rl2_screen_c.yaml +
+    docs/RL2_SCREEN_C.md: methods tuned / tuned_arl4 / tuned_noarl (aliases
+    by effective config), pretrain per dataset (pretrain.py --overrides),
+    pt vs scratch, refs incl. rl_light_mimic (new condition), seeds 240-249,
+    both datasets -> DECISION.json;
+  - M9 scripts/freeze_rl2.py (power: delta 0.01 P1 / 0.02 P2, 8 tests, n in
+    [20,100], seeds 300+; pins into scripts/prespec_rl2.py; refuses dirty /
+    other code / second freeze); M10 scripts/confirm_rl2.py (needs --go =
+    user's go-ahead; checks pins, code, inputs, checkpoints, seeds) and
+    scripts/prespec_rl2.py (8 one-sided sign-flip tests, Holm) --
+    docs/RL2_CONFIRMATION.md;
+  - endpoints from M7 on: eq5 (mean fixed-set acc, last 5 rounds within cost
+    1,400) and w10 (mean worst-10%, last 10 rounds); score = mean of both;
+  - GPU steps: tune, screen-c-pretrain, screen-c, confirm [go], packsmall <name>.
+  - Tested end to end here at tiny size (tune, pretrain, screen C, freeze,
+    confirm checks); tests/test_rl2_pipeline.py.
 - Screen B **version 2** (docs/RL2_SCREEN_B.md, configs/rl2_screen_b.yaml,
   seeds 215-219, persistent split, 100 runs): ppo_full, each component
   removed one at a time (12 leave-one-out), ppo_full_mimic, ppo_v3, and

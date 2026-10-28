@@ -141,3 +141,17 @@ def test_pretraining_refuses_non_practice_seeds(checkpoint):
                         "--seed-start", "210", "--out", str(out.parent / "x.pt")],
                        capture_output=True, text=True, cwd=ROOT)
     assert r.returncode != 0 and "practice" in r.stderr
+
+
+def test_fewer_processes_give_the_same_checkpoint(checkpoint, tmp_path):
+    """--procs only limits how many episodes run at once (GPU memory); every
+    episode starts from the same weights, so the averaged result is identical."""
+    import torch
+    plan, out = checkpoint
+    one = tmp_path / "one.pt"
+    r = _pretrain("--plan", str(plan), "--group", "g", "--condition", "ppo_full", "--iterations", "2",
+                  "--workers", "2", "--procs", "1", "--rounds", "4", "--out", str(one))
+    assert r.returncode == 0, r.stdout + r.stderr
+    a, b = torch.load(out, weights_only=False), torch.load(one, weights_only=False)
+    assert b["meta"]["procs"] == 1
+    assert all(torch.equal(a["state_dict"][k], b["state_dict"][k]) for k in a["state_dict"])

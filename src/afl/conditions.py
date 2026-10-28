@@ -219,6 +219,9 @@ CONDITIONS.update({
     "ppo_full_arl3":    _variant("ppo_full", reward__damage_metric="arl_v3"),  # ARL-v3 instead of v4
     "ppo_full_rawfail": _variant("ppo_full", reward__damage_metric="raw_fail",  # no ARL at all:
                                  policy__per_client_credit=False),             # plain failure count
+    # always Light with MimiC aggregation: screen C / confirmation control, so
+    # a gain of the MimiC RL is not just MimiC's own
+    "rl_light_mimic":   _variant("rl_light", fl__aggregator="mimic"),
     # the repaired simple scheduler: always Light, with the same repaired
     # predictor and gate as ppo_full
     "rl_light_pg":      _variant("rl_light", policy__predictor="v2", policy__gate_mode="thompson",

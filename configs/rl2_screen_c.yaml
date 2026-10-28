@@ -1,0 +1,32 @@
+# RL2 M8 screen C: the tuned method pre-trained vs from scratch, with and
+# without ARL-v4, against always-Light (with and without MimiC) and the strong
+# baselines, on both datasets. Rule: docs/RL2_SCREEN_C.md, written before any
+# run. Runner: scripts/screen_c_rl2.py.
+version: 1
+title: RL2 screen C (M8)
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+datasets: {femnist: s2_femnist, cifar: s2_cifar}
+base: ppo_full_mimic
+tuned: configs/rl2_tuned.json        # M7's winner (SELECTED.json), committed before this runs
+set: {data.split: persistent}
+rounds: 200
+seeds: [240, 241, 242, 243, 244, 245, 246, 247, 248, 249]
+methods:                             # each = the tuned settings, then these on top
+  tuned: {}
+  tuned_arl4: {reward.damage_metric: arl_v4, policy.per_client_credit: true}
+  tuned_noarl: {reward.damage_metric: raw_fail, policy.per_client_credit: false}
+pretrained: [tuned, tuned_arl4, tuned_noarl]   # a method equal to an earlier one is run once
+scratch: [tuned]
+references: [rl_light, rl_light_mimic, arl3_full_pg, v2_rawfail,
+             b_oort_ew, b_refl_ew, b_favor_ew, b_delta_ew, b_cov_ew]
+p2_reference: arl3_full_pg           # the second P2 comparator (the repaired original RL)
+pretrain:
+  iterations: 20
+  workers: 8                         # episodes per iteration, averaged
+  procs: {femnist: 8, cifar: 4}      # run at once: a CIFAR-10 episode keeps ~0.7 GB on the GPU (8 GB card)
+  mode: average
+  rounds: 200
+  seed_start: {femnist: 1000, cifar: 1200}   # practice seeds (1000-1999), never evaluated
+  checkpoints: checkpoints
+out: results/rl2_screen_c

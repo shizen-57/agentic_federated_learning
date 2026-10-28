@@ -46,10 +46,12 @@ RANDOMISE = {"system.availability_p": (0.75, 0.95), "system.diurnal_amplitude": 
 
 
 def practice_config(plan_path: str, group: str, cond: str, seed: int, rounds: int,
-                    randomise: bool) -> dict:
+                    randomise: bool, overrides: dict | None = None) -> dict:
     """The group's shared settings with the requested condition applied (the
-    condition need not be one of the group's own), as a practice episode on
-    the persistent split's practice pool."""
+    condition need not be one of the group's own), then `overrides` (a tuned
+    method's settings, applied after the condition exactly as a screen's
+    group override is), as a practice episode on the persistent split's
+    practice pool."""
     import copy
 
     import numpy as np
@@ -62,6 +64,8 @@ def practice_config(plan_path: str, group: str, cond: str, seed: int, rounds: in
     if group not in plan["groups"]:
         raise SystemExit(f"unknown group {group}")
     plan["groups"][group]["conditions"] = [cond]
+    if overrides:
+        plan["groups"][group]["override"] = dict(overrides)
     raw = build_jobs(plan, [group], [seed], "/tmp/afl_practice",
                      ["fl.practice=true", "data.split=persistent", f"fl.rounds={rounds}"])[0]["raw"]
     if randomise:
@@ -122,7 +126,13 @@ def main() -> int:
                     help="average: W episodes in parallel from the shared weights, then their "
                          "parameters are averaged; sequential: one policy trained episode after "
                          "episode (no averaging)")
+    ap.add_argument("--procs", type=int, default=0,
+                    help="episodes run at the same time (default: all of an iteration). Fewer saves "
+                         "GPU memory (a CIFAR-10 episode keeps ~0.7 GB of data on the GPU); the "
+                         "result is identical, since every episode starts from the same weights")
     ap.add_argument("--set", action="append", default=[], help="extra override, e.g. fl.device=auto")
+    ap.add_argument("--overrides", default="",
+                    help="JSON file of dotted settings applied after the condition (a tuned method)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -134,12 +144,16 @@ def main() -> int:
     seeds = [args.seed_start + k for k in range(args.iterations * per_it)]
     seedreg.check(seeds, "practice")
     randomise = not args.no_randomise
+    overrides = {}
+    if args.overrides:
+        with open(args.overrides) as fh:
+            overrides = json.load(fh)
     from afl.config import Cfg
     from afl.policies import build_policy
     from afl.run import _apply_override
 
     def config(s):
-        raw = practice_config(args.plan, args.group, args.condition, s, args.rounds, randomise)
+        raw = practice_config(args.plan, args.group, args.condition, s, args.rounds, randomise, overrides)
         for expr in args.set:
             _apply_override(raw, expr)
         return raw
@@ -155,7 +169,7 @@ def main() -> int:
     totals = {"episodes": 0, "rounds": 0, "cost": 0.0, "invites": 0, "episode_seconds": 0.0}
     t0 = time.time()
     ctx = mp.get_context("spawn")
-    with ProcessPoolExecutor(per_it, mp_context=ctx) as pool:
+    with ProcessPoolExecutor(min(args.procs or per_it, per_it), mp_context=ctx) as pool:
         for it in range(args.iterations):
             raws = [config(s) for s in seeds[it * per_it:(it + 1) * per_it]]
             expect = checksum(weights)
@@ -185,7 +199,9 @@ def main() -> int:
             "group": args.group, "plan": os.path.relpath(args.plan, ROOT), "seeds": [seeds[0], seeds[-1]],
             "iterations": args.iterations, "workers": args.workers, "rounds": args.rounds,
             "randomise": RANDOMISE if randomise else None, "overrides": args.set,
-            "mode": args.mode, "init_checksum": init_sum, "split_fingerprint": fps.pop(),
+            "mode": args.mode, "procs": min(args.procs or per_it, per_it),
+            "init_checksum": init_sum, "split_fingerprint": fps.pop(),
+            "overrides": overrides,
             # what pre-training itself cost, to report next to deployment cost
             "practice_totals": {**totals, "wall_seconds": round(time.time() - t0, 1)},
             "practice_only": True, "created": time.strftime("%Y-%m-%d %H:%M:%S %Z")}

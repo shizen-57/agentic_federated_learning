@@ -62,6 +62,9 @@ def build_jobs(plan: dict, groups: list[str] | None, seeds: list[int] | None,
                 raw = _deepcopy(base)
                 apply(raw, g.get("set", {}) or {})
                 apply(raw, CONDITIONS[cond])
+                # a group's "override" wins over its conditions (RL2 tuning:
+                # one group per candidate setting of the same condition)
+                apply(raw, g.get("override", {}) or {})
                 for expr in extra:
                     _apply_override(raw, expr)
                 raw["tag"] = f"{cond}_s{seed}"

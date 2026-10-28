@@ -1,0 +1,46 @@
+# RL2 M7: tuning of the carried-forward method (screen B: ppo_full_mimic).
+# Rule: docs/RL2_M7_TUNING.md, written before any run. Runner: scripts/tune_rl2.py.
+version: 1
+title: RL2 M7 tuning (random search, then the best 5 on fresh seeds)
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+source_group: s2_femnist
+base: ppo_full_mimic                 # every candidate = this condition + its own settings
+set: {data.split: persistent}        # every run on the persistent split
+rounds: 200
+n_configs: 40                        # c00 = the base unchanged, c01-c39 drawn below
+sampler_seed: 20261028
+stage1_seeds: [220, 221, 222, 223, 224]
+stage2_seeds: [225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239]
+top_k: 5
+references: [rl_light]               # reported next to the candidates, never selected
+# Each dimension: a list of values for that key, or a list of settings (dicts)
+# when one choice sets several keys. "__group__" = the s2 group's own value.
+# The 8 screen-B drop candidates are switches here, so tuning decides them.
+space:
+  policy.encoder: [attention, mlp]                     # drop candidate: attention
+  policy.pred_decay: [0.95, 0.98, 0.99, 1.0]           # 1.0 = no evidence ageing (drop candidate)
+  cost:                                                # drop candidate: cost constraint
+    - {policy.cost_target_mult: 1.0, reward.beta: 0.0}
+    - {policy.cost_target_mult: 1.25, reward.beta: 0.0}
+    - {policy.cost_target_mult: 1.5, reward.beta: 0.0}
+    - {policy.cost_target_mult: 0.0, reward.beta: __group__}   # fixed cost weight instead
+  policy.hard_budget_mult: [0.0, 1.5, 2.0, 3.0]        # 0 = no hard cap (drop candidate)
+  policy.curriculum: [true, false]                     # drop candidate: curriculum
+  reward.protect_weight: [0.0, 0.25, 0.5, 1.0]         # 0 = no protection reward (drop candidate)
+  damage:                                              # drop candidates: ARL-v4 -> v3 / failure count
+    - {reward.damage_metric: arl_v4, policy.per_client_credit: true}
+    - {reward.damage_metric: arl_v3, policy.per_client_credit: true}
+    - {reward.damage_metric: raw_fail, policy.per_client_credit: false}
+  policy.mode_mask_z: [0.25, 0.5, 1.0]
+  policy.gate_z: [0.5, 1.0, 1.5]
+  policy.ppo_lr: [0.001, 0.002, 0.003, 0.005, 0.01]
+  policy.ppo_epochs: [2, 4, 8]
+  policy.ppo_batch: [4, 8, 16]
+  policy.ppo_clip: [0.1, 0.2, 0.3]
+  policy.ppo_ent_start: [0.003, 0.01, 0.03]
+  policy.ppo_gamma: [0.8, 0.9, 0.95]
+  reward.lambda_arl: [0.25, 0.5, 1.0]
+  reward.lambda_cov: [0.25, 0.5, 1.0]
+  reward.arl4_mu: [0.5, 1.0, 2.0]
+out: results/rl2_tune
