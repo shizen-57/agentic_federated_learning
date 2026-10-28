@@ -1,0 +1,26 @@
+{
+  "created": "2026-10-28 12:19:16 UTC",
+  "code_hash": "a442febc89a1a7d3",
+  "git_commit": "1a1662e3c8c06512403c80e1299a3495a7985698",
+  "git_dirty": false,
+  "inputs": {
+    "spec": "fa6aff0d0a17a202669f15f64b9432c66f194a23aa284458e5834d66ae223b59",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8",
+    "configs": "ddb9e521b643dc520851b32e08e80e0012f97890cfbfb9d8a9689f0f3ede6a86"
+  },
+  "generated": "404a4bd95ea2c544b2fee88ca1f7aa56208e118298a7d768fe90af1951e1ecdf",
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "data.split",
+    "fl.device=auto"
+  ],
+  "python": "3.11.16",
+  "torch": "2.5.1+cu121",
+  "numpy": "2.4.6",
+  "cuda": "12.1",
+  "device": "NVIDIA GeForce RTX 3070",
+  "stage": 1,
+  "title": "RL2 M7 tuning (random search, then the best 5 on fresh seeds)"
+}

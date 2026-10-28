@@ -109,6 +109,18 @@ def test_tuning_rank_disqualifies_starvation_and_breaks_ties_by_id():
     assert [r["id"] for r in t.rank(by, "b")] == ["c02", "c03", "c00", "c01"]
 
 
+def test_recorded_ranking_is_compared_not_rewritten():
+    import tune_rl2 as t
+    row = {"id": "c03", "n": 5, "score": 0.6412035920158898, "eq5": 0.77, "w10": 0.5, "acc10": 0.78,
+           "starved": 0}
+    rec = {"ranking": [row], "references": [], "top": ["c03"]}
+    py313 = {"ranking": [{**row, "score": 0.64120359201589}], "references": [], "top": ["c03"]}
+    assert t.same_ranking(rec, py313) is None                 # last-digit float noise (Python 3.11 vs 3.13)
+    assert "score" in t.same_ranking(rec, {**py313, "ranking": [{**row, "score": 0.65}]})
+    assert "top" in t.same_ranking(rec, {**py313, "top": ["c04"]})
+    assert "starved" in t.same_ranking(rec, {**py313, "ranking": [{**row, "starved": 1}]})
+
+
 def test_tune_end_to_end_tiny(tmp_path):
     """The real runner at tiny size: smoke, stage 1, check, rank, stage 2."""
     if not os.path.exists(os.path.join(ROOT, "data", "femnist_x.npy")):

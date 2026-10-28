@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-28 (M7-M10 built and tested; next: M7 tuning on the dept GPU)
+Last updated: 2026-10-28 (M7 done: c34 selected, no ARL; next: screen C pre-training on the GPU)
 
 ---
 
@@ -336,6 +336,19 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   worse than rl_light (0.720 vs 0.767).
   Small results pack for upload: tar MANIFEST/plan/report/sweep.log + CSVs
   + config.json (5 MB) instead of the 110 MB full pack.
+- **M7 OUTCOME** (docs/RL2_M7_TUNING.md; results/rl2_tune; re-checked here,
+  same winner): **c34** selected (stage 2 score 0.6378 vs base c00 0.6311,
+  rl_light 0.5866; top 5 within 0.002 = near coin toss). c34: attention on,
+  curriculum OFF, cost target 1.0 (beta 0), cap 3.0, protection 1.0, ageing
+  0.98, mask z 0.25, gate z 1.5, PPO lr 0.005/4 epochs/batch 8/clip 0.3/
+  ent 0.003/gamma 0.9, **damage = raw_fail (NO ARL)**. ARL-v4 option had the
+  lowest stage-1 mean. Exploratory on stage-2 seeds: c34 vs rl_light eq5
+  +0.036 (13/15), w10 +0.067 (14/15), acc10 +0.056 (15/15); screen B seeds
+  were lucky for rl_light (gap there +0.005/+0.032). configs/rl2_tuned.json =
+  SELECTED.json. Screen C: tuned == tuned_noarl (alias) -> 2 pre-trained
+  methods (tuned, tuned_arl4) x 2 datasets = 4 checkpoints, 240 runs.
+  Re-check fix: tune --report-only compares the recorded ranking (Python 3.11
+  vs 3.13 float sums differ in the 16th digit) instead of rewriting it.
 - **M7-M10 built** (all rules written before any run):
   - shared library scripts/rl2lib.py (plan groups with an `override` applied
     after the condition -- new in sweep.build_jobs; manifests; evidence

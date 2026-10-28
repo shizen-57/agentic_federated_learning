@@ -90,6 +90,24 @@ def refs(by_group: dict) -> list[dict]:
             for c, runs in sorted(by_group.get("ref", {}).items())]
 
 
+def same_ranking(recorded: dict, now: dict, tol: float = 1e-9) -> str | None:
+    """None if the recorded ranking is the one recomputed now (same order,
+    same top, every value within tol); else what differs."""
+    if recorded.get("top") != now["top"]:
+        return f"top {recorded.get('top')} vs {now['top']}"
+    for key in ("ranking", "references"):
+        a, b = recorded.get(key, []), now[key]
+        if [r["id"] for r in a] != [r["id"] for r in b]:
+            return f"{key} order"
+        for x, y in zip(a, b):
+            for k, v in y.items():
+                if isinstance(v, float) and not abs(x.get(k, float("inf")) - v) <= tol:
+                    return f"{key} {y['id']} {k}: {x.get(k)} vs {v}"
+                if not isinstance(v, float) and x.get(k) != v:
+                    return f"{key} {y['id']} {k}: {x.get(k)} vs {v}"
+    return None
+
+
 def table(rows: list[dict]) -> list[str]:
     out = ["| candidate | seeds | score | equal-spend acc (eq5) | worst-10% (last 10) | acc (last 10) "
            "| starved seeds |", "|---|---|---|---|---|---|---|"]
@@ -162,8 +180,19 @@ def main() -> int:
     top = [int(r["id"][1:]) for r in qualified[:spec["top_k"]]]
     ids2 = sorted(set(top) | {0})
     rank_path = os.path.join(args.out, "stage1", "ranking.json")
-    with open(rank_path, "w") as fh:
-        json.dump({"ranking": r1, "references": refs(m1), "top": [name(k) for k in top]}, fh, indent=1)
+    ranking = {"ranking": r1, "references": refs(m1), "top": [name(k) for k in top]}
+    if args.report_only and os.path.exists(rank_path):
+        # The recorded ranking is an input of stage 2 (by hash): recompute and
+        # compare it, never rewrite it. Last-digit float differences between
+        # Python versions (3.12 changed float sum) are not a different ranking.
+        with open(rank_path) as fh:
+            why = same_ranking(json.load(fh), ranking)
+        if why:
+            print(f"\n**INCOMPLETE -- no decision.** The recorded stage-1 ranking differs: {why}")
+            return 2
+    else:
+        with open(rank_path, "w") as fh:
+            json.dump(ranking, fh, indent=1)
 
     plan2 = stage_plan(spec, 2, ids2, configs)
     problems, m2 = stage(spec, args, 2, plan2, {**inputs, "stage1_ranking": rank_path})
