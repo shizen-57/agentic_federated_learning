@@ -244,3 +244,10 @@ def test_where_the_files_are_recorded_does_not_matter(tmp_path, monkeypatch, cap
         json.dump(meta, open(base + ".config.json", "w"))
     code, out = _report(monkeypatch, capsys, group, spec)
     assert code == 0 and "Evidence complete" in out
+
+
+def test_explore_screen_sign_flip_is_exact():
+    import explore_screen as ex
+    assert ex.signflip([0.1] * 5) == pytest.approx(2 / 32)      # 5 seeds: the smallest p possible
+    assert ex.signflip([0.1, -0.1]) == 1.0
+    assert ex.signflip([0.3, 0.1, -0.05]) == pytest.approx(4 / 8)    # +-0.35 and +-0.45

@@ -133,3 +133,29 @@ Evidence complete: all 100 runs present, valid, one code version.
   closes most of that gap. ARL-v4 shows no benefit over ARL-v3 or the plain
   failure count here. Drop candidates are decided in tuning (M7) on seeds
   220-239, as pre-registered; nothing is tuned on 215-219.
+
+**Results and re-validation.** The runs are in `results/rl2_screen_b/full`
+(copied from the server; the report re-run here on them gives the same
+decision, word for word). MANIFEST: commit 61eff94, clean checkout, torch
+2.5.1+cu121 on the RTX 3070.
+
+**Exploratory, after the rule** (`results/rl2_screen_b/EXPLORATORY.md`,
+`scripts/explore_screen.py`; not a decision):
+
+- `ppo_full_mimic` vs `rl_light`, seed by seed: equal spend +0.002 (3/5
+  seeds ahead, a tie); last-10-round mean accuracy +0.029 and worst-10%
+  +0.052 (4/5 seeds ahead each); sign-flip p 0.125 and 0.188 (5 seeds cannot
+  go below 0.0625). The RL reaches its higher accuracy partly by spending
+  more (median 1,836 vs 1,413).
+- Seed 219: `ppo_full_mimic` stood at 0.78-0.80 for rounds 189-199 and fell to
+  0.49 in round 200 alone (`ppo_full` 0.81 -> 0.71). Last-round "final"
+  measures are decided by such single dips; the median round-to-round wobble
+  is no larger for the RL than for always-Light (0.012 vs 0.013).
+- `rl_light_pg` (always Light + predictor v2 + Thompson gate) is clearly
+  WORSE than plain `rl_light` (last-10 mean 0.720 vs 0.767) despite more
+  successes: the repaired gate helps a learner escape the stuck state, but
+  a fixed Light-only rule gains nothing from it and loses coverage.
+- Consequence for the next protocols (M7 on): "final" accuracy and worst-10%
+  are the mean of the last 10 rounds (last round kept as secondary). This is
+  decided now, after seeing screen B, and before any M7 run; it is stated as
+  such.

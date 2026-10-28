@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-28 (screen B done: ppo_full + mimic PASS; mimic carried forward; 8 drop candidates)
+Last updated: 2026-10-28 (screen B results saved + re-validated here; next: build M7)
 
 ---
 
@@ -326,8 +326,16 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   predictor v2 + Thompson gate: -0.587/-0.459, 3/5 starve (essential).
   8 of 12 components are drop candidates (attention, evidence ageing, cost
   constraint, hard cap, curriculum, protection, ARL-v4->v3, ARL-v4->rawfail):
-  ARL-v4 shows no benefit yet. Decide in M7 on seeds 220-239. Tarball of
-  the runs not yet received (copy into results/rl2_screen_b when it comes).
+  ARL-v4 shows no benefit yet. Decide in M7 on seeds 220-239.
+  Runs saved in results/rl2_screen_b/full (re-validated here: identical
+  decision). Exploratory (results/rl2_screen_b/EXPLORATORY.md): mimic vs
+  rl_light: equal spend +0.002 (tie), last-10 mean acc +0.029, worst-10%
+  +0.052, 4/5 seeds each, p 0.125/0.188; RL spends ~30% more. Seed 219
+  last-round-only dip (0.79 -> 0.49) -> from M7 on, "final" = mean of last
+  10 rounds (decided after screen B, before M7; say so). rl_light_pg is
+  worse than rl_light (0.720 vs 0.767).
+  Small results pack for upload: tar MANIFEST/plan/report/sweep.log + CSVs
+  + config.json (5 MB) instead of the 110 MB full pack.
 - Screen B **version 2** (docs/RL2_SCREEN_B.md, configs/rl2_screen_b.yaml,
   seeds 215-219, persistent split, 100 runs): ppo_full, each component
   removed one at a time (12 leave-one-out), ppo_full_mimic, ppo_v3, and
