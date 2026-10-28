@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-28 (screen B attempt 1 void: torch 2.5.1 crash, fixed; re-run pending)
+Last updated: 2026-10-28 (screen B attempt 2: 100/100 runs done; report path bug fixed; report re-run pending)
 
 ---
 
@@ -312,6 +312,12 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   LESSON: test against the server's torch too -- a torch 2.5.1 venv lives in
   the scratchpad (venv251); re-create with `pip install --index-url
   https://download.pytorch.org/whl/cpu torch==2.5.1` if gone.
+- Screen B attempt 2 (commit 61eff94): 100/100 runs finished, 0 failed,
+  25 min on the RTX 3070. Report said INCOMPLETE ("different config" for all):
+  saved "out" relative vs rebuilt absolute. Fixed in scripts/ only
+  (report ignores "out"); simulator hash unchanged, so the runs stand and
+  only the report is re-run. LESSON: unit tests used absolute paths on both
+  sides; tests/test_screen_e2e.py now runs runner + report for real.
 - Screen B **version 2** (docs/RL2_SCREEN_B.md, configs/rl2_screen_b.yaml,
   seeds 215-219, persistent split, 100 runs): ppo_full, each component
   removed one at a time (12 leave-one-out), ppo_full_mimic, ppo_v3, and

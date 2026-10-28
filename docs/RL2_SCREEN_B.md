@@ -95,3 +95,14 @@ configs/rl2_screen_b.yaml` (the GPU script writes it to `<out>/full/report.md`).
   suite is also run on torch 2.5.1. The whole screen is re-run from scratch
   with the fixed code (one code version for all 100 runs, as the evidence
   check requires); attempt 1's folder is kept aside, unused.
+- **Attempt 2 (2026-10-28, dept RTX 3070, commit 61eff94): all 100 runs
+  finished, none failed.** The report then said INCOMPLETE for every run
+  ("different config"): the runner had saved each run's output folder as a
+  relative path (`runs/rl2_screen_b/full/s2_femnist`), the report rebuilt it
+  as an absolute one, and compared the two strings. Every other setting
+  matched (reproduced here end to end). Fix: the report leaves the output
+  folder out of the config comparison -- the files are found at the expected
+  place, and a moved or unpacked results folder is the same run. The fix is
+  in scripts/ only, so the simulator code (and its hash) is unchanged and the
+  runs stand; only the report is run again. A new end-to-end test runs the
+  real runner with a relative folder, then the report.

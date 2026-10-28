@@ -134,7 +134,10 @@ def validate(spec: dict, variant_dir: str, spec_path: str) -> tuple[list[str], l
     jobs = build_jobs(plan, None, None, variant_dir, [])
     hashes, valid = set(), []
     for j in jobs:
-        status = run_status(j["raw"])
+        # "out" is where the files are, which is checked by finding them
+        # there; the runner may have recorded it relative to its working
+        # folder, or the folder may have been moved or unpacked elsewhere.
+        status = run_status(j["raw"], ignore=("out",))
         if status != "ok":
             problems.append(f"{j['cond']} seed {j['seed']}: {status}")
             continue

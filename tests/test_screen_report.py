@@ -231,3 +231,16 @@ def test_spec_and_plan_must_be_the_recorded_ones(tmp_path, monkeypatch, capsys, 
         why = "the generated plan"
     code, out = _report(monkeypatch, capsys, group, spec)
     assert code == 2 and why in out and "does not match the hash" in out
+
+
+def test_where_the_files_are_recorded_does_not_matter(tmp_path, monkeypatch, capsys):
+    # screen B on the server: the runner saved "out" relative to its working
+    # folder, the report rebuilt it absolute -> every run "different config"
+    spec, group, jobs = _screen(tmp_path)
+    for j in jobs:
+        base = os.path.join(j["raw"]["out"], j["raw"]["tag"])
+        meta = json.load(open(base + ".config.json"))
+        meta["out"] = os.path.join("runs", "screen", "full", "s2_femnist")
+        json.dump(meta, open(base + ".config.json", "w"))
+    code, out = _report(monkeypatch, capsys, group, spec)
+    assert code == 0 and "Evidence complete" in out
