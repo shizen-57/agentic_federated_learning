@@ -494,6 +494,10 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
     docs: RL2_METHOD.md (thesis method draft, which parts are
     contribution-aware), RL2_BASELINE_TUNING.md, RL2_COST_AND_CIFAR_CHECKS.md,
     README RL2 section.
+  - Verified 2026-10-29: 366 tests pass on torch 2.14 and 2.5.1 (8 skip);
+    validate_s2_original.sh OK (58/58); new CPU device reference
+    results/devicecheck/cpu.json (code a1be0f1e34704d16, seeds 900-902, 60
+    rounds).
   - D1: tag push refused (this session may push only the working branch).
     The user can push it from their own computer: `git fetch origin && git
     tag s2-frozen 998f2adb1c6cb244da311b3837319276d480d8f3 && git push origin

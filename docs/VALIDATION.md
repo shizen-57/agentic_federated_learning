@@ -186,3 +186,16 @@ CPU result is `results/devicecheck/cpu.json` (made on the current code; see
 its `code_hash`); the GPU one comes from `bash scripts/dept_gpu.sh
 devicecheck`, then `python scripts/check_devices.py --compare
 results/devicecheck/cpu.json <gpu.json>`.
+
+CPU reference (here, torch 2.14, code a1be0f1e34704d16; mean of 3 seeds, 60
+rounds, so accuracy is still rising):
+
+| run | last-10 acc | worst-10% (last 10) | successes / invited | cost | heavy share |
+|---|---|---|---|---|---|
+| FEMNIST tuned | 0.683 | 0.425 | 335 / 600 | 534 | 0.14 |
+| FEMNIST always-Light | 0.648 | 0.377 | 393 / 600 | 428 | 0 |
+| CIFAR-10 tuned | 0.400 | 0.243 | 327 / 600 | 598 | 0.24 |
+| CIFAR-10 always-Light | 0.331 | 0.119 | 400 / 600 | 428 | 0 |
+
+These are short checks of the device, not results: the tuned method spends
+25-40% more here, so the accuracy gap is not at equal spend.
