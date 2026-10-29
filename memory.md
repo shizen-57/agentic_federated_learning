@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-28 (fourth review: reserved data pools, validation matrix, ARL and sensitivity screens built; screen C must be re-run on the new code)
+Last updated: 2026-10-29 (project gap review: docs/GAP_REVIEW.md; the MimiC-vs-FedProx confound and unequal-spend fairness endpoint need fixing before the freeze)
 
 ---
 
@@ -441,6 +441,21 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
     spend; spends within ~2% at each checkpoint; rl_light ahead at 500,
     tuned ahead from ~800; rl_light only spends ~1,371 in total.
   - New log columns n_abstain, n_light_override (simulator hash changed).
+- **Gap review (2026-10-29, no tests run): docs/GAP_REVIEW.md.** Most
+  important: (A1) the tuned method uses MimiC but every primary comparator
+  (and the sensitivity screen's rl_light) uses FedProx -> scheduler effect
+  confounded with aggregation; use rl_light_mimic / matched aggregators;
+  (A2) P2 `w10` is measured at unequal spend (tuned ~1,818 vs rl_light
+  ~1,371); (A3) the soft cost constraint overshoots its 7.5/round target
+  (tuned 9.1, rl_light 6.9); (A4) no defined route for an ARL win into
+  screen C's final method; (A5) prespec_rl2 does not yet report spend /
+  cost curves / starvation / pre-training cost as RL2_CONFIRMATION promises;
+  (A6) P2 lacks a fairness-oriented baseline. Also: baselines untuned (B1),
+  M7 FEMNIST-only (B2), pre-training sim-to-sim (B3), only the weak=rare
+  scenario (B4), FedScale trace unused in RL2 (B5), fairness = one number
+  (B6), w10 noisy (~13 test examples per FEMNIST client, B7); thesis:
+  Chapter 3 out of date, no chapters/figures yet, README stale (C1-C5).
+  Waiting for the user to decide which to fix.
 - Next (dept GPU, after `git pull`; the old-code screen C may finish first,
   it is exploratory): `devicecheck`, `screen2 configs/rl2_arl_screen.yaml`,
   `screen2 configs/rl2_sensitivity.yaml`, then screen C again on the new code

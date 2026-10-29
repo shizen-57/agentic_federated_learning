@@ -116,7 +116,8 @@ could have succeeded:
 
 So the safety layer mostly avoids clients that would usually fail. That is
 the rule's design: eligibility needs a success chance of about 0.5. It still
-means about 12-16% of clients contribute nothing late in a run.
+means about 14% of clients (18% after a shock) contribute nothing late in a
+run.
 
 **Decision:** no change to the method now. Recovery works, there is no sign
 of wrongful avoidance at scale, and the reviewer asked for changes only where
