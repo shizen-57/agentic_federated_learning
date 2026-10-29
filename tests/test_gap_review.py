@@ -121,3 +121,20 @@ def test_rl2_figures_from_fabricated_runs(tmp_path):
     pl.plot_cost({"ctl": pts}, str(tmp_path / "c.png"), "t")
     pl.plot_worlds({"femnist churn": {"eq5": 0.01, "w10b": -0.02}}, str(tmp_path / "w.png"))
     assert all((tmp_path / f).stat().st_size > 1000 for f in ("p.png", "s.png", "c.png", "w.png"))
+
+
+def test_stress_report_survives_groups_with_no_jobs():
+    """Found by the server dry run: if no hit client is invited late in the
+    run (possible on CIFAR-10), the report printed None with a number format
+    and crashed after the whole run. It must say "none" instead."""
+    import predictor_stress as ps
+    rounds = [{"t": t, "abstain": 1, "override": 0, "fill": 0, "selected": 2, "online": [0, 1, 2, 3],
+               "ruled_out": [3], "could": {0: 1, 1: 1, 2: 0, 3: 0}, "light_ok": {0: 1, 1: 1, 2: 0, 3: 0}}
+              for t in range(1, ps.ROUNDS + 1)]
+    jobs = [{"t": t, "i": i, "mode": "light", "p": 0.6, "ok": t % 2, "weak": False, "k": t, "hit": i == 1}
+            for t in range(1, ps.SHOCK) for i in (0, 1)]           # nothing after the shock
+    res = [{"world": w, "seed": 290, "jobs": jobs, "rounds": rounds, "hit": [1], "N": 4, "weak": []}
+           for w in ("stable", "shock")]
+    text, out = ps.report(res)
+    assert out["recovery"]["rate_after"] is None and "vs none from round" in text
+    assert "invited again; median wait none rounds" in text

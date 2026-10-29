@@ -498,6 +498,12 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
     validate_s2_original.sh OK (58/58); new CPU device reference
     results/devicecheck/cpu.json (code a1be0f1e34704d16, seeds 900-902, 60
     rounds).
+  - Server dry run (2026-10-29, Python 3.11.17 + torch 2.5.1, like the
+    server; scratchpad venv311): every group of every new step ran 2 rounds
+    (tuning specs, cost/CIFAR checks, ARL, sensitivity, screen C + worlds,
+    device check). It caught one bug: predictor_stress's report crashed
+    when a group had no jobs (None with a number format) -- fixed, with a
+    regression test; `--rounds N` added for quick checks of the exact CLI.
   - D1: tag push refused (this session may push only the working branch).
     The user can push it from their own computer: `git fetch origin && git
     tag s2-frozen 998f2adb1c6cb244da311b3837319276d480d8f3 && git push origin

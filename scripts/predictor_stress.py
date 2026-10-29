@@ -38,6 +38,14 @@ ROUNDS, SHOCK, RESTORE = 200, 80, 140
 PERIODS = (("before", 1, SHOCK), ("shock", SHOCK, RESTORE), ("after", RESTORE, ROUNDS + 1))
 
 
+def set_schedule(rounds: int) -> None:
+    """Rounds of an episode; the shock comes at 40% and ends at 70% of them
+    (200 rounds: 80 and 140). Fewer rounds are for a quick check only."""
+    global ROUNDS, SHOCK, RESTORE, PERIODS
+    ROUNDS, SHOCK, RESTORE = rounds, round(0.4 * rounds), round(0.7 * rounds)
+    PERIODS = (("before", 1, SHOCK), ("shock", SHOCK, RESTORE), ("after", RESTORE, ROUNDS + 1))
+
+
 GROUPS = {"femnist": "s2_femnist", "cifar": "s2_cifar"}
 
 
@@ -54,7 +62,8 @@ def config(seed: int, group: str = "s2_femnist", sets: tuple = ()) -> dict:
 
 
 def episode(args) -> dict:
-    world, seed, group, sets = args
+    world, seed, group, sets, rounds = args
+    set_schedule(rounds)                    # a worker process starts from the defaults
     import numpy as np
     import torch
     torch.set_num_threads(2)
@@ -133,6 +142,12 @@ def calib(jobs: list[dict]) -> dict:
             "brier": float(((p - y) ** 2).mean())}
 
 
+def _f(x, spec: str) -> str:
+    """A value formatted with spec, or "none" when there is none (a group
+    with no jobs, for example no hit client invited late in the run)."""
+    return "none" if x is None else format(x, spec)
+
+
 def report(res: list[dict]) -> tuple[str, dict]:
     out, L = {}, ["# Predictor and safety-layer stress test", "",
                   "Tuned method, real FEMNIST, seeds " + ", ".join(map(str, SEEDS)) + f", {ROUNDS} rounds. "
@@ -190,11 +205,12 @@ def report(res: list[dict]) -> tuple[str, dict]:
                                        "stuck_could_half_or_more": sum(1 for x in cs if x >= 0.5)}
             a = out[world + "_avoided"]
             L.append(f"- of those {a['n']} clients (all seeds): {a['weak_share']:.0%} weak; median {a['median_online_rounds']} "
-                     f"of 60 rounds online; ruled out by the safety layer in a median {a['median_ruled_out_share']:.0%} "
-                     f"of their online rounds; {a['ruled_out_90pct_or_more']} ruled out in >= 90% (avoided for good)")
+                     f"of 60 rounds online; ruled out by the safety layer in a median "
+                     f"{_f(a['median_ruled_out_share'], '.0%')} of their online rounds; "
+                     f"{a['ruled_out_90pct_or_more']} ruled out in >= 90% (avoided for good)")
             if cs:
                 L.append(f"- were they right to be avoided? Of the {len(stuck)} avoided for good, some mode would have "
-                         f"succeeded in a median {a['stuck_median_could_share']:.0%} of their online rounds "
+                         f"succeeded in a median {_f(a['stuck_median_could_share'], '.0%')} of their online rounds "
                          f"(simulator ground truth); {a['stuck_could_half_or_more']} could have succeeded in at least "
                          f"half of them (avoided wrongly)")
         # every late online client-round the safety layer ruled out: how often
@@ -210,7 +226,7 @@ def report(res: list[dict]) -> tuple[str, dict]:
             b = out[world + "_ruled_out_rounds"]
             L.append(f"- last 60 rounds, every online client-round the safety layer ruled out ({b['n']}): a job was "
                      f"possible in {b['could']:.0%} (Light alone in {b['light_ok']:.0%}); for allowed client-rounds "
-                     f"{b['allowed_could']:.0%}")
+                     f"{_f(b['allowed_could'], '.0%')}")
         if world == "shock":
             lags, back, rate_b, rate_a = [], [], [], []
             for r in (r for r in res if r["world"] == "shock"):
@@ -221,12 +237,14 @@ def report(res: list[dict]) -> tuple[str, dict]:
                         lags.append(after[0] - RESTORE)
                 rate_b += [j["ok"] for j in r["jobs"] if j["hit"] and j["t"] < SHOCK]
                 rate_a += [j["ok"] for j in r["jobs"] if j["hit"] and j["t"] >= RESTORE + 20]
-            out["recovery"] = {"hit_invited_again": sum(back) / len(back), "median_lag": st.median(lags) if lags else None,
-                               "rate_before": st.mean(rate_b), "rate_after": st.mean(rate_a) if rate_a else None}
+            out["recovery"] = {"hit_invited_again": sum(back) / len(back) if back else None,
+                               "median_lag": st.median(lags) if lags else None,
+                               "rate_before": st.mean(rate_b) if rate_b else None,
+                               "rate_after": st.mean(rate_a) if rate_a else None}
             rc = out["recovery"]
-            L += ["", f"Recovery of the hit clients after round {RESTORE}: {rc['hit_invited_again']:.0%} invited "
-                  f"again; median wait {rc['median_lag']} rounds; success rate {rc['rate_before']:.3f} before the "
-                  f"shock vs {rc['rate_after']:.3f} from round {RESTORE + 20} on."]
+            L += ["", f"Recovery of the hit clients after round {RESTORE}: {_f(rc['hit_invited_again'], '.0%')} invited "
+                  f"again; median wait {_f(rc['median_lag'], '')} rounds; success rate {_f(rc['rate_before'], '.3f')} "
+                  f"before the shock vs {_f(rc['rate_after'], '.3f')} from round {RESTORE + 20} on."]
         L.append("")
     return "\n".join(L), out
 
@@ -237,12 +255,14 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=3)
     ap.add_argument("--dataset", choices=sorted(GROUPS), default="femnist")
     ap.add_argument("--set", action="append", default=[], help="operational override, e.g. fl.device=auto")
+    ap.add_argument("--rounds", type=int, default=200, help="200 for the test; fewer only for a quick check")
     args = ap.parse_args()
+    set_schedule(args.rounds)
     import rl2lib
     if rl2lib.non_operational(args.set):
         raise SystemExit("--set may only be operational")
     import multiprocessing as mp
-    tasks = [(w, s, GROUPS[args.dataset], tuple(args.set)) for w in ("stable", "shock") for s in SEEDS]
+    tasks = [(w, s, GROUPS[args.dataset], tuple(args.set), args.rounds) for w in ("stable", "shock") for s in SEEDS]
     with ProcessPoolExecutor(args.jobs, mp_context=mp.get_context("spawn")) as pool:
         res = list(pool.map(episode, tasks))
     text, summary = report(res)
