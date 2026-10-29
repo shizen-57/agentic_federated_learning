@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-29 (project gap review: docs/GAP_REVIEW.md; the MimiC-vs-FedProx confound and unequal-spend fairness endpoint need fixing before the freeze)
+Last updated: 2026-10-29 (all gap-review items fixed in code/docs; new GPU order: device check, cost check, CIFAR check, CIFAR stress, comparator tuning, then ARL screen, sensitivity, screen C)
 
 ---
 
@@ -388,9 +388,11 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   references incl. rl_light_pg (repaired simple scheduler) and
   ppo_full_rawfail / ppo_full_arl3 (the stack without ARL-v4). Rule is in the
   spec. Version 1 was never run.
-- Seed plan: 210-214 screen A (used), 215-219 screen B, 220-239 tuning (M7),
-  240-249 screen C (M8), 250-269 ARL screen, 270-279 sensitivity, 290-292
-  predictor stress, confirmation 300+ (user go-ahead).
+- Seed plan: 210-214 screen A (used), 215-219 screen B, 220-239 tuning (M7,
+  and the comparators' matched tuning), 240-249 screen C (M8), 250-269 ARL
+  screen, 270-279 sensitivity, 280-284 cost check, 285-289 CIFAR check,
+  290-292 predictor stress, 900-902 device checks, confirmation 300+ (user
+  go-ahead).
 - **Fourth external review (2026-10-28)**: user agreed "make the simulator
   trustworthy and find which parts of the method help; postpone framework
   migration (Flower etc.)". Milestone = verified repairs + genuinely reserved
@@ -455,9 +457,57 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   scenario (B4), FedScale trace unused in RL2 (B5), fairness = one number
   (B6), w10 noisy (~13 test examples per FEMNIST client, B7); thesis:
   Chapter 3 out of date, no chapters/figures yet, README stale (C1-C5).
-  Waiting for the user to decide which to fix.
-- Next (dept GPU, after `git pull`; the old-code screen C may finish first,
-  it is exploratory): `devicecheck`, `screen2 configs/rl2_arl_screen.yaml`,
-  `screen2 configs/rl2_sensitivity.yaml`, then screen C again on the new code
-  (move the old results/rl2_screen_c and checkpoints folders aside first),
-  then freeze, then confirm only with the user's go-ahead.
+  User said "fix all of them first" -> all fixed (2026-10-29), status table at
+  the end of docs/GAP_REVIEW.md. Also found and fixed A7: the `_ew`
+  baselines used the ORIGINAL predictor v1; their tuning may now pick v2.
+  What changed:
+  - comparators: `*_mimic` versions (conditions.py); new baseline
+    `b_fairq_ew` (policy `fairq`, Lyapunov fairness queues after RBCS-F,
+    Huang et al. TPDS 2021); Oort eps/alpha and FAVOR lr are config knobs
+    (defaults unchanged);
+  - matched tuning of 8 comparators: configs/rl2_tune_<name>.yaml, same
+    budget/seeds/score as M7 (seeds 220-239 reused), small spaces searched
+    exhaustively (tune_rl2.sample_configs); winners -> commit as
+    configs/rl2_tuned_<name>.json (I do it after checking the pack);
+  - endpoints: P2 = `w10b` (worst-10% over the last 10 rounds WITHIN the
+    1,400 budget); rl2lib.score_eq = (eq5 + w10b)/2 for screen C and the
+    screens; M7's rl2lib.score unchanged (its re-check still matches);
+  - screen C v2: tuned refs (`tuned_references`, `control:
+    rl_light_mimic_tuned`), P1/P2 second comparator = best tuned comparator
+    on eq5 / w10b; tuned file = configs/rl2_tuned_final.json;
+  - chain (A3/A4): cost check (seeds 280-284) -> `python
+    scripts/finalize_tuned.py cost --spec configs/rl2_cost_check.yaml --out
+    <folder>` -> commit configs/rl2_tuned_cost.json -> ARL screen ->
+    `finalize_tuned.py arl ...` -> commit configs/rl2_tuned_final.json ->
+    sensitivity + screen C. Runners stop if a file in the chain is missing;
+  - freeze: secondary worlds (fedscale_devices, weak_random, no_weak,
+    churn; final vs control; first 20 confirmation seeds), power with the
+    80% upper confidence limit of screen C's sd (sd 0.02 from 10 seeds ->
+    75 seeds); prespec reports spend, cost curves, starvation, n_never,
+    n_gap50, Jain, weak-client acc, budget_lighter/dropped, pre-training
+    cost, worlds;
+  - new log columns: cost_ref, budget_lighter, n_never, n_gap50 (code hash
+    changed -> every new run is on the new code);
+  - CIFAR check of M7's top 5 (seeds 285-289); sensitivity v2 (13 settings,
+    260 runs, reference = tuned rl_light_mimic); device check 3 seeds x 60
+    rounds; predictor stress --dataset cifar; scripts/plot_rl2.py;
+    docs: RL2_METHOD.md (thesis method draft, which parts are
+    contribution-aware), RL2_BASELINE_TUNING.md, RL2_COST_AND_CIFAR_CHECKS.md,
+    README RL2 section.
+  - D1: tag push refused (this session may push only the working branch).
+    The user can push it from their own computer: `git fetch origin && git
+    tag s2-frozen 998f2adb1c6cb244da311b3837319276d480d8f3 && git push origin
+    s2-frozen` (never from the shared server).
+- Next on the dept GPU, after `git pull` (stop or finish the old-code
+  screen C first; it is exploratory; move `runs/rl2_screen_c` and
+  `checkpoints` aside before the new screen C):
+  1. session 1 (no dependencies): `devicecheck`, `screen2
+     configs/rl2_cost_check.yaml`, `screen2 configs/rl2_cifar_check.yaml`,
+     `stress cifar`, then `tunebase all` (~8-9 h, overnight; resumable);
+     packsmall each and send.
+  2. I check them, run finalize_tuned cost, commit the tuned files.
+  3. session 2: `screen2 configs/rl2_arl_screen.yaml`; send; I run
+     finalize_tuned arl and commit.
+  4. session 3: `screen2 configs/rl2_sensitivity.yaml`,
+     `screen-c-pretrain`, `screen-c`; send; then freeze; confirm only with
+     the user's go-ahead.

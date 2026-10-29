@@ -31,22 +31,49 @@ import yaml  # noqa: E402
 
 import rl2lib  # noqa: E402
 
-PRIMARY = (("P1", "eq5"), ("P2", "w10"))
+# Both primary endpoints at equal spend (gap review A2): eq5 and w10b, the
+# worst-10% client accuracy over the last 10 rounds within the same budget.
+PRIMARY = (("P1", "eq5"), ("P2", "w10b"))
 
 
-def load(spec_path: str) -> tuple[dict, dict]:
+def load(spec_path: str, require_refs: bool = True) -> tuple[dict, dict]:
     with open(spec_path) as fh:
         spec = yaml.safe_load(fh)
-    with open(os.path.join(ROOT, spec["tuned"])) as fh:
+    path = os.path.join(ROOT, spec["tuned"])
+    if not os.path.exists(path):
+        raise SystemExit(f"{spec['tuned']} does not exist yet: the cost check and the ARL screen come first "
+                         "(scripts/finalize_tuned.py; docs/RL2_ARL_SCREEN.md, 'Order')")
+    with open(path) as fh:
         tuned = json.load(fh)
     if tuned.get("base") != spec["base"]:
         raise SystemExit(f"{spec['tuned']} tunes {tuned.get('base')}, the spec's base is {spec['base']}")
+    # pre-training needs no comparator, so it can run while they are tuned
+    spec["tuned_references"] = resolve_trefs(spec.get("tuned_references") or {}) if require_refs else {}
     return spec, tuned
 
 
-def entry_for(spec: dict, dataset: str, conditions, seeds, override=None) -> dict:
+def resolve_trefs(trefs: dict) -> dict:
+    """{name: tuned-settings file} -> {name: {file, base, overrides}}: each
+    comparator with the winner of its matched tuning (gap review B1)."""
+    out = {}
+    for name, v in trefs.items():
+        if isinstance(v, dict):                     # already resolved (a frozen spec)
+            out[name] = v
+            continue
+        full = os.path.join(ROOT, v)
+        if not os.path.exists(full):
+            raise SystemExit(f"{v} does not exist yet: run its matched tuning first "
+                             "(docs/RL2_BASELINE_TUNING.md)")
+        with open(full) as fh:
+            t = json.load(fh)
+        out[name] = {"file": v, "base": t["base"], "overrides": t["overrides"]}
+    return out
+
+
+def entry_for(spec: dict, dataset: str, conditions, seeds, override=None, extra_set=None) -> dict:
     src = rl2lib.source_group(spec["source_plan"], spec["datasets"][dataset])
-    return rl2lib.group_entry(src, spec.get("set"), spec["rounds"], conditions, seeds, override)
+    return rl2lib.group_entry(src, {**(spec.get("set") or {}), **(extra_set or {})}, spec["rounds"],
+                              conditions, seeds, override)
 
 
 def effective(spec: dict, dataset: str, overrides: dict) -> dict:
@@ -85,16 +112,42 @@ def ckpt(spec: dict, method: str, dataset: str) -> str:
     return os.path.join(spec["pretrain"]["checkpoints"], f"{method}_{dataset}.pt")
 
 
+def tref_entry(spec: dict, d: str, tr: dict, seeds, extra_set=None) -> dict:
+    e = entry_for(spec, d, [tr["base"]], seeds, extra_set=extra_set)
+    ov = rl2lib.resolve(e, tr["overrides"])
+    if ov:
+        e["override"] = ov
+    return e
+
+
+def method_entry(spec: dict, ms: dict, name: str, d: str, seeds, extra_set=None) -> dict:
+    """A "<method>_pt" or "<method>_scratch" run group."""
+    m, kind = name.rsplit("_", 1)
+    m = canonical(ms, m)
+    ov = ms[m]["overrides"] if kind == "scratch" else {**ms[m]["overrides"],
+                                                         "policy.init_checkpoint": ckpt(spec, m, d)}
+    return entry_for(spec, d, [spec["base"]], seeds, ov, extra_set)
+
+
 def build_plan(spec: dict, tuned: dict) -> dict:
     groups = {}
     for d in spec["datasets"]:
         ms = methods(spec, tuned, d)
         for m in dict.fromkeys(canonical(ms, m) for m in spec["pretrained"]):
-            groups[f"{d}_{m}_pt"] = entry_for(spec, d, [spec["base"]], spec["seeds"],
-                                              {**ms[m]["overrides"], "policy.init_checkpoint": ckpt(spec, m, d)})
+            groups[f"{d}_{m}_pt"] = method_entry(spec, ms, f"{m}_pt", d, spec["seeds"])
         for m in dict.fromkeys(canonical(ms, m) for m in spec["scratch"]):
-            groups[f"{d}_{m}_scratch"] = entry_for(spec, d, [spec["base"]], spec["seeds"], ms[m]["overrides"])
-        groups[f"{d}_ref"] = entry_for(spec, d, spec["references"], spec["seeds"])
+            groups[f"{d}_{m}_scratch"] = method_entry(spec, ms, f"{m}_scratch", d, spec["seeds"])
+        if spec.get("references"):
+            groups[f"{d}_ref"] = entry_for(spec, d, spec["references"], spec["seeds"])
+        for name, tr in spec["tuned_references"].items():
+            groups[f"{d}_tref_{name}"] = tref_entry(spec, d, tr, spec["seeds"])
+        # secondary worlds (gap review B3-B5; set by the freeze): the final
+        # method -- pre-trained in the usual world -- and the control, elsewhere
+        w = spec.get("worlds")
+        for wname, wset in (w or {}).get("settings", {}).items():
+            groups[f"{d}_world_{wname}_final"] = method_entry(spec, ms, w["final"], d, w["seeds"], wset)
+            groups[f"{d}_world_{wname}_control"] = tref_entry(spec, d, spec["tuned_references"][w["control"]],
+                                                              w["seeds"], wset)
     return {"seeds": list(spec["seeds"]), "sets": {}, "groups": groups}
 
 
@@ -162,6 +215,11 @@ def pretrain_methods(spec: dict, tuned: dict, max_procs: int, sets: list[str]) -
     return 0
 
 
+def tref_inputs(spec: dict) -> dict[str, str]:
+    """Every tuned comparator's settings file, checked by hash like any input."""
+    return {f"tuned reference {n}": os.path.join(ROOT, tr["file"]) for n, tr in spec["tuned_references"].items()}
+
+
 def checkpoint_inputs(spec: dict, tuned: dict) -> dict[str, str]:
     return {f"checkpoint {name}": os.path.join(ROOT, path) for name, (path, _, _) in checkpoints(spec, tuned).items()}
 
@@ -176,14 +234,15 @@ def evidence(spec: dict, tuned: dict, out: str, plan: dict, inputs: dict) -> tup
         why = checkpoint_problem(path, group, spec["base"], ov)
         if why:
             problems.append(f"checkpoint {name} ({path}): {why}")
-    sha = {name: rl2lib._sha(os.path.join(ROOT, path)) for name, (path, _, _) in checkpoints(spec, tuned).items()}
+    checked = {path for path, _, _ in checkpoints(spec, tuned).values()}
     ok = set(valid)
     for j in jobs:
         base = os.path.join(j["raw"]["out"], j["raw"]["tag"])
-        if base + ".csv" in ok and j["group"].endswith("_pt"):
+        ck_path = (j["raw"].get("policy") or {}).get("init_checkpoint")
+        if base + ".csv" in ok and ck_path:
             with open(base + ".config.json") as fh:
                 used = json.load(fh).get("init_checkpoint_sha256")
-            if used != sha[j["group"][:-3]]:
+            if ck_path not in checked or used != rl2lib._sha(os.path.join(ROOT, ck_path)):
                 problems.append(f"{j['group']}/{j['cond']} seed {j['seed']}: started from another checkpoint")
     if problems:
         return problems, {}
@@ -202,7 +261,15 @@ def by_condition(spec: dict, tuned: dict, mg: dict) -> dict[str, dict[str, dict[
             cur[f"{m}_pt"] = mg[f"{d}_{canonical(ms, m)}_pt"][spec["base"]]
         for m in spec["scratch"]:
             cur[f"{m}_scratch"] = mg[f"{d}_{canonical(ms, m)}_scratch"][spec["base"]]
-        cur.update(mg[f"{d}_ref"])
+        if spec.get("references"):
+            cur.update(mg[f"{d}_ref"])
+        for name, tr in spec["tuned_references"].items():
+            cur[name] = mg[f"{d}_tref_{name}"][tr["base"]]
+        w = spec.get("worlds")
+        for wname in (w or {}).get("settings", {}):
+            (cur[f"world:{wname}:final"],) = mg[f"{d}_world_{wname}_final"].values()
+            cur[f"world:{wname}:control"] = mg[f"{d}_world_{wname}_control"][
+                spec["tuned_references"][w["control"]]["base"]]
     return out
 
 
@@ -211,17 +278,25 @@ def paired(a: dict, b: dict, k: str) -> list[float]:
 
 
 def decide(spec: dict, tuned: dict, runs: dict, ck: dict) -> tuple[dict, list[str]]:
+    """The rule (docs/RL2_SCREEN_C.md): pre-trained or not by the median
+    paired equal-spend score; the control is the tuned always-Light with
+    MimiC; P1's second comparator is the tuned comparator with the best eq5,
+    P2's the one with the best w10b (gap review A6), each by the mean over
+    datasets of its median."""
     import torch
-    sc = lambda a, b: [rl2lib.score(a[s]) - rl2lib.score(b[s]) for s in sorted(a) if s in b]  # noqa: E731
+    sc = lambda a, b: [rl2lib.score_eq(a[s]) - rl2lib.score_eq(b[s]) for s in sorted(a) if s in b]  # noqa: E731
     pt_vs = [x for d in runs for x in sc(runs[d]["tuned_pt"], runs[d]["tuned_scratch"])]
     final = "tuned_pt" if st.median(pt_vs) >= 0 else "tuned_scratch"
-    cands = [r for r in spec["references"] if r != "rl_light"]
-    eq = {r: st.mean(st.median(m["eq5"] for m in runs[d][r].values()) for d in runs) for r in cands}
-    best = max(cands, key=lambda r: (eq[r], -cands.index(r)))
+    control = spec["control"]
+    cands = [r for r in spec["tuned_references"] if r != control]
+    by = {k: {r: st.mean(st.median(m[k] for m in runs[d][r].values()) for d in runs) for r in cands}
+          for k in ("eq5", "w10b")}
+    best = max(cands, key=lambda r: (by["eq5"][r], -cands.index(r)))
+    best_p2 = max(cands, key=lambda r: (by["w10b"][r], -cands.index(r)))
     tests = []
     for d in runs:
         for fam, k in PRIMARY:
-            for vs in ("rl_light", best if fam == "P1" else spec["p2_reference"]):
+            for vs in (control, best if fam == "P1" else best_p2):
                 diff = paired(runs[d][final], runs[d][vs], k)
                 tests.append({"family": fam, "dataset": d, "vs": vs, "endpoint": k, "n": len(diff),
                               "mean_diff": st.mean(diff), "sd": st.stdev(diff) if len(diff) > 1 else 0.0,
@@ -233,8 +308,10 @@ def decide(spec: dict, tuned: dict, runs: dict, ck: dict) -> tuple[dict, list[st
     from afl.provenance import code_hash
     import data_roles
     decision = {"final": {"name": final, "method": "tuned", "pretrained": final == "tuned_pt"},
-                "pt_minus_scratch_median_score": st.median(pt_vs), "best_baseline": best,
-                "best_baseline_eq5": eq, "p2_reference": spec["p2_reference"], "tests": tests,
+                "pt_minus_scratch_median_score": st.median(pt_vs), "control": control,
+                "best_baseline": best, "best_baseline_p2": best_p2, "best_baseline_eq5": by["eq5"],
+                "best_baseline_w10b": by["w10b"], "tests": tests,
+                "tuned_references": spec["tuned_references"],
                 "methods": {d: methods(spec, tuned, d) for d in spec["datasets"]},
                 "checkpoints": {n: {"path": p, "sha256": rl2lib._sha(os.path.join(ROOT, p))}
                                 for n, (p, _, _) in ck.items()},
@@ -244,16 +321,21 @@ def decide(spec: dict, tuned: dict, runs: dict, ck: dict) -> tuple[dict, list[st
                 "eval_pool": "dev", "data_roles_sha256": rl2lib._sha(data_roles.PATH),
                 "starved_final_seeds": {d: sum(m["starved"] for m in runs[d][final].values()) for d in runs}}
     lines = [f"# {spec['title']}", "", "Evidence complete: every run and checkpoint checked.", "",
-             f"**Final method: {final}** (median paired score, pre-trained minus scratch, over "
+             f"**Final method: {final}** (median paired equal-spend score, pre-trained minus scratch, over "
              f"{len(pt_vs)} dataset-seed pairs: {st.median(pt_vs):+.4f}).",
-             f"**Best baseline for P1: {best}** (mean over datasets of median equal-spend acc).", "",
-             "## Per dataset, median over seeds", ""]
+             f"**Control: {control}.** **P1 comparator: {best}** (best mean of median eq5). "
+             f"**P2 comparator: {best_p2}** (best mean of median w10b).", "",
+             "## Per dataset, median over seeds", "",
+             "All endpoints but w10 and acc10 are at equal spend (cumulative cost <= 1,400).", ""]
     for d in runs:
-        lines += [f"### {d}", "", "| condition | eq5 | w10 | acc10 | score | starved |", "|---|---|---|---|---|---|"]
+        lines += [f"### {d}", "", "| condition | eq5 | w10b | w10 (whole run) | acc10 | score_eq | spend | "
+                  "never contributed | Jain | starved |", "|---|---|---|---|---|---|---|---|---|---|"]
         for c, r in sorted(runs[d].items()):
             v = r.values()
-            lines.append(f"| {c} | {st.median(m['eq5'] for m in v):.3f} | {st.median(m['w10'] for m in v):.3f} | "
-                         f"{st.median(m['acc10'] for m in v):.3f} | {st.median(rl2lib.score(m) for m in v):.4f} | "
+            lines.append(f"| {c} | {st.median(m['eq5'] for m in v):.3f} | {st.median(m['w10b'] for m in v):.3f} | "
+                         f"{st.median(m['w10'] for m in v):.3f} | {st.median(m['acc10'] for m in v):.3f} | "
+                         f"{st.median(rl2lib.score_eq(m) for m in v):.4f} | {st.median(m['spend'] for m in v):.0f} | "
+                         f"{st.median(m['n_never'] for m in v):.0f} | {st.median(m['jain'] for m in v):.3f} | "
                          f"{sum(m['starved'] for m in v)}/{len(r)} |")
         lines.append("")
     lines += ["## The confirmation's primary tests, as estimated here (no test is run here)", "",
@@ -261,17 +343,18 @@ def decide(spec: dict, tuned: dict, runs: dict, ck: dict) -> tuple[dict, list[st
     lines += [f"| {t['family']} | {t['dataset']} | {t['vs']} | {t['endpoint']} | {t['mean_diff']:+.4f} | "
               f"{t['sd']:.4f} | {t['wins']}/{t['n']} |" for t in tests]
     lines += ["", "## Secondary (descriptive): final method minus each condition, median paired", "",
-              "| dataset | condition | eq5 | w10 | acc10 |", "|---|---|---|---|---|"]
+              "| dataset | condition | eq5 | w10b | w10 | acc10 |", "|---|---|---|---|---|---|"]
     for d in runs:
         for c in sorted(runs[d]):
             if c != final:
                 lines.append(f"| {d} | {c} | {st.median(paired(runs[d][final], runs[d][c], 'eq5')):+.3f} | "
+                             f"{st.median(paired(runs[d][final], runs[d][c], 'w10b')):+.3f} | "
                              f"{st.median(paired(runs[d][final], runs[d][c], 'w10')):+.3f} | "
                              f"{st.median(paired(runs[d][final], runs[d][c], 'acc10')):+.3f} |")
     lines += ["", "ARL contrast (with ARL-v4 minus without, pre-trained, median paired):", ""]
     for d in runs:
         a, b = runs[d]["tuned_arl4_pt"], runs[d]["tuned_noarl_pt"]
-        lines.append(f"- {d}: eq5 {st.median(paired(a, b, 'eq5')):+.3f}, w10 {st.median(paired(a, b, 'w10')):+.3f}")
+        lines.append(f"- {d}: eq5 {st.median(paired(a, b, 'eq5')):+.3f}, w10b {st.median(paired(a, b, 'w10b')):+.3f}")
     lines += ["", "Pre-training cost per checkpoint (practice only, never evaluated):", ""]
     lines += [f"- {n}: {c}" for n, c in cost.items()]
     return decision, lines
@@ -290,7 +373,7 @@ def main() -> int:
     args = ap.parse_args()
     if rl2lib.non_operational(args.set):
         raise SystemExit(f"--set may only be operational; put {rl2lib.non_operational(args.set)} in the spec")
-    spec, tuned = load(args.spec)
+    spec, tuned = load(args.spec, require_refs=args.command != "pretrain")
     import seeds as seedreg
     seedreg.check(spec["seeds"], spec.get("purpose", "dev"))
     plan = build_plan(spec, tuned)
@@ -305,7 +388,7 @@ def main() -> int:
         return cmd_pretrain(spec, tuned, args)
     ck = checkpoints(spec, tuned)
     inputs = {"spec": args.spec, "source": os.path.join(ROOT, spec["source_plan"]),
-              "tuned": os.path.join(ROOT, spec["tuned"])}
+              "tuned": os.path.join(ROOT, spec["tuned"]), **tref_inputs(spec)}
     if args.command == "run":
         bad = {k: checkpoint_problem(p, g, spec["base"], ov) for k, (p, g, ov) in ck.items()}
         if any(bad.values()):

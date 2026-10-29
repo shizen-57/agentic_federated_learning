@@ -255,11 +255,21 @@ def measures_by_group(jobs: list[dict]) -> dict[str, dict[str, dict[int, dict]]]
 # ----------------------------------------------------------------- scores
 
 def score(m: dict) -> float:
-    """The one number tuning and screen C rank by: the mean of the two
-    primary endpoints, P1 equal-spend accuracy (eq5) and P2 worst-10% client
-    accuracy (w10, last 10 rounds); a missing value counts as 0."""
+    """The number M7 tuning ranked by (and the matched baseline tuning, for
+    parity): the mean of equal-spend accuracy (eq5) and worst-10% client
+    accuracy over the last 10 rounds (w10, whatever was spent); a missing
+    value counts as 0."""
     eq = m["eq5"] if m["eq5"] == m["eq5"] else 0.0
     w = m["w10"] if m["w10"] == m["w10"] else 0.0
+    return (eq + w) / 2.0
+
+
+def score_eq(m: dict) -> float:
+    """From screen C on (gap review A2): both endpoints at equal spend -- eq5
+    and w10b, worst-10% client accuracy over the last 10 rounds within the
+    same budget; a missing value counts as 0."""
+    eq = m["eq5"] if m["eq5"] == m["eq5"] else 0.0
+    w = m["w10b"] if m["w10b"] == m["w10b"] else 0.0
     return (eq + w) / 2.0
 
 

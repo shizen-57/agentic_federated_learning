@@ -30,10 +30,23 @@ import rl2lib  # noqa: E402
 
 def sample_configs(spec: dict) -> list[dict]:
     """c00 = {} (the base), then random draws: one option per dimension, in
-    sorted dimension order, from a fixed seed -- the same list every time."""
+    sorted dimension order, from a fixed seed -- the same list every time.
+    A space with fewer combinations than n_configs - 1 (a baseline with few
+    settings) is searched exhaustively instead: every combination, in order."""
+    import itertools
+    import math
     import numpy as np
     rng = np.random.default_rng(spec["sampler_seed"])
     dims = sorted(spec["space"])
+    if math.prod(len(spec["space"][d]) for d in dims) < spec["n_configs"] - 1:
+        configs = [{}]
+        for combo in itertools.product(*(spec["space"][d] for d in dims)):
+            c: dict = {}
+            for d, o in zip(dims, combo):
+                c.update(o if isinstance(o, dict) else {d: o})
+            if c not in configs:
+                configs.append(c)
+        return configs
     configs: list[dict] = [{}]
     while len(configs) < spec["n_configs"]:
         c: dict = {}
@@ -224,7 +237,7 @@ def main() -> int:
              *table(r2), "", "References:", "", *table(refs(m2)), "",
              f"**Selected: {winner}**" + (" (no top-k candidate qualified: the base is kept)" if not eligible else ""),
              "", f"Settings: `{json.dumps(configs[k], sort_keys=True) if configs[k] else 'the base, unchanged'}`",
-             "", "## Exploratory (no decision): stage-1 mean score by option, c01-c39", ""]
+             "", f"## Exploratory (no decision): stage-1 mean score by option, c01-{name(len(configs) - 1)}", ""]
     for d in sorted(spec["space"]):
         opts = spec["space"][d]
         cells = []

@@ -12,11 +12,13 @@
 #   bash scripts/dept_gpu.sh pretrain femnist ppo_full   # RL2 pre-training -> checkpoints/
 #   bash scripts/dept_gpu.sh screen configs/rl2_screen_b.yaml   # a development screen
 #   bash scripts/dept_gpu.sh tune       # RL2 M7: tuning (docs/RL2_M7_TUNING.md)
+#   bash scripts/dept_gpu.sh tunebase b_oort_ew_mimic   # matched tuning of one comparator ("all" = all 8)
 #   bash scripts/dept_gpu.sh screen-c-pretrain   # RL2 M8: the checkpoints screen C needs
 #   bash scripts/dept_gpu.sh screen-c   # RL2 M8: screen C (docs/RL2_SCREEN_C.md)
 #   bash scripts/dept_gpu.sh confirm    # RL2 M10: checks only; "confirm go" runs it (user's go-ahead)
 #   bash scripts/dept_gpu.sh screen2 configs/rl2_arl_screen.yaml   # a controlled screen (ARL, sensitivity)
 #   bash scripts/dept_gpu.sh devicecheck  # short real-data runs to compare with the CPU
+#   bash scripts/dept_gpu.sh stress cifar # predictor stress test on CIFAR-10 (FEMNIST: stress femnist)
 #   bash scripts/dept_gpu.sh packsmall rl2_tune   # small results file to send (no big logs)
 #   bash scripts/dept_gpu.sh pack       # pack the results to copy back home
 #
@@ -144,6 +146,26 @@ tune)
     python scripts/tune_rl2.py --spec configs/rl2_tune.yaml --out "$OUT/rl2_tune" --jobs "$JOBS" \
         --set fl.device=auto 2>&1 | tee -a "$OUT/rl2_tune.log"
     ;;
+tunebase)
+    # matched tuning of the comparators (docs/RL2_BASELINE_TUNING.md); resumable
+    activate; jobs_default; mkdir -p "$OUT"
+    which=${2:?give a comparator, e.g. b_oort_ew_mimic, or all}
+    if [ "$which" = all ]; then
+        names="rl_light_mimic arl3_full_pg_mimic b_oort_ew_mimic b_refl_ew b_favor_ew_mimic b_delta_ew_mimic b_cov_ew_mimic b_fairq_ew_mimic"
+    else
+        names=$which
+    fi
+    for n in $names; do
+        python scripts/tune_rl2.py --spec "configs/rl2_tune_$n.yaml" --out "$OUT/rl2_tune_$n" --jobs "$JOBS" \
+            --set fl.device=auto 2>&1 | tee -a "$OUT/rl2_tune_$n.log"
+    done
+    ;;
+stress)
+    activate; mkdir -p "$OUT"
+    ds=${2:-cifar}
+    python scripts/predictor_stress.py --dataset "$ds" --out "$OUT/predictor_stress_$ds" --jobs "${JOBS:-3}" \
+        --set fl.device=auto 2>&1 | tee -a "$OUT/predictor_stress_$ds.log"
+    ;;
 screen-c-pretrain)
     activate; mkdir -p "$OUT"
     # resumable: run it again after an interruption. MAXPROCS=2 if the GPU runs out of memory.
@@ -190,6 +212,6 @@ pack)
     echo "  scp -P <port> <user>@<server>:$(pwd)/results_$stamp.tar.gz ."
     ;;
 *)
-    sed -n '2,27p' "$0"; exit 1
+    sed -n '2,29p' "$0"; exit 1
     ;;
 esac

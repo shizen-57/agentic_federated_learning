@@ -1,19 +1,24 @@
 # RL2 sensitivity screen: does "tuned beats always-Light" depend on one chosen
-# world setting? Each factor moved low and high, one at a time.
+# world setting? Each factor moved low and high, one at a time; plus the
+# measured FedScale device trace and the other weak-client scenarios.
+# Version 2 (gap review, before any run): the reference is the TUNED
+# always-Light with MimiC, like the tuned method (A1, B1); the tuned method is
+# the final one (cost and ARL verdicts carried in); both endpoints at equal
+# spend; new settings: FedScale devices (B5) and the scenarios (B4).
 # Rule: docs/RL2_SENSITIVITY.md and the `rule` block, written before any run.
 # Runner: scripts/screen_rl2.py.
-version: 1
+version: 2
 title: RL2 sensitivity screen (one world setting at a time)
 purpose: dev
 source_plan: configs/sweep_advanced.yaml
 datasets: {femnist: s2_femnist}
-tuned: configs/rl2_tuned.json
+tuned: configs/rl2_tuned_final.json    # made by scripts/finalize_tuned.py arl
 set: {data.split: persistent}
 rounds: 200
 seeds: [270, 271, 272, 273, 274, 275, 276, 277, 278, 279]
 arms:
   tuned: {tuned: true}
-  rl_light: {condition: rl_light}
+  control: {tuned_file: configs/rl2_tuned_rl_light_mimic.json}   # tuned always-Light, MimiC
 settings:
   base: {}
   deadline_low: {system.deadline: 0.8}
@@ -24,13 +29,19 @@ settings:
   battery_high: {system.energy_scale: 2.0}
   bandwidth_low: {system.bandwidth_scale: 0.5}
   bandwidth_high: {system.bandwidth_scale: 2.0}
+  fedscale_devices: {system.device_trace: fedscale}        # measured phone speeds and bandwidths
+  weak_random: {system.weak_select: random}                # weak devices hold random data
+  no_weak: {system.weak_frac: 0.0}                         # no weak devices
+  churn: {system.churn_after: 3, system.churn_prob: 0.5}   # clients may leave for good
 rule:
   kind: sensitivity
   arm: tuned
-  reference: rl_light
+  reference: control
   factors:
     deadline: [deadline_low, base, deadline_high]
     availability: [avail_low, base, avail_high]
     battery: [battery_low, base, battery_high]
     bandwidth: [bandwidth_low, base, bandwidth_high]
+    devices: [base, fedscale_devices]
+    scenario: [base, weak_random, no_weak, churn]
 out: results/rl2_sensitivity

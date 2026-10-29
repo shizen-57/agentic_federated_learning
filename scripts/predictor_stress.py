@@ -3,9 +3,10 @@
 from pessimism? (fourth external review, finding 5; docs/VALIDATION.md)
 
     python scripts/predictor_stress.py --out results/predictor_stress --jobs 3
+    python scripts/predictor_stress.py --dataset cifar --out runs/predictor_stress_cifar --set fl.device=auto
 
-The tuned method (configs/rl2_tuned.json) on real FEMNIST (s2 settings,
-persistent split, development pool, 200 rounds), seeds 290-292, in two
+The tuned method (configs/rl2_tuned.json) on real FEMNIST or CIFAR-10 (s2
+settings, persistent split, development pool, 200 rounds), seeds 290-292, in two
 worlds: `stable`, and `shock` -- at round 80 half the devices (fixed per
 seed) lose 98% of their bandwidth and 95% of their battery capacity; at
 round 140 they are restored. Every executed job's predicted success (for the
@@ -37,25 +38,29 @@ ROUNDS, SHOCK, RESTORE = 200, 80, 140
 PERIODS = (("before", 1, SHOCK), ("shock", SHOCK, RESTORE), ("after", RESTORE, ROUNDS + 1))
 
 
-def config(seed: int) -> dict:
+GROUPS = {"femnist": "s2_femnist", "cifar": "s2_cifar"}
+
+
+def config(seed: int, group: str = "s2_femnist", sets: tuple = ()) -> dict:
     import rl2lib
     from sweep import build_jobs
     with open(os.path.join(ROOT, "configs", "rl2_tuned.json")) as fh:
         tuned = json.load(fh)
-    src = rl2lib.source_group("configs/sweep_advanced.yaml", "s2_femnist")
+    src = rl2lib.source_group("configs/sweep_advanced.yaml", group)
     e = rl2lib.group_entry(src, {"data.split": "persistent"}, ROUNDS, [tuned["base"]], [seed])
     e["override"] = rl2lib.resolve(e, tuned["overrides"])
-    return build_jobs({"seeds": [seed], "sets": {}, "groups": {"g": e}}, None, None, "/tmp/afl_stress", [])[0]["raw"]
+    return build_jobs({"seeds": [seed], "sets": {}, "groups": {"g": e}}, None, None, "/tmp/afl_stress",
+                      list(sets))[0]["raw"]
 
 
 def episode(args) -> dict:
-    world, seed = args
+    world, seed, group, sets = args
     import numpy as np
     import torch
     torch.set_num_threads(2)
     from afl.config import Cfg
     from afl.engine import Experiment
-    exp = Experiment(Cfg.from_dict(config(seed)))
+    exp = Experiment(Cfg.from_dict(config(seed, group, sets)))
     env, pol = exp.env, exp.policy
     hit = np.random.default_rng([seed, 99]).permutation(env.N)[: env.N // 2]
     hit_set = set(int(i) for i in hit)
@@ -230,12 +235,18 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--jobs", type=int, default=3)
+    ap.add_argument("--dataset", choices=sorted(GROUPS), default="femnist")
+    ap.add_argument("--set", action="append", default=[], help="operational override, e.g. fl.device=auto")
     args = ap.parse_args()
+    import rl2lib
+    if rl2lib.non_operational(args.set):
+        raise SystemExit("--set may only be operational")
     import multiprocessing as mp
-    tasks = [(w, s) for w in ("stable", "shock") for s in SEEDS]
+    tasks = [(w, s, GROUPS[args.dataset], tuple(args.set)) for w in ("stable", "shock") for s in SEEDS]
     with ProcessPoolExecutor(args.jobs, mp_context=mp.get_context("spawn")) as pool:
         res = list(pool.map(episode, tasks))
     text, summary = report(res)
+    text = text.replace("real FEMNIST", f"real {'CIFAR-10' if args.dataset == 'cifar' else 'FEMNIST'}", 1)
     os.makedirs(args.out, exist_ok=True)
     with open(os.path.join(args.out, "report.md"), "w") as fh:
         fh.write(text)

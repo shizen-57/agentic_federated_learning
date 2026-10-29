@@ -6,8 +6,11 @@ configs/rl2_frozen.json by scripts/freeze_rl2.py (docs/RL2_CONFIRMATION.md).
 
 Primary: 8 paired, one-sided sign-flip tests (the final method better than
 the comparator), Holm-adjusted together at alpha 0.05 -- per dataset, P1
-equal-spend accuracy vs always-Light and vs the best baseline of screen C,
-P2 worst-10% client accuracy vs always-Light and vs the repaired original RL.
+equal-spend accuracy (eq5) and P2 equal-spend worst-10% client accuracy
+(w10b), each vs the tuned always-Light with MimiC and vs screen C's best
+tuned comparator on that endpoint. The report also discloses spend, cost
+curves, starvation, participation fairness, budget projections, pre-training
+cost and the secondary worlds (descriptive).
 A test supports superiority only if its Holm-adjusted p < alpha (its mean
 difference is then > 0). Secondary comparisons are descriptive, with
 unadjusted two-sided p. No verdict is printed unless the frozen manifest
@@ -100,7 +103,73 @@ def evaluate(frozen: dict, frozen_path: str, root: str) -> tuple[int, str, dict]
               "| dataset | comparison | endpoint | n | mean diff | p |", "|---|---|---|---|---|---|"]
     lines += [f"| {r['dataset']} | {r['a']} - {r['b']} | {r['endpoint']} | {r['n']} | {r['mean_diff']:+.4f} | "
               f"{r['p_two_sided']:.4f} |" for r in sec]
-    return 0, "\n".join(lines) + "\n", {"primary": res, "secondary": sec}
+    more, extra = disclosures(frozen, runs)
+    return 0, "\n".join(lines + more) + "\n", {"primary": res, "secondary": sec, **extra}
+
+
+def _med(v):
+    v = [x for x in v if x == x]
+    return st.median(v) if v else float("nan")
+
+
+def disclosures(frozen: dict, runs: dict) -> tuple[list[str], dict]:
+    """What the endpoints alone do not show (gap review A5, B6, B10, B3-B5):
+    actual spend and accuracy at common budgets, starvation, participation
+    fairness, how often the budget step changed jobs, the soft cost target,
+    pre-training cost, and the secondary worlds. Descriptive; medians over
+    seeds."""
+    import report_dev_screen as rep
+    import screen_c_rl2 as sc
+    L, out = ["", "## Resources, fairness and safety (descriptive)", "",
+              "Medians over seeds. Spend in simulated cost units; budget checkpoints show accuracy and "
+              "(actual spend) at the last round within each budget.", ""], {"disclosures": {}}
+    for d, conds in runs.items():
+        main = {c: r for c, r in conds.items() if not c.startswith("world:")}
+        L += [f"### {d}", "", "| condition | total spend | spend at eq5 | spend / soft target, 2nd half | "
+              "starved | never contributed | idle 50+ rounds | Jain | weak-client acc | jobs made lighter / "
+              "dropped by the budget step |", "|---|---|---|---|---|---|---|---|---|---|"]
+        for c, r in sorted(main.items()):
+            v = list(r.values())
+            inv = _med([m["inv"] for m in v]) or 1
+            L.append(f"| {c} | {_med([m['spend'] for m in v]):.0f} | {_med([m['spend_eq5'] for m in v]):.0f} | "
+                     f"{_med([m['spend_ratio_late'] for m in v]):.2f} | {sum(m['starved'] for m in v)}/{len(v)} | "
+                     f"{_med([m['n_never'] for m in v]):.0f} | {_med([m['n_gap50'] for m in v]):.0f} | "
+                     f"{_med([m['jain'] for m in v]):.3f} | {_med([m['acc_weak10'] for m in v]):.3f} | "
+                     f"{_med([m['budget_lighter'] for m in v]) / inv:.1%} / "
+                     f"{_med([m['budget_dropped'] for m in v]) / inv:.1%} |")
+        L += ["", "Accuracy at common budget checkpoints, median (median actual spend) [seeds that got there]:", "",
+              "| condition | " + " | ".join(f"B={b}" for b in rep.CHECKPOINTS) + " |",
+              "|---|" + "---|" * len(rep.CHECKPOINTS)]
+        for c, r in sorted(main.items()):
+            cells = []
+            for b in rep.CHECKPOINTS:
+                hits = [m["curve"][b] for m in r.values() if b in m["curve"]]
+                cells.append(f"{_med([h[0] for h in hits]):.3f} ({_med([h[1] for h in hits]):.0f}) [{len(hits)}]"
+                             if hits else "-")
+            L.append(f"| {c} | " + " | ".join(cells) + " |")
+        L.append("")
+    tuned = tuned_of(frozen)
+    L += ["Pre-training cost per checkpoint (practice episodes only; not inside the 1,400 budget):", ""]
+    import torch
+    for name, (path, _, _) in sc.checkpoints(frozen["spec"], tuned).items():
+        meta = torch.load(os.path.join(ROOT, path), map_location="cpu", weights_only=False).get("meta", {})
+        L.append(f"- {name}: {meta.get('practice_totals')}")
+        out["disclosures"][f"pretrain {name}"] = meta.get("practice_totals")
+    w = frozen["spec"].get("worlds")
+    if w:
+        L += ["", f"## Secondary worlds: final method minus the control ({w['control']}), "
+              f"seeds {w['seeds'][0]}-{w['seeds'][-1]}", "",
+              "| dataset | world | eq5 mean diff | wins | w10b mean diff | wins |", "|---|---|---|---|---|---|"]
+        for d, conds in runs.items():
+            for wname in w["settings"]:
+                a, b = conds[f"world:{wname}:final"], conds[f"world:{wname}:control"]
+                row = [f"| {d} | {wname} "]
+                for k in ("eq5", "w10b"):
+                    diff = [a[s][k] - b[s][k] for s in sorted(a) if s in b]
+                    row.append(f"| {st.mean(diff):+.4f} | {sum(x > 0 for x in diff)}/{len(diff)} ")
+                    out["disclosures"][f"world {d} {wname} {k}"] = st.mean(diff)
+                L.append("".join(row) + "|")
+    return L, out
 
 
 def main() -> int:

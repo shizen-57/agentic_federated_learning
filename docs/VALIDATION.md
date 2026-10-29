@@ -66,7 +66,8 @@ A controlled screen, everything else fixed, with the rule written first:
 
 `scripts/predictor_stress.py`, `results/predictor_stress/report.md`. The
 tuned method on real FEMNIST, 3 seeds, 200 rounds, in a stable world and a
-shocked one. In the shocked world, at round 80 half the devices lose 98% of
+shocked one. (The same test on CIFAR-10, gap review D3, runs on the GPU:
+`bash scripts/dept_gpu.sh stress cifar`.) In the shocked world, at round 80 half the devices lose 98% of
 their bandwidth and 95% of their battery; at round 140 they are restored.
 Every executed job's predicted success is compared with what happened.
 
@@ -130,8 +131,15 @@ method version and would need its own development screen first.
 ## 6. Resources compared precisely (finding 6)
 
 - The development endpoint stays `eq5`: mean accuracy over the last 5 rounds
-  within a cumulative cost of 1,400. The confirmation's endpoints are fixed
-  in the freeze and never change after its results are seen.
+  within a cumulative cost of 1,400. From the gap review on (A2), the
+  fairness endpoint is at equal spend too: `w10b`, worst-10% client accuracy
+  over the last 10 rounds within the same budget. The confirmation's
+  endpoints are fixed in the freeze and never change after its results are
+  seen.
+- The confirmation report discloses actual spend, accuracy at the common
+  budget checkpoints, starvation, participation fairness, budget projections
+  and pre-training cost (`scripts/prespec_rl2.py`, gap review A5; tested in
+  `tests/test_rl2_pipeline.py::test_prespec_verdicts_on_complete_evidence`).
 - **Actual spend is disclosed.** `scripts/cost_curves.py` gives accuracy at
   common budget checkpoints (500 to 2,000) with the actual spend at each, and
   draws accuracy against cumulative cost:
@@ -159,7 +167,7 @@ Run before any further confirmation sweep. Each row names its test.
 | everyone abstains (safety layer rules everyone out) | rounds run empty but are kept for PPO and counted as no-contribution rounds; once the rule lifts, clients are invited again | `...::test_everyone_abstains_then_recovers` |
 | every update fails / every update is rejected | nothing is aggregated, the global model is unchanged, values stay finite, the starvation measure sees it | `...::test_every_update_fails_or_is_rejected` |
 | a cap too tight for any job | every job dropped, no work, no cost, empty round kept | `...::test_a_cap_too_tight_for_any_job` |
-| tight budgets with mode changes | executed jobs fit the cap and the mask; calibration by executed mode | `...::test_select_project_learn_hold_together` |
+| tight budgets with mode changes | executed jobs fit the cap and the mask; calibration by executed mode; the jobs made lighter are counted | `...::test_select_project_learn_hold_together`, `test_gap_review.py::test_budget_step_counts_the_jobs_it_makes_lighter` |
 | sudden bandwidth and battery drop, then recovery | the hit clients' success falls; after recovery most of them are invited again (real jobs only, not the oracle's what-ifs) and succeed again | `...::test_sudden_bandwidth_and_battery_drop_and_recovery` |
 | interrupted run, resumed | a damaged or partial result is re-run, a valid one is kept, an original is never overwritten | `test_resume_validation.py` |
 | interrupted pre-training, resumed | the same checkpoint as without the interruption | `test_pretrain.py::test_an_interrupted_pretraining_resumes_to_the_same_checkpoint` |
@@ -167,23 +175,14 @@ Run before any further confirmation sweep. Each row names its test.
 | checkpoint compatibility | a checkpoint from other code, data or method is refused | `test_pretrain.py::test_foreign_checkpoints_are_refused`, `scripts/screen_c_rl2.py` (`checkpoint_problem`) |
 
 **Short real-data checks on CPU and GPU** (`scripts/check_devices.py`):
-FEMNIST and CIFAR-10, the tuned method and always-Light, seed 900, 30 rounds,
-on the development pool. Records last-10 accuracy, worst-10%, successes,
-invitations, cost and the share of heavy jobs. `--compare` flags a material
-difference: accuracy by more than 0.03, or successes or cost by more than
-15%. Small differences are expected (GPU arithmetic is not bit-identical to
-CPU). The CPU result is `results/devicecheck/cpu.json`; the GPU one comes from
-`bash scripts/dept_gpu.sh devicecheck`.
-
-CPU result (here, torch 2.14, 30 rounds; short runs, so accuracy is still
-low):
-
-| run | last-10 acc | worst-10% | successes / invited | cost | heavy share |
-|---|---|---|---|---|---|
-| FEMNIST tuned | 0.464 | 0.212 | 156 / 300 | 278 | 0.17 |
-| FEMNIST always-Light | 0.465 | 0.208 | 182 / 300 | 214 | 0 |
-| CIFAR-10 tuned | 0.269 | 0.087 | 149 / 300 | 284 | 0.19 |
-| CIFAR-10 always-Light | 0.233 | 0.050 | 213 / 300 | 197 | 0 |
-
-The GPU run is compared with `python scripts/check_devices.py --compare
+FEMNIST and CIFAR-10, the tuned method and always-Light, seeds 900-902,
+60 rounds, on the development pool (gap review D2: the first version, one
+seed and 30 rounds, could only show a gross difference). Records last-10
+accuracy, worst-10%, successes, invitations, cost and the share of heavy
+jobs. `--compare` averages over the seeds and flags a material difference:
+accuracy by more than 0.03, or successes or cost by more than 15%. Small
+differences are expected (GPU arithmetic is not bit-identical to CPU). The
+CPU result is `results/devicecheck/cpu.json` (made on the current code; see
+its `code_hash`); the GPU one comes from `bash scripts/dept_gpu.sh
+devicecheck`, then `python scripts/check_devices.py --compare
 results/devicecheck/cpu.json <gpu.json>`.

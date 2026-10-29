@@ -3,6 +3,11 @@
 Written before any run (fourth external review, finding 3). Spec:
 `configs/rl2_arl_screen.yaml`. Runner: `scripts/screen_rl2.py`.
 
+**Version 2 (gap review, 2026-10-29, still before any run):** both
+endpoints at equal spend (`eq5` and `w10b`; A2); the screen runs on the tuned
+settings after the cost check (`configs/rl2_tuned_cost.json`; A3); and the
+route of an ARL win into the final method is fixed below (A4).
+
 ## Why
 
 The thesis is about a contribution-aware reward (ARL). But the method that M7
@@ -12,11 +17,12 @@ take the tuned method and change **only** the damage term.
 
 ## Design
 
-- Base: the tuned method (`configs/rl2_tuned.json`, c34), from scratch (no
+- Base: the tuned method after the cost check (`configs/rl2_tuned_cost.json`:
+  c34, plus the cost variant the check adopts, if any), from scratch (no
   pre-training, as in M7), on the persistent split and the **development**
   pool (`data.eval_pool: dev`). The confirmation pool is never touched.
 - Three arms, everything else identical:
-  - `plain`: the failure count (`raw_fail`, no per-client credit) = c34 itself;
+  - `plain`: the failure count (`raw_fail`, no per-client credit) = the base itself;
   - `arl3`: ARL-v3 (lost work, Shapley share) with per-client credit;
   - `arl4`: ARL-v4 (set-level, within the cost constraint) with per-client credit.
 - Datasets: FEMNIST and CIFAR-10. Seeds 250-269 (20, development, never used).
@@ -36,8 +42,8 @@ budget.
 - Evidence first: every run present, one code version, clean checkout,
   recorded hashes (`rl2lib.check_evidence`). Otherwise no decision.
 - Per dataset, each ARL arm minus `plain`, paired by seed, on the two
-  development endpoints `eq5` (accuracy at equal spend) and `w10` (worst-10%
-  clients). Two-sided paired sign-flip test; Holm over all 8 tests
+  development endpoints, both at equal spend: `eq5` (accuracy) and `w10b`
+  (worst-10% client accuracy over the last 10 rounds within the budget). Two-sided paired sign-flip test; Holm over all 8 tests
   (2 arms x 2 endpoints x 2 datasets) at alpha 0.05; 95% bootstrap interval of
   the mean difference.
 - Verdict per ARL version:
@@ -46,9 +52,12 @@ budget.
   - **makes it worse**: significantly worse somewhere, better nowhere;
   - **mixed**: both;
   - **no evidence that it adds value**: neither.
-- What follows:
-  - If an ARL version adds value, it stays in the method and screen C's
-    final method is re-examined with it before any freeze.
+- What follows (the route, gap review A4):
+  - If an ARL version adds value, `scripts/finalize_tuned.py arl` writes it
+    into `configs/rl2_tuned_final.json` (if both do, the one with the larger
+    mean equal-spend score gain). Screen C and the sensitivity screen use
+    that file, so it becomes the final method; screen C's ARL contrast
+    (with ARL-v4 minus without) is still reported.
   - Otherwise ARL is **not** part of the final method. The thesis then reports
     honestly that the contribution-aware reward did not improve the tuned
     scheduler in this setting, and the claim rests on the other components.
@@ -78,7 +87,13 @@ With equal tuning effort, the failure count is still ahead, by 0.005 (v4) and
 are within the spread of the top candidates, so this is weak evidence in either
 direction. That is why the controlled screen above is needed.
 
+## Order
+
+Cost check first (`docs/RL2_COST_AND_CIFAR_CHECKS.md`), then this screen,
+then `python scripts/finalize_tuned.py arl --spec configs/rl2_arl_screen.yaml
+--out <run folder>`, then the sensitivity screen and screen C.
+
 ## Outcome
 
-Not run yet. To run on the department GPU:
-`bash scripts/dept_gpu.sh screen2 configs/rl2_arl_screen.yaml`.
+Not run yet. To run on the department GPU (after the cost check's file is
+committed): `bash scripts/dept_gpu.sh screen2 configs/rl2_arl_screen.yaml`.

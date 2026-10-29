@@ -25,6 +25,27 @@ system heterogeneity, the simulator models all four:
 | Clients per round K | 10 | assumed (typical) |
 | Rounds | 200 | assumed |
 
+**Per-client test examples (gap review B7).** FEMNIST holds out 10% of each
+chosen writer's examples (15-40, median 18) and 70% of those are test
+examples: a median of about 13 per client. A client's accuracy is therefore
+coarse (steps of about 8 points), and the worst-10% measure (the mean of the
+10 lowest of 100 clients) is noisy. Comparisons are paired (same clients,
+same examples, per seed), which removes most of that noise from the
+differences. CIFAR-10 clients have no held-out examples of their own; their
+accuracy is the per-class accuracy weighted by their label mix
+(`engine._client_metrics`).
+
+**How far apart the data roles are (gap review B9).** FEMNIST's practice,
+development and confirmation clients are different people (writers). On
+CIFAR-10 there are no people: every run draws its 100 clients' data from the
+same 50,000 training images (a Dirichlet split per seed), and the reward's
+validation images are shared by every run; only the test images are split
+into development and confirmation. So on CIFAR-10 the separation is weaker:
+the scheduler has trained on episodes made of the same training images it
+later meets. The scheduler sees device, availability and coverage
+features, not images, so what it could carry over is small, but the thesis
+states it.
+
 ## Devices
 
 Three tiers (slow / mid / fast) with probabilities 0.35 / 0.40 / 0.25.
@@ -103,6 +124,25 @@ n_i = the client's examples, rescaled so their mean is 500 (`work_ref_samples`).
   - A dropped job runs nothing, costs nothing and trains nothing
     (`tests/test_validation_matrix.py`).
 
+## What the scheduler knows (gap review B11)
+
+Every policy sees each device's speed and bandwidth with only 15% noise
+(`speed_hat`, `bw_hat`), the battery level, an availability hint, and its
+history. The server-side time estimate (`policies/base.est_time`) uses the
+simulator's own time formula, without the hidden per-round jitter and
+channel noise. A real server would know much less about the time function.
+Feasibility therefore looks easier here than in practice. Every method gets
+the same information, so the comparison stays fair, but absolute success
+rates are likely optimistic.
+
+**Communication time (gap review D4).** Upload bytes per mode were checked
+against the real model (`results/simulator_checks/timing.md`). Upload *time*
+is modelled (0.25 x f / b x channel noise) and not measured: it depends on
+real networks, which this project does not have. With
+`system.device_trace: fedscale` the bandwidths come from FedScale's measured
+phones; the sensitivity screen and the confirmation's secondary worlds use
+that setting.
+
 ## What is not calibrated (stated in the thesis)
 
 - The energy model and the battery values.
@@ -112,5 +152,7 @@ n_i = the client's examples, rescaled so their mean is 500 (`work_ref_samples`).
 - What a round means in clock time.
 
 The sensitivity screen (`configs/rl2_sensitivity.yaml`) varies deadline,
-availability, battery and bandwidth one at a time, so that no conclusion
-rests on one chosen setting.
+availability, battery and bandwidth one at a time, swaps the device tiers for
+the measured FedScale trace, and changes the scenario (random weak clients,
+no weak clients, churn), so that no conclusion rests on one chosen setting.
+The confirmation repeats the last two as secondary worlds.

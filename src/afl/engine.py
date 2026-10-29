@@ -31,17 +31,21 @@ from .sim import ClientEnv
 from .diagnostics import DiagWriter, norm_state
 
 LOG_FIELDS = [
-    "round", "accuracy", "accuracy_fixed", "eval_fixed_n", "acc_worst10", "test_loss", "reward", "cost", "latency",
+    "round", "accuracy", "accuracy_fixed", "eval_fixed_n", "acc_worst10", "test_loss", "reward", "cost",
+    "cost_ref", "latency",
     "n_selected", "n_success", "fail_ratio", "empty_round", "n_online", "n_abstain", "n_light_override",
     "arl_online", "arl_selected", "arl_oracle",
     "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
     "mode_priority", "weak_selected", "weak_success", "late_delivered",
-    "budget_dropped", "debt_mean", "arl_v2", "departed",
+    "budget_dropped", "budget_lighter", "debt_mean", "arl_v2", "departed",
     "arl_v3_loss", "arl_v3_gain", "arl_v4_loss", "arl_v4_deficit",
     # protocol-fix diagnostics (docs/ADVANCED_RESULTS.md, "Protocol fix")
     "val_accuracy", "acc_client_worst10", "acc_client_weak", "cov_lost", "cov_lost_avoid",
     "gap_max_all", "gap_max_weak", "ece_light", "ece_standard", "ece_priority",
     "ece_weak", "ece_strong", "gate_filled", "acc_labelmix_worst10", "acc_client_measured",
+    # participation fairness (gap review B6): clients with no successful
+    # contribution yet, and clients whose current gap is 50+ rounds
+    "n_never", "n_gap50",
     "wall_s",
 ]
 
@@ -526,6 +530,8 @@ class Experiment:
             "gap_max_weak": float(self.gap_max[weak].mean()) if weak.any() else 0.0,
             "ece_weak": ece(wk) if len(P) else 0.0,
             "ece_strong": ece(~wk) if len(P) else 0.0,
+            "n_never": int((self.x_succ == 0).sum()),
+            "n_gap50": int((self.gap_cur >= 50).sum()),
         }
         for m in self.cfg.system.modes:
             out[f"ece_{m}"] = ece(modes == m) if len(P) else 0.0
@@ -534,7 +540,8 @@ class Experiment:
     def _practice_metrics(self) -> dict:
         """Practice episodes measure nothing on the test set: NaN placeholders."""
         keys = ["acc_client_worst10", "acc_labelmix_worst10", "acc_client_measured",
-                "acc_client_weak", "gap_max_all", "gap_max_weak", "ece_weak", "ece_strong"]
+                "acc_client_weak", "gap_max_all", "gap_max_weak", "ece_weak", "ece_strong",
+                "n_never", "n_gap50"]
         keys += [f"ece_{m}" for m in self.cfg.system.modes]
         return {k: float("nan") for k in keys}
 
@@ -616,8 +623,12 @@ class Experiment:
         # Lagrangian target only steers the average.
         cap = (self.cfg.policy.hard_budget_mult * state["cost_ref"]
                if self.cfg.policy.hard_budget_mult > 0 else None)
+        proposed = dict(assign)
         selected, assign, budget_dropped = self._enforce_budget(
             selected, assign, state, fracs, cap, getattr(self.policy, "allowed_modes", None))
+        # jobs the budget step made lighter (an action projection: a learning
+        # policy still learns from what it sampled; gap review B10)
+        budget_lighter = sum(1 for i in selected if assign[i] != proposed.get(i, assign[i]))
         self._refresh_losses(selected)
 
         # V^repr_{i,t}(S_t) for every client (Eq. 3.26), not only the selected
@@ -1084,7 +1095,10 @@ class Experiment:
             "round": t, "accuracy": acc, "acc_worst10": acc_worst,
             "accuracy_fixed": acc_fixed, "eval_fixed_n": eval_fixed_n,
             "test_loss": test_loss, "reward": reward,
-            "cost": round_cost, "latency": latency,
+            "cost": round_cost,
+            # K x mean Light cost: the scale of SAFE-PPO's spend target and cap,
+            # logged so a report can check the target (gap review A3)
+            "cost_ref": float(state["cost_ref"]), "latency": latency,
             "n_selected": len(selected), "n_success": n_succ,
             "fail_ratio": fail_ratio, "empty_round": int(not selected),
             # clients reachable this round: a round with nobody online is not a
@@ -1104,7 +1118,7 @@ class Experiment:
             "weak_selected": int(sum(weak[i] for i in selected)),
             "weak_success": int(sum(weak[i] and success[i] for i in selected)),
             "late_delivered": late_delivered,
-            "budget_dropped": budget_dropped,
+            "budget_dropped": budget_dropped, "budget_lighter": budget_lighter,
             "debt_mean": float(self.debt.mean()),
             "arl_v2": arl_v2,
             "departed": int(self.env.departed.sum()),

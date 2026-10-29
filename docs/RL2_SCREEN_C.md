@@ -14,9 +14,20 @@ on the new code, which evaluates on the development pool; only that run's
 `DECISION.json` can feed the freeze (`scripts/freeze_rl2.py` checks it). It
 runs after the ARL screen, so that screen's verdict is known first.
 
-**Methods** (each = M7's tuned settings, `configs/rl2_tuned.json`, with the
-following on top; a method whose full config equals an earlier one is run
-once):
+**Version 2 (gap review, 2026-10-29, before any new-code run).** The
+rule below replaces version 1 (which is in the git history):
+- the method is M7's c34 **plus the cost-check and ARL-screen verdicts**
+  (`configs/rl2_tuned_final.json`; A3, A4);
+- every comparator aggregates like the method (**MimiC**; REFL keeps its own
+  published aggregation) and has been **tuned with the same budget** as the
+  method (`docs/RL2_BASELINE_TUNING.md`; A1, A7, B1);
+- both endpoints are at **equal spend** (`eq5`, `w10b`; A2);
+- P2's second comparator is the best tuned comparator **on fairness**, as
+  P1's is on accuracy (A6).
+
+**Methods** (each = the tuned settings in `configs/rl2_tuned_final.json`,
+with the following on top; a method whose full config equals an earlier one
+is run once):
 
 - `tuned`: the tuned settings as they are;
 - `tuned_arl4`: with ARL-v4 as the damage term;
@@ -32,38 +43,46 @@ an interruption, again with an identical result. Practice seeds only (FEMNIST
 rewards from the validation pool, and the test set never evaluated. A
 checkpoint is accepted only if it was made by this simulator code, from
 practice episodes, for exactly that method, condition and data group.
-Practice cost is recorded and reported next to deployment cost.
+Practice cost is recorded and reported next to deployment cost. Pre-training
+does not need the tuned comparators, so it can run while they are tuned.
 
-**Runs** (both datasets, s2 settings, persistent split, 200 rounds, dev seeds
-240-249):
+**Runs** (both datasets, s2 settings, persistent split, development pool,
+200 rounds, dev seeds 240-249):
 
 - each method pre-trained (`<method>_pt`) and `tuned` from scratch
   (`tuned_scratch`);
-- references: `rl_light`, `rl_light_mimic` (always Light with MimiC, so a
-  MimiC gain is not credited to RL), `arl3_full_pg` (the repaired original
-  RL), `v2_rawfail`, `b_oort_ew`, `b_refl_ew`, `b_favor_ew`, `b_delta_ew`,
-  `b_cov_ew`.
+- the control `rl_light_mimic_tuned` (always Light, MimiC, tuned);
+- the tuned comparators: `arl3_full_pg_mimic_tuned` (the repaired original
+  RL), `b_oort_ew_mimic_tuned`, `b_refl_ew_tuned`, `b_favor_ew_mimic_tuned`,
+  `b_delta_ew_mimic_tuned`, `b_cov_ew_mimic_tuned`, `b_fairq_ew_mimic_tuned`
+  (fairness queues, after RBCS-F);
+- `rl_light` (untuned, FedProx), to show how much of a gain is MimiC's own.
 
-**Measures:** as in M7 (`eq5`, `w10`, score = their mean, starvation).
+**Measures:** `eq5`, `w10b` (worst-10% client accuracy over the last 10
+rounds within the same 1,400 budget), score_eq = their mean, starvation; also
+reported: `w10` over the whole run, spend, clients who never contributed,
+Jain's index.
 
 **Rule:**
 
 1. Evidence first: every run and checkpoint checked, as in M7, plus every
    pre-trained run must have started from its method's checkpoint (by
-   SHA-256). Anything missing or invalid: INCOMPLETE, no decision.
+   SHA-256), and every tuned comparator's settings file must match its
+   recorded hash. Anything missing or invalid: INCOMPLETE, no decision.
 2. Final method: `tuned` pre-trained if, over all dataset-seed pairs, the
-   median paired score difference (pre-trained minus scratch) is >= 0;
+   median paired score_eq difference (pre-trained minus scratch) is >= 0;
    otherwise `tuned` from scratch. Pre-training must not make it worse.
-3. Best baseline for P1: the reference other than `rl_light` with the
-   highest median `eq5` (mean of the two datasets' medians).
+3. P1's second comparator: the tuned comparator (not the control) with the
+   highest median `eq5` (mean of the two datasets' medians). P2's second
+   comparator: the same on `w10b`.
 4. The confirmation's primary tests are then fixed. Per dataset:
-   - P1 (`eq5`): final vs `rl_light`, and final vs the best baseline;
-   - P2 (`w10`): final vs `rl_light`, and final vs `arl3_full_pg`.
+   - P1 (`eq5`): final vs the control, and final vs P1's comparator;
+   - P2 (`w10b`): final vs the control, and final vs P2's comparator.
 
    Screen C only estimates their mean paired difference and spread, for the
    power analysis (M9). It runs no test.
 5. Reported, no decision: everything against everything (median paired), the
-   ARL contrast (with minus without ARL-v4, pre-trained), the MimiC control,
-   and pre-training cost.
+   ARL contrast (with minus without ARL-v4, pre-trained), MimiC's own share
+   (`rl_light`), and pre-training cost.
 
 Writes `DECISION.json` (used by `scripts/freeze_rl2.py`) and `report.md`.

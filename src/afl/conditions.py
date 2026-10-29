@@ -228,6 +228,17 @@ CONDITIONS.update({
                                  policy__pred_decay=0.98),
 })
 
+# Gap review (docs/GAP_REVIEW.md, A1 and C5). The tuned method aggregates with
+# MimiC, so every comparator gets a MimiC version: a comparison then differs
+# in the scheduler only. REFL keeps its own staleness-aware aggregation, which
+# is part of the published method. b_fairq_ew: a published-style
+# fairness-guaranteed selection (Lyapunov queues, after RBCS-F).
+CONDITIONS["b_fairq_ew"] = {"policy.name": "fairq", "fl.aggregator": "fedprox",
+                            "policy.mode_rule": "expected_work"}
+CONDITIONS.update({f"{c}_mimic": _variant(c, fl__aggregator="mimic")
+                   for c in ("arl3_full_pg", "v2_rawfail", "b_oort_ew", "b_favor_ew", "b_delta_ew",
+                             "b_cov_ew", "b_fairq_ew")})
+
 
 def apply(raw: dict, overrides: dict) -> dict:
     """Apply dotted-key overrides to a nested config dict, in place."""

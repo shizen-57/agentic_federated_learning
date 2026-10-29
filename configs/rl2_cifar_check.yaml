@@ -1,0 +1,24 @@
+# RL2 CIFAR-10 check of M7's tuning (gap review B2): M7 tuned on FEMNIST only.
+# Its top 5 candidates and the untuned base c00, on CIFAR-10. Nothing is
+# re-selected (the comparators are also tuned on FEMNIST only); the verdict
+# is reported in the thesis. Rule: the `rule` block, written before any run.
+# Runner: scripts/screen_rl2.py.
+version: 1
+title: RL2 CIFAR-10 check of the FEMNIST tuning
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+datasets: {cifar: s2_cifar}
+tuned: configs/rl2_tuned.json          # only its base condition is used here
+candidates_from: results/rl2_tune/configs.json
+set: {data.split: persistent}
+rounds: 200
+seeds: [285, 286, 287, 288, 289]
+arms:
+  c00: {candidate: c00}
+  c17: {candidate: c17}
+  c20: {candidate: c20}
+  c32: {candidate: c32}
+  c33: {candidate: c33}
+  c34: {candidate: c34}
+rule: {kind: transfer, selected: c34, base_candidate: c00}
+out: results/rl2_cifar_check

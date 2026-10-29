@@ -68,6 +68,12 @@ the final method.**
 - Fix: choose P2's second comparator in screen C as the best baseline on
   `w10` (by the same rule as P1's), or add it.
 
+**A7. (found while fixing A1-A6) The baselines used the original success
+predictor.** Every `_ew` baseline's gate and mode rule read the original
+predictor (v1), which the diagnosis found faulty; our method uses the
+repaired one (v2 + Thompson gate + evidence ageing).
+- Fix: the comparators' matched tuning may choose either predictor (B1).
+
 ## B. Validity gaps worth closing (or stating as limitations)
 
 **B1. Unequal tuning effort.** SAFE-PPO had a 40-candidate random search
@@ -174,3 +180,34 @@ method, so the comparison stays fair).
 2. Before the screen C re-run: A1 (matched aggregators), A2, A3, A6.
 3. Before the freeze: A5, B4, B6, B8.
 4. Thesis: C1-C5 and the stated limitations (B1-B3, B7, B9-B11).
+
+## Status: what was done (2026-10-29)
+
+Everything below is built and tested; the items marked GPU still need runs
+on the department GPU (`memory.md` has the order and the commands).
+
+| gap | what was done |
+|---|---|
+| A1 | MimiC versions of every comparator (`*_mimic` in `src/afl/conditions.py`); screen C, the freeze and the sensitivity screen use them; `rl_light` (FedProx) stays only to show MimiC's own share |
+| A2 | new endpoint `w10b` (worst-10% client accuracy over the last 10 rounds within the 1,400 budget) for P2, the screens and screen C's score (`rl2lib.score_eq`); M7's own score is unchanged |
+| A3 | the spend target is logged (`cost_ref`) and reported; a pre-registered cost check (`configs/rl2_cost_check.yaml`, `docs/RL2_COST_AND_CIFAR_CHECKS.md`) decides whether a tighter variant replaces the base (GPU) |
+| A4 | `scripts/finalize_tuned.py` carries the cost-check and ARL-screen verdicts into `configs/rl2_tuned_final.json`, which screen C and the sensitivity screen use; the order is enforced (a missing file stops the runner) |
+| A5 | `scripts/prespec_rl2.py` now discloses spend, cost curves, starvation, participation fairness, budget projections, pre-training cost and the secondary worlds |
+| A6 | P2's second comparator is the best tuned comparator on `w10b`, as P1's is on `eq5` |
+| A7 | the matched tuning may give each comparator the repaired predictor |
+| B1 | matched tuning of 8 comparators, same budget, seeds and rule as M7 (`configs/rl2_tune_*.yaml`, `docs/RL2_BASELINE_TUNING.md`); screen C refuses to run without the results (GPU) |
+| B2 | CIFAR-10 check of M7's top 5 (`configs/rl2_cifar_check.yaml`) (GPU) |
+| B3, B4 | the confirmation adds four secondary worlds (FedScale devices, random weak, no weak, churn) for the final method, pre-trained in the usual world, against the control |
+| B5 | the sensitivity screen adds the FedScale device trace and the three scenarios |
+| B6 | new log columns `n_never`, `n_gap50`; reported with Jain's index, weak-client accuracy and the longest gaps |
+| B7 | stated in `docs/SIMULATOR_MODEL.md` (about 13 test examples per FEMNIST client) |
+| B8 | the power analysis uses the 80% upper confidence limit of the spread (`freeze_rl2.sd_upper`) |
+| B9, B11, D4 | stated in `docs/SIMULATOR_MODEL.md` |
+| B10 | new log column `budget_lighter`; projection rates reported |
+| C1, C2 | `docs/RL2_METHOD.md`: the method as implemented, the reward, and exactly which parts are contribution-aware |
+| C3 | `scripts/plot_rl2.py` (primary comparisons, per-seed differences, cost curves, worlds); the chapters themselves are the student's to write |
+| C4 | README section "Where the project stands (RL2)" |
+| C5 | `policy.name: fairq`: fairness-guaranteed selection with Lyapunov queues, after RBCS-F (Huang et al., IEEE TPDS 2021), tuned like the others |
+| D1 | this session may push only the working branch, so the tag could not be pushed; the validator falls back to the commit, which is on GitHub; the commands to push it from your own computer are in `memory.md` |
+| D2 | the device check now uses seeds 900-902 and 60 rounds and compares seed averages |
+| D3 | `scripts/predictor_stress.py --dataset cifar`, GPU step `stress cifar` (GPU) |

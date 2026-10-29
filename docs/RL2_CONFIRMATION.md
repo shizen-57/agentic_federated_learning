@@ -53,8 +53,10 @@ records them in `configs/rl2_frozen.json`.
 - Seeds: confirmation seeds from 300 upward, never run before. Their number
   comes from a power analysis on screen C's paired spread: n = ((z_{1-0.05/8}
   + z_0.8) x sd / delta)^2 per primary test, with delta = 0.01 for P1 and
-  0.02 for P2. The largest n is used, kept between 20 and 100. If a test would
-  need more than 100 seeds, its power is lower and the report says so.
+  0.02 for P2. The spread used is its 80% upper confidence limit (screen C
+  has only 10 seeds, so its spread is itself uncertain; gap review B8). The
+  largest n is used, kept between 20 and 100. If a test would need more than
+  100 seeds, its power is lower and the report says so.
 - `configs/rl2_frozen.json`'s SHA-256 and the code hash are written into
   `scripts/prespec_rl2.py` together. A freeze is never redone to admit new
   code or results (the same rule as s2).
@@ -78,18 +80,29 @@ Then:
 **Tests (`scripts/prespec_rl2.py`):**
 
 - Primary: 8 tests. Per dataset (FEMNIST, CIFAR-10):
-  - P1, accuracy at equal spend (`eq5`): final method vs always-Light, and vs
-    screen C's best baseline;
-  - P2, weakest clients (`w10`): final method vs always-Light, and vs the
-    repaired original RL (`arl3_full_pg`).
+  - P1, accuracy at equal spend (`eq5`): final method vs the control
+    (always-Light with MimiC, tuned), and vs screen C's best tuned
+    comparator on `eq5`;
+  - P2, weakest clients at equal spend (`w10b`): final method vs the
+    control, and vs screen C's best tuned comparator on `w10b`.
+  - Every comparator aggregates like the final method (MimiC; REFL keeps its
+    own published aggregation) and had the same tuning budget (gap review
+    A1, A6, B1).
 - Each test is a paired sign-flip test on the per-seed difference, one-sided
   (final better): exact for n <= 20, otherwise Monte Carlo with 200,000 draws
   and a fixed seed.
 - Holm-adjusted together at alpha 0.05. A test supports superiority only if
   its Holm-adjusted p < 0.05.
 - Secondary, descriptive with unadjusted two-sided p:
-  - the final method vs the other RL2 versions and `rl_light_mimic`;
+  - the final method vs the other RL2 versions and `rl_light` (FedProx: how
+    much is MimiC's own share), on `eq5`, `w10b`, `w10` and `acc10`;
+  - the final method vs each primary comparator on `w10` (fairness over the
+    whole run, whatever was spent);
   - the ARL contrast (with minus without ARL-v4).
+- Secondary worlds (gap review B3-B5), descriptive, on the first 20
+  confirmation seeds: the final method (pre-trained in the usual world, if
+  it is pre-trained) minus the control, in four other worlds: measured
+  FedScale devices, random weak clients, no weak clients, churn.
 - No verdict unless the frozen manifest matches its pins and every run is
   complete and valid. Every result is reported, supported or not.
 
@@ -97,10 +110,16 @@ Then:
 
 - `eq5`: mean fixed-set accuracy over the last 5 rounds whose cumulative cost
   is <= 1,400;
-- `w10`: mean worst-10% client accuracy over the last 10 rounds.
+- `w10b`: mean worst-10% client accuracy over the last 10 rounds whose
+  cumulative cost is <= 1,400 (P2 at equal spend; gap review A2);
+- `w10` (secondary): the same over the last 10 rounds of the run.
 
 The endpoints are fixed here and never change after confirmation results are
-seen. Next to them, the report discloses the actual spend of each method and
-accuracy at common budget checkpoints (`scripts/cost_curves.py`; fourth review,
-finding 6). Pre-training cost is reported separately, next to deployment cost,
-not inside the 1,400 budget.
+seen. Next to them, `scripts/prespec_rl2.py` discloses, per condition
+(gap review A5, B6, B10): total spend and the spend at `eq5`; accuracy and
+actual spend at common budget checkpoints (500 to 2,000); spend against the
+soft target in the second half; starved seeds; clients who never
+contributed and clients idle for 50+ rounds; Jain's index; weak-client
+accuracy; how often the budget step made jobs lighter or dropped them; and
+each checkpoint's pre-training cost, reported separately, not inside the
+1,400 budget. Figures: `scripts/plot_rl2.py`.

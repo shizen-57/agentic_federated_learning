@@ -334,12 +334,19 @@ class PolicyCfg:
     oort_estimated_time: bool = False   # simulator fix: Oort's deadline penalty uses the
                                         # round time estimated from observed speed and
                                         # bandwidth, not this round's true time
+    oort_eps: float = 0.2               # Oort: share of the K slots given to exploration
+    oort_alpha: float = 2.0             # Oort: exponent of the deadline penalty
+    # Lyapunov fairness queues after RBCS-F (Huang et al., IEEE TPDS 2021;
+    # policies/published.py FairQueuePolicy)
+    fairq_beta: float = 0.05            # long-term selection rate promised to every client
+    fairq_v: float = 1.0                # weight of efficiency against the fairness queues
     # FAVOR (Wang et al., INFOCOM 2020)
     favor_target: float = 0.0           # target accuracy Omega; 0 = the paper's value
                                         # for the dataset (see FAVORPolicy)
     favor_pca: int = 100                # PCA dimensions per model
     favor_hidden: int = 512
     favor_gamma: float = 0.9
+    favor_lr: float = 1e-3              # Adam step of FAVOR's Q-network
     # DELTA (Wang et al., NeurIPS 2023)
     delta_alpha: float = 0.5            # alpha_1 = alpha_2 (the paper's default)
     # REFL (Abdelmoniem et al., EuroSys 2023)

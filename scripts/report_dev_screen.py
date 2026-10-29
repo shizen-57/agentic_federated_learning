@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 STARVE = 50          # rounds in a row with no successful contribution (see measures)
 BUDGET = 1400.0      # simulated cost units, fixed before the runs
+CHECKPOINTS = (500, 800, 1100, 1400, 1700, 2000)   # common budgets for the cost curves
 NAN = float("nan")
 
 
@@ -67,13 +68,26 @@ def measures(path: str) -> dict:
     spend = 0.0
     at_budget = None
     within = []                       # fixed-set accuracy of every round within the budget
+    within_w = []                     # worst-10% client accuracy of those rounds
     for r in rows:
         if spend + f(r, "cost") <= BUDGET:
             spend += f(r, "cost")
             at_budget = (f(r, "accuracy_fixed"), int(f(r, "round")))
             within.append(f(r, "accuracy_fixed"))
+            if "acc_client_worst10" in r:
+                within_w.append(f(r, "acc_client_worst10"))
         else:
             spend = float("inf")
+    # accuracy and actual spend at the last round within each common budget
+    # (gap review A5: the cost curves next to the endpoints)
+    cum, curve = 0.0, {}
+    for r in rows:
+        cum += f(r, "cost")
+        for b in CHECKPOINTS:
+            if cum <= b:
+                curve[b] = (f(r, "accuracy_fixed"), cum)
+    last = rows[-1] if rows else {}
+    has = lambda k: k in last and last[k] not in ("", None)  # noqa: E731
     tail = lambda k, n: (sum(f(r, k) for r in rows[-n:]) / len(rows[-n:])  # noqa: E731
                          if rows and k in rows[-1] else NAN)
     inv = sum(f(r, "n_selected") for r in rows)
@@ -91,7 +105,34 @@ def measures(path: str) -> dict:
             # decide a last-round value): equal spend = mean of the last 5
             # rounds within the budget; final = mean of the last 10 rounds
             "eq5": sum(within[-5:]) / len(within[-5:]) if within else NAN,
-            "acc10": tail("accuracy", 10), "w10": tail("acc_client_worst10", 10)}
+            "acc10": tail("accuracy", 10), "w10": tail("acc_client_worst10", 10),
+            # P2 at equal spend (gap review A2): worst-10% client accuracy over
+            # the last 10 rounds within the same budget as eq5
+            "w10b": sum(within_w[-10:]) / len(within_w[-10:]) if within_w else NAN,
+            "spend_eq5": None if not within else spend_at(rows, len(within)),
+            "curve": curve,
+            # participation fairness and projections (gap review B6, B10), at the end
+            "jain": f(last, "jain") if has("jain") else NAN,
+            "cv": f(last, "cv") if has("cv") else NAN,
+            "n_never": f(last, "n_never") if has("n_never") else NAN,
+            "n_gap50": f(last, "n_gap50") if has("n_gap50") else NAN,
+            "acc_weak10": tail("acc_client_weak", 10),
+            "gap_max_weak": f(last, "gap_max_weak") if has("gap_max_weak") else NAN,
+            # spend per round in the second half, relative to K x mean Light cost
+            "spend_ratio_late": (sum(f(r, "cost") for r in rows[len(rows) // 2:])
+                                 / max(len(rows) - len(rows) // 2, 1) / f(last, "cost_ref")
+                                 if has("cost_ref") and f(last, "cost_ref") > 0 else NAN),
+            "budget_dropped": sum(f(r, "budget_dropped") for r in rows) if has("budget_dropped") else NAN,
+            "budget_lighter": sum(f(r, "budget_lighter") for r in rows) if has("budget_lighter") else NAN}
+
+
+def spend_at(rows: list[dict], k: int) -> float:
+    """Mean cumulative spend over the last 5 of the first k rounds (eq5's rounds)."""
+    cum, out = 0.0, []
+    for r in rows[:k]:
+        cum += float(r["cost"])
+        out.append(cum)
+    return sum(out[-5:]) / len(out[-5:])
 
 
 def validate(spec: dict, variant_dir: str, spec_path: str) -> tuple[list[str], list[dict], list[str]]:
