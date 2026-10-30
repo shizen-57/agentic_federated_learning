@@ -1,0 +1,120 @@
+{
+ "c00": {},
+ "c01": {
+  "policy.delta_alpha": 0.25,
+  "policy.elig_threshold": 0.4,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "c02": {
+  "policy.delta_alpha": 0.25,
+  "policy.elig_threshold": 0.4,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "c03": {
+  "policy.delta_alpha": 0.25,
+  "policy.elig_threshold": 0.5,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "c04": {
+  "policy.delta_alpha": 0.25,
+  "policy.elig_threshold": 0.5,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "c05": {
+  "policy.delta_alpha": 0.25,
+  "policy.elig_threshold": 0.6,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "c06": {
+  "policy.delta_alpha": 0.25,
+  "policy.elig_threshold": 0.6,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "c07": {
+  "policy.delta_alpha": 0.5,
+  "policy.elig_threshold": 0.4,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "c08": {
+  "policy.delta_alpha": 0.5,
+  "policy.elig_threshold": 0.4,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "c09": {
+  "policy.delta_alpha": 0.5,
+  "policy.elig_threshold": 0.5,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "c10": {
+  "policy.delta_alpha": 0.5,
+  "policy.elig_threshold": 0.5,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "c11": {
+  "policy.delta_alpha": 0.5,
+  "policy.elig_threshold": 0.6,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "c12": {
+  "policy.delta_alpha": 0.5,
+  "policy.elig_threshold": 0.6,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "c13": {
+  "policy.delta_alpha": 0.75,
+  "policy.elig_threshold": 0.4,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "c14": {
+  "policy.delta_alpha": 0.75,
+  "policy.elig_threshold": 0.4,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "c15": {
+  "policy.delta_alpha": 0.75,
+  "policy.elig_threshold": 0.5,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "c16": {
+  "policy.delta_alpha": 0.75,
+  "policy.elig_threshold": 0.5,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "c17": {
+  "policy.delta_alpha": 0.75,
+  "policy.elig_threshold": 0.6,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "c18": {
+  "policy.delta_alpha": 0.75,
+  "policy.elig_threshold": 0.6,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ }
+}

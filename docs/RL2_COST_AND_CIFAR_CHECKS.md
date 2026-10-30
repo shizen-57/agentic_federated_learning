@@ -54,3 +54,48 @@ go into the thesis.
 The CIFAR-10 check and the comparator tuning
 (`docs/RL2_BASELINE_TUNING.md`) do not depend on these and can run at any
 time. The sensitivity screen and screen C need the tuned comparators.
+
+## Outcome (run 2026-10-30 on the RTX 3070, commit 2812614, re-checked here)
+
+Evidence complete in both checks: every run present and valid, one code
+version (a1be0f1e34704d16), clean checkout. My re-run of each report gave
+the same verdict as the server's.
+
+**Cost check (`results/rl2_cost_check`).** Spend per round in the second half,
+as a multiple of the soft target, per seed (280-284):
+
+| arm | per seed | median | meets (<= 1.05) | total spend (median) | score_eq vs base |
+|---|---|---|---|---|---|
+| base | 1.01, 0.98, 1.35, 1.95, 1.00 | 1.007 | yes | 1,680 | - |
+| fast_dual | 0.97, 1.18, 1.60, 1.65, 1.61 | 1.599 | no | 2,292 | -0.009 |
+| cap_target | 0.95, 0.87, 0.95, 0.95, 0.95 | 0.949 | yes | 1,422 | +0.005 |
+
+- **Verdict, by the rule: the base already meets its target; it is kept.**
+  `configs/rl2_tuned_cost.json` = M7's settings, unchanged (with provenance).
+- Stated plainly, because the median hides it: on 2 of 5 seeds the soft
+  constraint fails badly (seed 283 spends 1.95 x the target). Only the hard
+  cap at the target held it on every seed, and it also scored slightly
+  higher. The rule looked at the median and was fixed before the runs, so
+  it is applied as written; switching after seeing the results would be the
+  after-the-fact choice the rules exist to prevent. The thesis must not
+  claim that the soft constraint holds spending; the equal-spend endpoints
+  keep the comparisons fair either way.
+- A 10x faster price adjustment made spending worse, not better (likely
+  overshooting and oscillation of the multiplier).
+
+**CIFAR-10 check (`results/rl2_cifar_check`).** Seeds 285-289:
+
+| candidate | M7 score | score_eq | eq5 | w10b |
+|---|---|---|---|---|
+| c34 (selected) | 0.4717 | 0.4423 | 0.522 | 0.345 |
+| c20 | 0.4712 | 0.4504 | 0.532 | 0.378 |
+| c17 | 0.4690 | 0.4461 | 0.531 | 0.366 |
+| c32 | 0.4680 | 0.4483 | 0.534 | 0.365 |
+| c33 | 0.4656 | 0.4528 | 0.527 | 0.374 |
+| c00 (untuned) | 0.4645 | 0.4430 | 0.521 | 0.378 |
+
+- **Verdict, by the rule: the tuning holds on CIFAR-10.** c34 ranks first of
+  six on M7's score and beats the untuned base by +0.007 (3 of 5 seeds).
+- A caution for the confirmation: on the equal-spend fairness endpoint `w10b`,
+  c34 is the weakest of the six on CIFAR-10 (0.345 vs 0.378 untuned). Five
+  seeds and small differences, so a warning, not a finding.

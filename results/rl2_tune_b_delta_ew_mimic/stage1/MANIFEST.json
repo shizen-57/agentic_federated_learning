@@ -1,0 +1,26 @@
+{
+  "created": "2026-10-30 02:57:20 UTC",
+  "code_hash": "a1be0f1e34704d16",
+  "git_commit": "281261469560bf6722196816995c68176c54629d",
+  "git_dirty": false,
+  "inputs": {
+    "spec": "fc94a39d8799a6f8a391a1c2fb237afbe7ded20e1dfd6b2fb9cd686f0d91ea31",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8",
+    "configs": "19a8bad566270c4e5c56ea466cdb19f35e1f4d0b573a32909b654b2311ef2be5"
+  },
+  "generated": "bee7cd86a6739ec60ff636207711735596643c6967577add48fe2bccda76d28f",
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "data.split",
+    "fl.device=auto"
+  ],
+  "python": "3.11.16",
+  "torch": "2.5.1+cu121",
+  "numpy": "2.4.6",
+  "cuda": "12.1",
+  "device": "NVIDIA GeForce RTX 3070",
+  "stage": 1,
+  "title": "Matched tuning of b_delta_ew_mimic"
+}

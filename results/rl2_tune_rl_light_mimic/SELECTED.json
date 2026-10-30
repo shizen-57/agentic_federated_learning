@@ -1,0 +1,48 @@
+{
+ "base": "rl_light_mimic",
+ "code_hash": "a1be0f1e34704d16",
+ "no_eligible_candidate": false,
+ "overrides": {
+  "policy.elig_threshold": 0.4,
+  "policy.entropy_coef": 0.01,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1",
+  "policy.rl_hidden": 64,
+  "policy.rl_lr": 0.03,
+  "reward.beta": 0.1,
+  "reward.lambda_arl": 0.25,
+  "reward.lambda_fair": 0.0
+ },
+ "resolved_s2_femnist": {
+  "policy.elig_threshold": 0.4,
+  "policy.entropy_coef": 0.01,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1",
+  "policy.rl_hidden": 64,
+  "policy.rl_lr": 0.03,
+  "reward.beta": 0.1,
+  "reward.lambda_arl": 0.25,
+  "reward.lambda_fair": 0.0
+ },
+ "spec": "configs/rl2_tune_rl_light_mimic.yaml",
+ "spec_sha256": "8a6a1ae082d7d4505564399c7376163b58c64023d71ab351c05c0f5ddfdd96a2",
+ "stage1": {
+  "acc10": 0.7714640625226986,
+  "eq5": 0.7759908848508279,
+  "id": "c06",
+  "n": 5,
+  "score": 0.6432834824673375,
+  "starved": 0,
+  "w10": 0.510576080083847
+ },
+ "stage2": {
+  "acc10": 0.7833803027034846,
+  "eq5": 0.7836554517577162,
+  "id": "c06",
+  "n": 15,
+  "score": 0.6519432151431874,
+  "starved": 0,
+  "w10": 0.5202309785286585
+ },
+ "winner": "c06"
+}

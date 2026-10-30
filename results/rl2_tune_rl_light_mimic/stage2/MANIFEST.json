@@ -1,0 +1,27 @@
+{
+  "created": "2026-10-29 23:16:13 UTC",
+  "code_hash": "a1be0f1e34704d16",
+  "git_commit": "281261469560bf6722196816995c68176c54629d",
+  "git_dirty": false,
+  "inputs": {
+    "spec": "8a6a1ae082d7d4505564399c7376163b58c64023d71ab351c05c0f5ddfdd96a2",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8",
+    "configs": "31ef7b9b72d440508e2e1de01ac83f34c2843c04da865b5d6df977d6e5666fb7",
+    "stage1_ranking": "2c5434eabe9901b8b73723c4e93770e274f47bcf509d3861821f64d33caca9e2"
+  },
+  "generated": "5bdb06a22e09812802230bb09ec0642e9ba6d3bd83366d89871ba003aec984ee",
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "data.split",
+    "fl.device=auto"
+  ],
+  "python": "3.11.16",
+  "torch": "2.5.1+cu121",
+  "numpy": "2.4.6",
+  "cuda": "12.1",
+  "device": "NVIDIA GeForce RTX 3070",
+  "stage": 2,
+  "title": "Matched tuning of rl_light_mimic"
+}

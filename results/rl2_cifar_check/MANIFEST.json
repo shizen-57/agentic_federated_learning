@@ -1,0 +1,26 @@
+{
+  "created": "2026-10-29 22:31:39 UTC",
+  "code_hash": "a1be0f1e34704d16",
+  "git_commit": "281261469560bf6722196816995c68176c54629d",
+  "git_dirty": false,
+  "inputs": {
+    "spec": "30b0943073284800fa164e16314bc9f01b61efc3506dc41328e1a30ffba4dbcb",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8",
+    "tuned": "799c83109a17239ff54dc5ab68581a6283db83607121afc1b5c4121b35bcc492",
+    "candidates": "ddb9e521b643dc520851b32e08e80e0012f97890cfbfb9d8a9689f0f3ede6a86"
+  },
+  "generated": "e73fa1bc0b0d8984e4a8c4c9a3bfe50c05fa4264acbc5e37cb9d052ed20be6d3",
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "data.split",
+    "fl.device=auto"
+  ],
+  "python": "3.11.16",
+  "torch": "2.5.1+cu121",
+  "numpy": "2.4.6",
+  "cuda": "12.1",
+  "device": "NVIDIA GeForce RTX 3070",
+  "title": "RL2 CIFAR-10 check of the FEMNIST tuning"
+}

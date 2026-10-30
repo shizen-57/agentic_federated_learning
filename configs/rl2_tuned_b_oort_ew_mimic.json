@@ -1,0 +1,42 @@
+{
+ "base": "b_oort_ew_mimic",
+ "code_hash": "a1be0f1e34704d16",
+ "no_eligible_candidate": false,
+ "overrides": {
+  "policy.elig_threshold": 0.6,
+  "policy.gate_mode": "thompson",
+  "policy.oort_alpha": 2.0,
+  "policy.oort_eps": 0.5,
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "resolved_s2_femnist": {
+  "policy.elig_threshold": 0.6,
+  "policy.gate_mode": "thompson",
+  "policy.oort_alpha": 2.0,
+  "policy.oort_eps": 0.5,
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "spec": "configs/rl2_tune_b_oort_ew_mimic.yaml",
+ "spec_sha256": "9d721c7981ae010352e233528a650c861eaadd18f38dba1fe5b2eeffd468572e",
+ "stage1": {
+  "acc10": 0.7869690216392028,
+  "eq5": 0.7577003231325933,
+  "id": "c19",
+  "n": 5,
+  "score": 0.6473975501795207,
+  "starved": 0,
+  "w10": 0.537094777226448
+ },
+ "stage2": {
+  "acc10": 0.7827483025619641,
+  "eq5": 0.7567082981329922,
+  "id": "c19",
+  "n": 15,
+  "score": 0.6429999475708488,
+  "starved": 0,
+  "w10": 0.5292915970087051
+ },
+ "winner": "c19"
+}

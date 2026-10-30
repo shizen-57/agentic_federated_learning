@@ -1,0 +1,116 @@
+{
+ "code_hash": "a1be0f1e34704d16",
+ "device": "NVIDIA GeForce RTX 3070",
+ "python": "3.11.16",
+ "runs": {
+  "cifar_light_s900": {
+   "acc10": 0.3207447247706422,
+   "cost": 425.528675282714,
+   "heavy_share": 0.0,
+   "invites": 600,
+   "seconds": 13.3,
+   "successes": 369,
+   "w10": 0.11452423553769887
+  },
+  "cifar_light_s901": {
+   "acc10": 0.3269428899082569,
+   "cost": 449.32008051109875,
+   "heavy_share": 0.0,
+   "invites": 600,
+   "seconds": 13.9,
+   "successes": 363,
+   "w10": 0.1466823170146361
+  },
+  "cifar_light_s902": {
+   "acc10": 0.33367270642201835,
+   "cost": 452.28185935820665,
+   "heavy_share": 0.0,
+   "invites": 600,
+   "seconds": 14.3,
+   "successes": 368,
+   "w10": 0.13003628168644396
+  },
+  "cifar_tuned_s900": {
+   "acc10": 0.3687933486238532,
+   "cost": 551.1934571890145,
+   "heavy_share": 0.14833333333333334,
+   "invites": 600,
+   "seconds": 13.7,
+   "successes": 305,
+   "w10": 0.19089894581731398
+  },
+  "cifar_tuned_s901": {
+   "acc10": 0.3866676605504587,
+   "cost": 589.1240995469213,
+   "heavy_share": 0.18166666666666667,
+   "invites": 600,
+   "seconds": 14.1,
+   "successes": 332,
+   "w10": 0.23237004380502696
+  },
+  "cifar_tuned_s902": {
+   "acc10": 0.4290919724770642,
+   "cost": 667.4401581452479,
+   "heavy_share": 0.23833333333333334,
+   "invites": 600,
+   "seconds": 14.9,
+   "successes": 324,
+   "w10": 0.26950206403211563
+  },
+  "femnist_light_s900": {
+   "acc10": 0.62,
+   "cost": 420.52033150488916,
+   "heavy_share": 0.0,
+   "invites": 600,
+   "seconds": 8.1,
+   "successes": 386,
+   "w10": 0.3509088605642319
+  },
+  "femnist_light_s901": {
+   "acc10": 0.6657958687727825,
+   "cost": 438.15042573320704,
+   "heavy_share": 0.0,
+   "invites": 600,
+   "seconds": 8.2,
+   "successes": 369,
+   "w10": 0.3565473645925522
+  },
+  "femnist_light_s902": {
+   "acc10": 0.653656998738966,
+   "cost": 445.85104151422036,
+   "heavy_share": 0.0,
+   "invites": 600,
+   "seconds": 7.8,
+   "successes": 359,
+   "w10": 0.36193786561489105
+  },
+  "femnist_tuned_s900": {
+   "acc10": 0.6334337349397591,
+   "cost": 580.9874791318865,
+   "heavy_share": 0.325,
+   "invites": 600,
+   "seconds": 11.7,
+   "successes": 344,
+   "w10": 0.39324297904968264
+  },
+  "femnist_tuned_s901": {
+   "acc10": 0.7151275820170109,
+   "cost": 566.1728949858091,
+   "heavy_share": 0.20666666666666667,
+   "invites": 600,
+   "seconds": 10.4,
+   "successes": 332,
+   "w10": 0.439838844537735
+  },
+  "femnist_tuned_s902": {
+   "acc10": 0.7004413619167718,
+   "cost": 651.057417434997,
+   "heavy_share": 0.185,
+   "invites": 600,
+   "seconds": 10.9,
+   "successes": 339,
+   "w10": 0.42808514535427095
+  }
+ },
+ "torch": "2.5.1+cu121"
+}

@@ -1,0 +1,26 @@
+{
+  "created": "2026-10-30 03:44:46 UTC",
+  "code_hash": "a1be0f1e34704d16",
+  "git_commit": "281261469560bf6722196816995c68176c54629d",
+  "git_dirty": false,
+  "inputs": {
+    "spec": "e8bda725935e5b867d2e1bfea5db5a6d6d5e7d8ef53c2c796dbc187bec5915dc",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8",
+    "configs": "9b0b714bf63158de726ea8bff7ef4029487d8161cb96941115f42050420ff18f"
+  },
+  "generated": "b0d5bfb3547e5b5c09e7d3f32a41047a941b1999e99f9618896e211ce3b4d7d2",
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "data.split",
+    "fl.device=auto"
+  ],
+  "python": "3.11.16",
+  "torch": "2.5.1+cu121",
+  "numpy": "2.4.6",
+  "cuda": "12.1",
+  "device": "NVIDIA GeForce RTX 3070",
+  "stage": 1,
+  "title": "Matched tuning of b_fairq_ew_mimic"
+}

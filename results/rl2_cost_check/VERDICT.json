@@ -1,0 +1,31 @@
+{
+ "adopt": null,
+ "arms": {
+  "base": {
+   "meets": true,
+   "ratio": 1.0065510191953408,
+   "score_eq": 0.6308448049861252,
+   "vs_base": 0.0
+  },
+  "cap_target": {
+   "meets": true,
+   "ratio": 0.9493271743735132,
+   "score_eq": 0.6353681515938427,
+   "vs_base": 0.004523346607717582
+  },
+  "fast_dual": {
+   "meets": false,
+   "ratio": 1.59942309235089,
+   "score_eq": 0.6216588793070938,
+   "vs_base": -0.009185925679031292
+  }
+ },
+ "base": "base",
+ "kind": "cost",
+ "manifest_sha256": "d69265b63d20d5d5bdc05c6defc25c25f626dec2af7f9c47cf852140abda9605",
+ "override": {},
+ "spec": "configs/rl2_cost_check.yaml",
+ "spec_sha256": "bc720d9d04086d41a73adcfc19d27bb12bd8e0833d9b53abee86b6ba5fe8b348",
+ "tuned": "configs/rl2_tuned.json",
+ "tuned_sha256": "799c83109a17239ff54dc5ab68581a6283db83607121afc1b5c4121b35bcc492"
+}

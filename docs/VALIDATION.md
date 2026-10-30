@@ -66,8 +66,9 @@ A controlled screen, everything else fixed, with the rule written first:
 
 `scripts/predictor_stress.py`, `results/predictor_stress/report.md`. The
 tuned method on real FEMNIST, 3 seeds, 200 rounds, in a stable world and a
-shocked one. (The same test on CIFAR-10, gap review D3, runs on the GPU:
-`bash scripts/dept_gpu.sh stress cifar`.) In the shocked world, at round 80 half the devices lose 98% of
+shocked one. The same test on CIFAR-10 (gap review D3; RTX 3070,
+2026-10-30): `results/predictor_stress_cifar/report.md`, summarised after the
+FEMNIST results below. In the shocked world, at round 80 half the devices lose 98% of
 their bandwidth and 95% of their battery; at round 140 they are restored.
 Every executed job's predicted success is compared with what happened.
 
@@ -119,6 +120,20 @@ So the safety layer mostly avoids clients that would usually fail. That is
 the rule's design: eligibility needs a success chance of about 0.5. It still
 means about 14% of clients (18% after a shock) contribute nothing late in a
 run.
+
+**CIFAR-10 (same test, `results/predictor_stress_cifar`).** The same
+picture, with one clear weakness:
+- calibrated overall (predicted 0.610, observed 0.588, ECE 0.046); weak
+  clients 0.535 vs 0.523; cold start 0.542 vs 0.480;
+- **Priority jobs are badly over-predicted** (0.688 vs 0.377, ECE 0.31), but
+  they are only 2% of jobs (138 of 6,000);
+- after the shock: 0.402 predicted vs 0.035 observed for the few hit jobs
+  that still ran (282); abstentions rise from 13 to 54 per round;
+- recovery: 89% of the hit clients invited again, median wait 8 rounds,
+  then success 0.625 (0.582 before the shock);
+- avoided for good: 31 of 300 clients (stable) and 23 (shock); they would
+  have succeeded in a median **2%** of their online rounds; 0 and 2 of them
+  could have succeeded in at least half (avoided wrongly).
 
 **Decision:** no change to the method now. Recovery works, there is no sign
 of wrongful avoidance at scale, and the reviewer asked for changes only where
@@ -199,3 +214,18 @@ rounds, so accuracy is still rising):
 
 These are short checks of the device, not results: the tuned method spends
 25-40% more here, so the accuracy gap is not at equal spend.
+
+**GPU against CPU (2026-10-30, RTX 3070, torch 2.5.1, same code;
+`results/devicecheck/compare.md`):** no material difference in any group.
+
+| run (mean of 3 seeds) | acc10 CPU / GPU | successes CPU / GPU | cost CPU / GPU | heavy share CPU / GPU |
+|---|---|---|---|---|
+| FEMNIST tuned | 0.683 / 0.683 | 335 / 338 | 534 / 599 | 0.14 / 0.24 |
+| FEMNIST always-Light | 0.648 / 0.646 | 393 / 371 | 428 / 435 | 0 / 0 |
+| CIFAR-10 tuned | 0.400 / 0.395 | 327 / 320 | 598 / 603 | 0.24 / 0.19 |
+| CIFAR-10 always-Light | 0.331 / 0.327 | 400 / 367 | 428 / 442 | 0 / 0 |
+
+The largest gap is the tuned method's FEMNIST cost (12% higher on the GPU,
+under the 15% limit): its learner picked more heavy jobs there. GPU
+arithmetic is not bit-identical, and a learner's choices then drift; this
+is the expected size of that drift, not a different method.

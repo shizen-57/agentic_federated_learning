@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-29 (all gap-review items fixed in code/docs; new GPU order: device check, cost check, CIFAR check, CIFAR stress, comparator tuning, then ARL screen, sensitivity, screen C)
+Last updated: 2026-10-30 (session 1 results checked: GPU=CPU, cost check keeps base, tuning holds on CIFAR, 8 comparators tuned -- tuned always-Light+MimiC and fairness queues score above c34; next: ARL screen)
 
 ---
 
@@ -235,8 +235,8 @@ to run it and send back the results.
   0.744). Always-Light 0.781 / raw-fail 0.756 strongest. Per the rule: no
   tuning on these seeds, no confirmation study.
 - PR: https://github.com/shizen-57/agentic_federated_learning/pull/1
-- Dept GPU: user cloned to ~/shifat/agentic_federated_learning (shared
-  account -- others use it). dept_gpu.sh refuses to run outside conda env
+- Dept GPU: user cloned the repo into a folder of a shared account (others
+  use it; the path is not written here -- the repo is public). dept_gpu.sh refuses to run outside conda env
   `afl`. Planned there: `diag full` + dev screen on GPU as a cross-check.
 - User chose (d): `policy.mode_mask=feasible` (draw only modes with
   p >= 0.5, log-prob of the masked draw), condition `arl3_full_fm`, on
@@ -508,15 +508,36 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
     The user can push it from their own computer: `git fetch origin && git
     tag s2-frozen 998f2adb1c6cb244da311b3837319276d480d8f3 && git push origin
     s2-frozen` (never from the shared server).
+- **Session 1 results (2026-10-30, RTX 3070, commit 2812614; all evidence
+  re-checked here, same verdicts as the server; results/ committed):**
+  - device check: GPU vs CPU no material difference (largest: tuned FEMNIST
+    cost +12%, limit 15%); results/devicecheck/{gpu.json,compare.md}.
+  - CIFAR stress: like FEMNIST (ECE 0.046; recovery 89%, median 8 rounds;
+    avoided-for-good clients would succeed in a median 2% of rounds) BUT
+    Priority badly over-predicted (0.69 vs 0.38; 2% of jobs).
+  - cost check: rule -> base kept (median second-half spend 1.007 x target).
+    Hidden by the median: seeds 282/283 at 1.35x/1.95x; cap_target held
+    every seed (0.87-0.95) and scored +0.005; fast_dual made spend worse.
+    Applied as written (no post-hoc switch); thesis must not claim the soft
+    constraint holds spend. configs/rl2_tuned_cost.json = c34 unchanged.
+  - CIFAR check: rule -> tuning holds (c34 rank 1/6, +0.007 vs c00) BUT on
+    w10b c34 is the weakest of 6 on CIFAR (0.345 vs 0.378) -- caution for P2.
+  - comparator tuning (stage 2, seeds 225-239, M7 score): fairq 0.6532,
+    rl_light_mimic 0.6519 (eq5 0.784, spend 1,468), refl 0.6491, oort
+    0.6430, favor 0.6334, arl3 0.6324, cov 0.6157, delta 0.6099 -- vs c34
+    0.6378 in M7 (old code/pool, not a paired comparison). Suggests c34's
+    lead over always-Light came mostly from MimiC + tuning effort. Screen C
+    will decide on fresh seeds; a negative result is a valid thesis finding.
+    Winners in configs/rl2_tuned_<name>.json (5 of 8 picked predictor v2).
 - Next on the dept GPU, after `git pull` (stop or finish the old-code
   screen C first; it is exploratory; move `runs/rl2_screen_c` and
   `checkpoints` aside before the new screen C):
-  1. session 1 (no dependencies): `devicecheck`, `screen2
+  1. DONE: session 1 (no dependencies): `devicecheck`, `screen2
      configs/rl2_cost_check.yaml`, `screen2 configs/rl2_cifar_check.yaml`,
      `stress cifar`, then `tunebase all` (~8-9 h, overnight; resumable);
      packsmall each and send.
-  2. I check them, run finalize_tuned cost, commit the tuned files.
-  3. session 2: `screen2 configs/rl2_arl_screen.yaml`; send; I run
+  2. DONE (2026-10-30).
+  3. session 2 (NEXT): `screen2 configs/rl2_arl_screen.yaml`; send; I run
      finalize_tuned arl and commit.
   4. session 3: `screen2 configs/rl2_sensitivity.yaml`,
      `screen-c-pretrain`, `screen-c`; send; then freeze; confirm only with
