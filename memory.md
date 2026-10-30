@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-30 (session 1 results checked: GPU=CPU, cost check keeps base, tuning holds on CIFAR, 8 comparators tuned -- tuned always-Light+MimiC and fairness queues score above c34; next: ARL screen)
+Last updated: 2026-10-30 (handover file docs/HANDOVER.md written for another assistant; session 1 results checked: GPU=CPU, cost check keeps base, tuning holds on CIFAR, 8 comparators tuned -- tuned always-Light+MimiC and fairness queues score above c34; next: ARL screen)
 
 ---
 
@@ -72,6 +72,9 @@ Repo: `shizen-57/agentic_federated_learning`, working branch
 
 ## 4. Where things are
 
+- **Handover:** `docs/HANDOVER.md` -- a self-contained brief for another
+  assistant (rules, history, setup, results, next steps, upload checks,
+  open items). Keep it in step with this file when the status changes.
 - Code: `src/afl/` (engine.py, sim.py, policies/rl.py, policies/baselines.py,
   policies/published.py, predictor.py, ...).
 - Tests: `python -m pytest tests -q` (core, advanced, review-fix tests).
