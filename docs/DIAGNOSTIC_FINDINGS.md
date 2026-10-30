@@ -101,9 +101,22 @@ only until enough successes; (c) a random or availability-weighted fallback;
 (d) a feasible-mode mask for fallback clients. (b) targets the root cause
 (inverted ranking); (a) and (c) remove the trigger and the absorbing choice.
 
-## 7. Unexecuted checks
+## 7. Platform sensitivity (department RTX 3070, torch 2.5.1+cu121)
 
-- GPU reproduction with diagnostics (dept GPU: `bash scripts/dept_gpu.sh diag full`).
+The same 8 diagnostic runs on the department GPU (`bash scripts/dept_gpu.sh
+diag full`, 139 s): **none stayed stuck**. Every learned-mode run still hit
+an all-fallback round 3, but escaped within a few rounds (longest zero-success
+streak 0-1; 1,174-1,408 successes; accuracy 0.65-0.74). Kaggle's GPU and this
+CPU kept ARL-v3 s113 and c2 s110/s113 locked for ~200 rounds.
+
+So the lock-up is a **tipping point**, not a fixed outcome: the gate/predictor
+chain puts nearly every learned-mode run into the same fragile state at
+round 3, and tiny numerical differences between devices decide whether it
+escapes. The cause in sections 2-3 stands; how often it bites depends on
+the platform. Runs, checks and sidecars: `results/diagnostic_v1_rtx3070/`.
+
+## 8. Unexecuted checks
+
 - Other collapsing seeds (103, 112, 116) and CIFAR-10.
 - Sidecars of the 200-round runs are not committed (28 MB); CPU runs are
   bit-reproducible: `python scripts/diagnose_collapse.py --variant full --jobs 4` (~9 min).

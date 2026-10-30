@@ -1,0 +1,81 @@
+{
+ "base": "ppo_full_mimic",
+ "code_hash": "a442febc89a1a7d3",
+ "no_eligible_candidate": false,
+ "overrides": {
+  "policy.cost_target_mult": 1.0,
+  "policy.curriculum": false,
+  "policy.encoder": "attention",
+  "policy.gate_z": 1.5,
+  "policy.hard_budget_mult": 3.0,
+  "policy.mode_mask_z": 0.25,
+  "policy.per_client_credit": false,
+  "policy.ppo_batch": 8,
+  "policy.ppo_clip": 0.3,
+  "policy.ppo_ent_start": 0.003,
+  "policy.ppo_epochs": 4,
+  "policy.ppo_gamma": 0.9,
+  "policy.ppo_lr": 0.005,
+  "policy.pred_decay": 0.98,
+  "reward.arl4_mu": 2.0,
+  "reward.beta": 0.0,
+  "reward.damage_metric": "raw_fail",
+  "reward.lambda_arl": 0.5,
+  "reward.lambda_cov": 1.0,
+  "reward.protect_weight": 1.0
+ },
+ "provenance": [
+  {
+   "adopted": null,
+   "from": "configs/rl2_tuned.json",
+   "from_sha256": "799c83109a17239ff54dc5ab68581a6283db83607121afc1b5c4121b35bcc492",
+   "override": {},
+   "spec": "configs/rl2_cost_check.yaml",
+   "step": "cost",
+   "verdict_sha256": "afdc71b0bf6826ab62f4dcb77a58e39149603e7622a726749bf2ba806bac0219"
+  }
+ ],
+ "resolved_s2_femnist": {
+  "policy.cost_target_mult": 1.0,
+  "policy.curriculum": false,
+  "policy.encoder": "attention",
+  "policy.gate_z": 1.5,
+  "policy.hard_budget_mult": 3.0,
+  "policy.mode_mask_z": 0.25,
+  "policy.per_client_credit": false,
+  "policy.ppo_batch": 8,
+  "policy.ppo_clip": 0.3,
+  "policy.ppo_ent_start": 0.003,
+  "policy.ppo_epochs": 4,
+  "policy.ppo_gamma": 0.9,
+  "policy.ppo_lr": 0.005,
+  "policy.pred_decay": 0.98,
+  "reward.arl4_mu": 2.0,
+  "reward.beta": 0.0,
+  "reward.damage_metric": "raw_fail",
+  "reward.lambda_arl": 0.5,
+  "reward.lambda_cov": 1.0,
+  "reward.protect_weight": 1.0
+ },
+ "spec": "configs/rl2_tune.yaml",
+ "spec_sha256": "fa6aff0d0a17a202669f15f64b9432c66f194a23aa284458e5834d66ae223b59",
+ "stage1": {
+  "acc10": 0.776306769969368,
+  "eq5": 0.7656057877715644,
+  "id": "c34",
+  "n": 5,
+  "score": 0.6419670075861721,
+  "starved": 0,
+  "w10": 0.5183282274007797
+ },
+ "stage2": {
+  "acc10": 0.7799976417141856,
+  "eq5": 0.7600513082106675,
+  "id": "c34",
+  "n": 15,
+  "score": 0.6378360568165663,
+  "starved": 0,
+  "w10": 0.515620805422465
+ },
+ "winner": "c34"
+}

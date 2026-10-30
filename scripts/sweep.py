@@ -62,6 +62,9 @@ def build_jobs(plan: dict, groups: list[str] | None, seeds: list[int] | None,
                 raw = _deepcopy(base)
                 apply(raw, g.get("set", {}) or {})
                 apply(raw, CONDITIONS[cond])
+                # a group's "override" wins over its conditions (RL2 tuning:
+                # one group per candidate setting of the same condition)
+                apply(raw, g.get("override", {}) or {})
                 for expr in extra:
                     _apply_override(raw, expr)
                 raw["tag"] = f"{cond}_s{seed}"
@@ -72,7 +75,8 @@ def build_jobs(plan: dict, groups: list[str] | None, seeds: list[int] | None,
     return jobs
 
 
-PROVENANCE_KEYS = ("init_checksum", "code_hash", "code_changed_during_run")
+PROVENANCE_KEYS = ("init_checksum", "code_hash", "code_changed_during_run",
+                   "init_checkpoint_sha256", "split_fingerprint")
 
 
 def expected_config(raw: dict) -> dict:
@@ -137,12 +141,15 @@ def _csv_status(path: str, rounds: int, exact_schema: bool) -> str:
     return "ok"
 
 
-def run_status(raw: dict, current_code: str | None = None) -> str:
+def run_status(raw: dict, current_code: str | None = None, ignore: tuple = ()) -> str:
     """'ok' if this job's run exists, was made with exactly this config (and,
     if current_code is given, by this code), has every round in order with
     finite values in the expected columns, and was not affected by a source
     change mid-run; 'missing'; otherwise why the existing result cannot be
-    used. Never raises on a damaged result: a reason means "run it again"."""
+    used. Never raises on a damaged result: a reason means "run it again".
+    ignore: top-level config keys left out of the comparison (the screen
+    report ignores "out": where the files are, not what was run -- a run
+    saved with a relative folder, or a moved results folder, is the same run)."""
     base = os.path.join(raw["out"], raw["tag"])
     if not os.path.exists(base + ".csv"):
         return "missing"
@@ -160,6 +167,9 @@ def run_status(raw: dict, current_code: str | None = None) -> str:
     want = expected_config(raw)
     got = {k: v for k, v in meta.items() if k not in PROVENANCE_KEYS}
     got.get("fl", {}).pop("device", None)
+    for k in ignore:
+        want.pop(k, None)
+        got.pop(k, None)
     if got != want:
         return "different config"
     if current_code is not None and meta.get("code_hash") != current_code:

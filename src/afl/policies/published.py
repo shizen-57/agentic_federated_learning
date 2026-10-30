@@ -6,6 +6,9 @@ DELTA  Wang, Guo, Lin, Tang. "DELTA: Diverse Client Sampling for Fasting
        Federated Learning." NeurIPS 2023 (practical version, FedPracDELTA).
 REFL   Abdelmoniem, Sahu, Canini, Fahmy. "REFL: Resource-Efficient Federated
        Learning." EuroSys 2023.
+FairQ  after RBCS-F: Huang, Lin, Wu, Wang, Li. "An Efficiency-Boosting Client
+       Selection Scheme for Federated Learning With Fairness Guarantee."
+       IEEE TPDS 2021 (Lyapunov virtual queues for a long-term selection rate).
 
 None of the three chooses a participation mode, so each gives every selected
 client Standard (as Random and Oort do) unless policy.mode_rule says otherwise.
@@ -20,7 +23,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .base import Policy, pool
+from .base import Policy, best_work_mode, est_time, pool
 
 
 class FAVORPolicy(Policy):
@@ -66,7 +69,7 @@ class FAVORPolicy(Policy):
             self.net = nn.Sequential(nn.Linear((self.N + 1) * self.q, h), nn.ReLU(),
                                      nn.Linear(h, self.N))
         self.tgt = copy.deepcopy(self.net)
-        self.opt = torch.optim.Adam(self.net.parameters(), lr=1e-3)
+        self.opt = torch.optim.Adam(self.net.parameters(), lr=cfg.policy.favor_lr)
         self.buffer: list[tuple] = []       # (state, action, discounted reward, next
                                             #  state, clients selectable there, discount)
         self.pending = None                 # last decision awaiting its next state:
@@ -302,3 +305,51 @@ class REFLPolicy(Policy):
     def observe_outcome(self, state, action, reward, info):
         for i in info["recv_ids"]:
             self.last_submit[i] = info["t"]
+
+
+class FairQueuePolicy(Policy):
+    """Fairness-guaranteed selection with Lyapunov virtual queues, after RBCS-F.
+
+    RBCS-F promises every client a long-term selection rate beta and meets it
+    with one virtual queue per client, Z_i(t+1) = max(Z_i(t) + beta - x_i(t), 0)
+    (x_i = 1 if selected): a client that waits builds up a debt. Each round it
+    picks the K clients with the largest  Z_i + V * u_i, where u_i is the
+    client's efficiency; V trades efficiency against fairness (drift plus
+    penalty). Here:
+    - u_i = -(estimated round time / deadline) for the mode the client will be
+      given (the expected-work rule, or Standard), from base.est_time -- the
+      same observed-speed estimate every baseline uses. RBCS-F learns the time
+      with a contextual bandit instead; this is the one simplification.
+    - The queue grows only in rounds the client is online (checked in): the
+      promise is a share of the rounds it could have taken part in.
+    beta = policy.fairq_beta, V = policy.fairq_v.
+    """
+
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.N = cfg.data.num_clients
+        self.Z = np.zeros(self.N)
+        self.rng = np.random.default_rng(cfg.seed + 37)
+
+    def _mode(self, p_succ: dict) -> str:
+        rule = self.cfg.policy.mode_rule
+        if rule == "expected_work":
+            return best_work_mode(self.cfg, p_succ)
+        return "light" if rule == "light" else "standard"
+
+    def act(self, state, t):
+        K = min(self.cfg.fl.clients_per_round, self.N)
+        cands = pool(state, self.N)
+        if not cands:
+            return [], {}
+        pol, dl = self.cfg.policy, self.cfg.system.deadline
+        score = {}
+        for i in cands:
+            m = self._mode(state["p_succ"][i])
+            score[i] = self.Z[i] - pol.fairq_v * est_time(self.cfg, state, i, m) / dl
+        tie = self.rng.random(self.N) * 1e-9            # random order among exact ties
+        sel = sorted(cands, key=lambda i: -(score[i] + tie[i]))[:K]
+        chosen = set(sel)
+        for i in cands:
+            self.Z[i] = max(self.Z[i] + pol.fairq_beta - (1.0 if i in chosen else 0.0), 0.0)
+        return [int(i) for i in sel], {int(i): "standard" for i in sel}

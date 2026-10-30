@@ -1,0 +1,40 @@
+{
+ "base": "b_delta_ew_mimic",
+ "code_hash": "a1be0f1e34704d16",
+ "no_eligible_candidate": false,
+ "overrides": {
+  "policy.delta_alpha": 0.25,
+  "policy.elig_threshold": 0.6,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "resolved_s2_femnist": {
+  "policy.delta_alpha": 0.25,
+  "policy.elig_threshold": 0.6,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "spec": "configs/rl2_tune_b_delta_ew_mimic.yaml",
+ "spec_sha256": "fc94a39d8799a6f8a391a1c2fb237afbe7ded20e1dfd6b2fb9cd686f0d91ea31",
+ "stage1": {
+  "acc10": 0.7531940377000782,
+  "eq5": 0.724550898454437,
+  "id": "c06",
+  "n": 5,
+  "score": 0.6002013825286673,
+  "starved": 0,
+  "w10": 0.47585186660289763
+ },
+ "stage2": {
+  "acc10": 0.7618148583831494,
+  "eq5": 0.7363063615563239,
+  "id": "c06",
+  "n": 15,
+  "score": 0.6098670325677954,
+  "starved": 0,
+  "w10": 0.48342770357926684
+ },
+ "winner": "c06"
+}

@@ -20,7 +20,8 @@ from afl.engine import Experiment  # noqa: E402
 from afl.run import _load  # noqa: E402
 
 # The s2 protocol switches and weak-client regime, on the small synthetic task.
-CONDS = ["arl3_full", "c2_rl_fedprox", "v2_rawfail", "rl_light", "rl_ew", "b_random_ew", "b_cov_ew"]
+CONDS = ["arl3_full", "c2_rl_fedprox", "v2_rawfail", "rl_light", "rl_ew", "b_random_ew", "b_cov_ew",
+         "ppo_v3", "arl3_full_pg", "ppo_att", "ppo_safe", "ppo_full", "ppo_full_mimic"]
 
 
 def _raw(cond, out, diag, rounds=8, seed=3):
@@ -111,7 +112,7 @@ def test_sidecars_reconcile_with_the_csv(pair):
     else:
         assert {u["t"] for u in updates} == {row["round"] for row in exp.rows}
         for u in updates:
-            if u["updated"]:
+            if u["updated"] and not u.get("ppo"):
                 assert u["advantage"] == pytest.approx(u["reward"] - u["baseline_before"])
 
 

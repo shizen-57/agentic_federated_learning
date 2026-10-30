@@ -25,22 +25,27 @@ from .local import accepted, local_train
 from .models import build_model, get_flat, set_flat
 from .policies import build_policy
 from .policies.base import best_work_mode, est_time, mode_by_rule
-from .predictor import SuccessPredictor
+from .predictor import SuccessPredictor, SuccessPredictorV2
 from .provenance import LOADED as CODE_LOADED, code_hash
 from .sim import ClientEnv
 from .diagnostics import DiagWriter, norm_state
 
 LOG_FIELDS = [
-    "round", "accuracy", "accuracy_fixed", "eval_fixed_n", "acc_worst10", "test_loss", "reward", "cost", "latency",
-    "n_selected", "n_success", "fail_ratio", "empty_round", "arl_online", "arl_selected", "arl_oracle",
+    "round", "accuracy", "accuracy_fixed", "eval_fixed_n", "acc_worst10", "test_loss", "reward", "cost",
+    "cost_ref", "latency",
+    "n_selected", "n_success", "fail_ratio", "empty_round", "n_online", "n_abstain", "n_light_override",
+    "arl_online", "arl_selected", "arl_oracle",
     "cv", "cv_selection", "jain", "ece", "mode_light", "mode_standard",
     "mode_priority", "weak_selected", "weak_success", "late_delivered",
-    "budget_dropped", "debt_mean", "arl_v2", "departed",
-    "arl_v3_loss", "arl_v3_gain",
+    "budget_dropped", "budget_lighter", "debt_mean", "arl_v2", "departed",
+    "arl_v3_loss", "arl_v3_gain", "arl_v4_loss", "arl_v4_deficit",
     # protocol-fix diagnostics (docs/ADVANCED_RESULTS.md, "Protocol fix")
     "val_accuracy", "acc_client_worst10", "acc_client_weak", "cov_lost", "cov_lost_avoid",
     "gap_max_all", "gap_max_weak", "ece_light", "ece_standard", "ece_priority",
     "ece_weak", "ece_strong", "gate_filled", "acc_labelmix_worst10", "acc_client_measured",
+    # participation fairness (gap review B6): clients with no successful
+    # contribution yet, and clients whose current gap is 50+ rounds
+    "n_never", "n_gap50",
     "wall_s",
 ]
 
@@ -70,8 +75,24 @@ class Experiment:
         self.d = build_data(cfg)
         self.N = cfg.data.num_clients
         self.env = ClientEnv(cfg, self.d["n_i"], cfg.seed, sketch=self.d["sketch"])
-        self.predictor = SuccessPredictor(cfg)
+        if cfg.policy.predictor not in ("v1", "v2"):
+            raise ValueError(f"unknown policy.predictor {cfg.policy.predictor}")
+        if cfg.policy.gate_mode not in ("top", "thompson"):
+            raise ValueError(f"unknown policy.gate_mode {cfg.policy.gate_mode}")
+        if cfg.policy.gate_mode == "thompson" and cfg.policy.predictor != "v2":
+            raise ValueError("policy.gate_mode=thompson needs policy.predictor=v2")
+        self.pv2 = cfg.policy.predictor == "v2"
+        self.predictor = SuccessPredictorV2(cfg) if self.pv2 else SuccessPredictor(cfg)
+        # Own stream for the Thompson gate, so it never shifts any other draw.
+        self.gate_rng = np.random.default_rng(cfg.seed + 7100)
         self.policy = build_policy(cfg)
+        ck = getattr(self.policy, "checkpoint_meta", None)
+        data_fp = (self.d.get("split") or {}).get("fingerprint")
+        if ck is not None and (data_fp is None or ck.get("split_fingerprint") != data_fp):
+            # A pre-trained scheduler may only be used on the same persistent
+            # split it practised on (practice pool / validation only).
+            raise ValueError("checkpoint split fingerprint "
+                             f"{ck.get('split_fingerprint')} does not match this run's {data_fp}")
         # Opt-in diagnostic sidecars; reading only, never changes the run.
         self.diag = DiagWriter(cfg.out, cfg.tag) if cfg.diag.enabled else None
 
@@ -90,7 +111,20 @@ class Experiment:
         # from uses only it.
         self.val_idx = self.test_idx = None
         pool = np.arange(n_test)
-        if cfg.fl.val_frac > 0:
+        self.split_fp = None
+        if self.d.get("split") is not None:
+            # data.split = persistent: every example's role is fixed for all
+            # seeds (afl.data), so no run's test example is ever another run's
+            # validation (reward) example.
+            # Test examples are those of the run's evaluation pool only:
+            # development runs never measure on confirmation data.
+            roles = self.d["split"]["val_role"]
+            self.val_idx = torch.from_numpy(np.where(roles)[0]).to(self.dev)
+            confirm = self.d["split"]["confirm_role"] == (self.d["split"]["pool"] == "confirm")
+            pool = np.where(~roles & confirm)[0]
+            self.test_idx = torch.from_numpy(pool).to(self.dev)
+            self.split_fp = self.d["split"]["fingerprint"]
+        elif cfg.fl.val_frac > 0:
             perm = np.random.default_rng(cfg.seed + 6).permutation(n_test)
             n_val = int(round(cfg.fl.val_frac * n_test))
             self.val_idx = torch.from_numpy(np.sort(perm[:n_val])).to(self.dev)
@@ -124,8 +158,19 @@ class Experiment:
         nkw = dict(floor=1e-3, clip=3.0, warmup=10) if cfg.reward.robust_norm else {}
         self.norm = {k: M.Normalizer(**nkw) for k in ("acc", "cost", "lat", "arl", "faildmg", "debt",
                                                       "v2c", "v3g", "v3c", "v3cg",
-                                                      "v2s", "v3s", "v3sg")}
+                                                      "v2s", "v3s", "v3sg",
+                                                      "v4c", "v4cg", "v4d", "v4g", "prot")}
         self.cov_ema = np.zeros(self.d["num_classes"])   # ARL-v2 class-coverage history
+        self.cov_peak = np.zeros(self.d["num_classes"])  # ARL-v4: best coverage so far
+        self.cov_dur = np.zeros(self.d["num_classes"])   # ARL-v4: rounds without new coverage
+        self.align_ema = np.zeros(self.N)                # ARL-v4: update/validation alignment
+        self._prev_worst_r: float | None = None
+        self.arl4 = cfg.reward.damage_metric == "arl_v4"
+        if cfg.fl.practice and not cfg.fl.val_frac > 0:
+            raise ValueError("a practice episode needs fl.val_frac > 0 (its reward uses validation data)")
+        if (self.arl4 or cfg.reward.protect_weight > 0) and not cfg.fl.val_frac > 0:
+            raise ValueError("ARL-v4 and the protection reward need fl.val_frac > 0 "
+                             "(they use the validation set, never the test set)")
         if cfg.policy.value_feature == "marginal":
             self.value_input = M.expected_marginal_value(
                 self.d["sketch"], cfg.fl.clients_per_round, seed=cfg.seed + 41)
@@ -189,6 +234,18 @@ class Experiment:
                 out = self.model(x[:128])
                 self.local_loss[i] = float(F.cross_entropy(out, y[:128]))
 
+    def _val_grad(self, n: int = 512) -> torch.Tensor:
+        """Gradient of the loss on the first n VALIDATION examples at the current
+        global model (ARL-v4's update alignment). Validation data only; reads
+        no test example, changes no parameter and draws no random number."""
+        set_flat(self.model, self.global_flat)
+        self.model.eval()
+        idx = self.val_idx[:n]
+        self._val_grad_idx = idx
+        loss = F.cross_entropy(self.model(self.x_test[idx]), self.y_test[idx])
+        grads = torch.autograd.grad(loss, list(self.model.parameters()))
+        return torch.cat([g.reshape(-1) for g in grads]).detach()
+
     def _evaluate(self, full: bool = True, idx=None) -> tuple[float, float, float]:
         """Accuracy, loss, and mean accuracy over the worst 10% of classes.
 
@@ -243,13 +300,29 @@ class Experiment:
             }
             for i in range(self.N)
         }
-        p_succ = {
-            i: {m: self.predictor.predict(obs[i], hist[i], m) for m in self.cfg.system.modes}
-            for i in range(self.N)
-        }
+        if self.pv2:
+            self.predictor.t = t
+        if self.cfg.policy.predictor_norm == "round" or self.pv2:
+            self.predictor.set_reference(np.array(
+                [self.predictor.client_features(obs[i], hist[i]) for i in range(self.N)]))
+        p_sd = None
+        if self.pv2:
+            post = {i: {m: self.predictor.predict_client(i, obs[i], hist[i], m)
+                        for m in self.cfg.system.modes} for i in range(self.N)}
+            p_succ = {i: {m: v[0] for m, v in post[i].items()} for i in range(self.N)}
+            p_sd = {i: {m: v[1] for m, v in post[i].items()} for i in range(self.N)}
+        else:
+            p_succ = {
+                i: {m: self.predictor.predict(obs[i], hist[i], m) for m in self.cfg.system.modes}
+                for i in range(self.N)
+            }
         # e^elig_{i,t} (Eq. 3.26): at least one mode clears the threshold.
+        # Gate v2 (thompson): on the optimistic bound p + z*sd, so a client the
+        # predictor knows little about is not written off.
+        z = self.cfg.policy.gate_z if self.cfg.policy.gate_mode == "thompson" else 0.0
         eligible = {
-            i: int(max(p_succ[i].values()) >= self.cfg.policy.elig_threshold)
+            i: int(max(p_succ[i][m] + (z * p_sd[i][m] if p_sd else 0.0)
+                       for m in self.cfg.system.modes) >= self.cfg.policy.elig_threshold)
             for i in range(self.N)
         }
         # True round time under this round's draws -- what the original Oort
@@ -271,6 +344,10 @@ class Experiment:
         noise = self.fc_rng.random(self.N)
         state = {
             "obs": obs, "hist": hist, "p_succ": p_succ, "eligible": eligible,
+            "p_sd": p_sd, "gate_rng": self.gate_rng,
+            "p_post": ({i: {m: self.predictor.posterior(i, obs[i], hist[i], m)
+                            for m in self.cfg.system.modes} for i in range(self.N)}
+                       if self.cfg.policy.gate_mode == "thompson" else None),
             "t_expected": t_expected, "t_est": t_est, "n_i": self.d["n_i"],
             "avail_forecast": np.where(wrong, noise, fc),
             "n_late": len(self.late),
@@ -279,6 +356,10 @@ class Experiment:
             "repr_value": self.value_input,
             "sketch": self.d["sketch"],
             "n_work": self.env.n_work,
+            # K x the mean cost of a Light job: the scale of the safety layer's
+            # spend target (RL2 C6). Observable: from data sizes and mode costs.
+            "cost_ref": float(min(self.cfg.fl.clients_per_round, self.N) * np.mean(
+                [self.env.cost(i, "light") for i in range(self.N)])),
             "debt": self.debt / (1.0 + self.debt.max()),
             "cov_deficit": 1.0 - self.cov_ema / max(float(self.cov_ema.max()), 1e-9),
             # Protocol fix (system.checkin_pool): the clients that checked in
@@ -352,7 +433,7 @@ class Experiment:
         """Server-side estimate of a client's round time from observed descriptors."""
         return est_time(self.cfg, {"obs": state["obs"], "n_work": self.env.n_work}, i, mode, frac)
 
-    def _enforce_budget(self, selected, assign, state, fracs):
+    def _enforce_budget(self, selected, assign, state, fracs, cost_cap=None, allowed=None):
         """Eq. (3.64)-(3.65): per-round cost budget C_max and time limit L_max.
 
         Applied to every policy's chosen action, so constrained comparisons are
@@ -362,25 +443,38 @@ class Experiment:
         is moved to a lighter mode, or dropped once it is already on Light.
         Only observable quantities are used. (For the RL policy this is an
         action projection: the gradient still uses the sampled action.)
+
+        allowed: {client: modes} the policy's safety layer permits (SAFE-PPO's
+        mask). A projection may then only move a client to a lighter mode it
+        permits; with none left, the client is dropped this round (third
+        external review, finding 1). None = every mode, as before.
         """
         sysc = self.cfg.system
-        if sysc.cost_max >= 1e9 and sysc.latency_max >= 1e9:
+        cost_max = sysc.cost_max if cost_cap is None else min(sysc.cost_max, cost_cap)
+        if cost_max >= 1e9 and sysc.latency_max >= 1e9:
             return selected, assign, 0
+
+        def lighter(i, m):
+            m = LIGHTER[m]
+            while m is not None and allowed is not None and m not in allowed.get(i, (m,)):
+                m = LIGHTER[m]
+            return m
+
         assign = dict(assign)
         keep, dropped = [], 0
         for i in selected:
             m = assign[i]
-            while self._est_time(i, m, state, fracs.get(i)) > sysc.latency_max and LIGHTER[m]:
-                m = LIGHTER[m]
+            while self._est_time(i, m, state, fracs.get(i)) > sysc.latency_max and lighter(i, m):
+                m = lighter(i, m)
             if self._est_time(i, m, state, fracs.get(i)) > sysc.latency_max:
                 dropped += 1
                 continue
             assign[i] = m
             keep.append(i)
-        while keep and sum(self.env.cost(i, assign[i], fracs.get(i)) for i in keep) > sysc.cost_max:
+        while keep and sum(self.env.cost(i, assign[i], fracs.get(i)) for i in keep) > cost_max:
             for i in reversed(keep):
-                if LIGHTER[assign[i]]:
-                    assign[i] = LIGHTER[assign[i]]
+                if lighter(i, assign[i]):
+                    assign[i] = lighter(i, assign[i])
                     break
             else:
                 keep.pop()
@@ -436,10 +530,20 @@ class Experiment:
             "gap_max_weak": float(self.gap_max[weak].mean()) if weak.any() else 0.0,
             "ece_weak": ece(wk) if len(P) else 0.0,
             "ece_strong": ece(~wk) if len(P) else 0.0,
+            "n_never": int((self.x_succ == 0).sum()),
+            "n_gap50": int((self.gap_cur >= 50).sum()),
         }
         for m in self.cfg.system.modes:
             out[f"ece_{m}"] = ece(modes == m) if len(P) else 0.0
         return out
+
+    def _practice_metrics(self) -> dict:
+        """Practice episodes measure nothing on the test set: NaN placeholders."""
+        keys = ["acc_client_worst10", "acc_labelmix_worst10", "acc_client_measured",
+                "acc_client_weak", "gap_max_all", "gap_max_weak", "ece_weak", "ece_strong",
+                "n_never", "n_gap50"]
+        keys += [f"ece_{m}" for m in self.cfg.system.modes]
+        return {k: float("nan") for k in keys}
 
     def _measured_client_acc(self):
         """Each client's accuracy on its own held-out test examples, from the
@@ -514,7 +618,17 @@ class Experiment:
             dg["busy_removed"] = [i for i in dg["proposed"] if i in busy]
             dg["pre_budget"] = list(selected)
             dg["rule_modes"] = dict(assign)
-        selected, assign, budget_dropped = self._enforce_budget(selected, assign, state, fracs)
+        # policy.hard_budget_mult: a HARD per-round cap (an action projection,
+        # as for system.cost_max) of mult x the Light reference cost; the
+        # Lagrangian target only steers the average.
+        cap = (self.cfg.policy.hard_budget_mult * state["cost_ref"]
+               if self.cfg.policy.hard_budget_mult > 0 else None)
+        proposed = dict(assign)
+        selected, assign, budget_dropped = self._enforce_budget(
+            selected, assign, state, fracs, cap, getattr(self.policy, "allowed_modes", None))
+        # jobs the budget step made lighter (an action projection: a learning
+        # policy still learns from what it sampled; gap review B10)
+        budget_lighter = sum(1 for i in selected if assign[i] != proposed.get(i, assign[i]))
         self._refresh_losses(selected)
 
         # V^repr_{i,t}(S_t) for every client (Eq. 3.26), not only the selected
@@ -648,7 +762,10 @@ class Experiment:
                     recv_ids.append(i)
 
             # The predictor learns from every issued invitation, success or not.
-            self.predictor.update(state["obs"][i], state["hist"][i], mode, int(ok))
+            if self.pv2:
+                self.predictor.update_client(i, state["obs"][i], state["hist"][i], mode, int(ok))
+            else:
+                self.predictor.update(state["obs"][i], state["hist"][i], mode, int(ok))
             self.cal_probs.append(state["p_succ"][i][mode])
             self.cal_out.append(int(ok))
             self.cal_mode.append(mode)
@@ -660,6 +777,15 @@ class Experiment:
             for i in range(self.N):
                 if i not in success and i not in late_ids:
                     self.since_success[i] += 1
+
+        if self.arl4 and self.cfg.reward.arl4_align and updates:
+            # ARL-v4: how well each delivered update points downhill on the
+            # VALIDATION loss of the model it was trained from.
+            g = self._val_grad()
+            gn = float(g.norm()) + 1e-12
+            for i, u in zip(recv_ids, updates):
+                cos = float(-(u @ g) / (gn * (float(u.norm()) + 1e-12)))
+                self.align_ema[i] = 0.7 * self.align_ema[i] + 0.3 * cos
 
         agg = self.cfg.fl.aggregator
         base_flat = self.global_flat
@@ -703,17 +829,22 @@ class Experiment:
         # Keep a fixed held-out evaluation series for budget/target comparisons.
         # Final headline accuracy and client metrics still use the full test set.
         # Evaluate it last so _last_* describes the reported client population.
-        if self.val_idx is not None:
+        if self.cfg.fl.practice:
+            # Pre-training episode (RL2 M6): validation only, no test set at all.
+            acc_r, _, worst_r = self._evaluate(idx=self.val_idx)
+            acc = test_loss = acc_worst = float("nan")
+        elif self.val_idx is not None:
             # Reward and learning baselines see the validation set only; the
             # reported accuracy is computed afterwards and never fed back.
-            acc_r, _, _ = self._evaluate(idx=self.val_idx)
+            acc_r, _, worst_r = self._evaluate(idx=self.val_idx)
             acc, test_loss, acc_worst = self._evaluate(full=False)
         else:
             acc_r, loss_r, worst_r = self._evaluate(full=False)
             acc, test_loss, acc_worst = acc_r, loss_r, worst_r
         acc_fixed = acc
-        eval_fixed_n = len(self._last_ok) if self._last_ok is not None else 0
-        if t == self.cfg.fl.rounds and self.eval_idx is not None:
+        eval_fixed_n = 0 if self.cfg.fl.practice else (
+            len(self._last_ok) if self._last_ok is not None else 0)
+        if t == self.cfg.fl.rounds and self.eval_idx is not None and not self.cfg.fl.practice:
             acc, test_loss, acc_worst = self._evaluate(full=True)
         d_acc = acc_r - (self._prev_acc_r if self._prev_acc_r is not None else acc_r)
         self._prev_acc_r = acc_r
@@ -812,6 +943,40 @@ class Experiment:
         b = self.cfg.reward.arl_v2_ema
         self.cov_ema = (1 - b) * self.cov_ema + b * cov
 
+        # ARL-v4 (docs/RL2_DESIGN.md): expected work the chosen mode gave up
+        # against the best confidently feasible, affordable mode; a deficit
+        # term that grows while classes go uncovered; per-client difference
+        # credit on deficit-weighted delivered coverage.
+        rw = self.cfg.reward
+        self.cov_peak, self.cov_dur = M.deficit_update(self.cov_ema, self.cov_peak, self.cov_dur, cov)
+        arl_v4_deficit = M.deficit_term(self.cov_ema, self.cov_peak, self.cov_dur)
+        # The counterfactual must fit the round's JOINT budget (the safety
+        # layer's target): client i may use what the target leaves after the
+        # other invited clients' planned jobs.
+        target = (self.cfg.policy.cost_target_mult * state["cost_ref"]
+                  if self.cfg.policy.cost_target_mult > 0 else None)
+        planned = {j: self.env.cost(j, assign[j], fracs.get(j)) for j in selected}
+        total_planned = float(sum(planned.values()))
+        sd = state.get("p_sd")
+        v4: dict[int, float] = {}
+        for i in selected:
+            p = state["p_succ"][i]
+            pc = {m: max(0.0, p[m] - (rw.arl4_z * sd[i][m] if sd else 0.0)) for m in p}
+            afford = None
+            if target is not None:
+                room = target - (total_planned - planned[i])
+                afford = {m for m in p if self.env.cost(i, m, fracs.get(i)) <= room}
+            q = 1.0 + max(0.0, float(self.align_ema[i])) if rw.arl4_align else 1.0
+            mult = phi[i] * (1.0 + sketch[i] @ deficit) * q
+            v4[i] = float(mult * M.arl4_expected_gap(pc, assign[i], ep, thr, afford))
+        arl_v4_loss = float(sum(v4.values()))
+        # The gain ARL-v4 rewards is the deficit-weighted class coverage the
+        # DELIVERED set achieves, f(D) = sum_k w_k max_{i in D} c_ik: adding a
+        # successful client never lowers it (review finding 5). Per-client
+        # difference credits f(D) - f(D minus i) are used only as individual
+        # advantages (no credit_total), never summed into the joint reward.
+        v4_set_gain = float((sketch[ok_ids].max(axis=0) * (1.0 + deficit)).sum()) if ok_ids else 0.0
+
         # Fairness debt (Sec. 3.13): each eligible client accrues its fair share
         # K/N of service per round and pays it off with a successful contribution.
         rho = len(selected) / self.N if selected else 0.0
@@ -841,6 +1006,14 @@ class Experiment:
             else:
                 damage_term = (self.norm["arl"](arl_v3_loss)
                                - r.lambda_cov / max(r.lambda_arl, 1e-9) * self.norm["v3g"](arl_v3_gain))
+        elif r.damage_metric == "arl_v4":
+            if self.cfg.policy.per_client_credit:
+                damage_term = r.arl4_mu * self.norm["v4d"](arl_v4_deficit)
+            else:
+                damage_term = (self.norm["arl"](arl_v4_loss)
+                               + r.arl4_mu * self.norm["v4d"](arl_v4_deficit)
+                               - r.lambda_cov / max(r.lambda_arl, 1e-9)
+                               * self.norm["v4g"](v4_set_gain))
         else:
             raise ValueError(f"unknown reward.damage_metric {r.damage_metric}")
         fairness_term = cv_sel if r.fairness_metric == "cv_selection" else cv
@@ -859,6 +1032,14 @@ class Experiment:
         if r.lambda_debt > 0:
             z_debt = self.norm["debt"](float(self.debt.mean()))
             reward -= r.lambda_debt * z_debt
+        z_prot = None
+        if r.protect_weight > 0:
+            # Reward v2 protection term: gain in the worst-10%-class accuracy
+            # on the validation set (never the test set).
+            d_worst = worst_r - (self._prev_worst_r if self._prev_worst_r is not None else worst_r)
+            self._prev_worst_r = worst_r
+            z_prot = self.norm["prot"](d_worst)
+            reward += r.protect_weight * z_prot
         shared_reward = reward
         client_adv = None
         if r.batch_client_norm:
@@ -875,6 +1056,16 @@ class Experiment:
             client_adv = {i: -r.lambda_arl * z[i] for i in selected}
             if self.cfg.policy.credit_split:
                 set_adv = -r.lambda_arl * self.norm["v2s"].batch([arl_v2])[0]
+        elif r.damage_metric == "arl_v4" and self.cfg.policy.per_client_credit:
+            zl = norm("v4c", v4)
+            if self.cfg.policy.credit_total:
+                # one joint objective: summed per-client losses + set-level gain
+                client_adv = {i: -r.lambda_arl * zl[i] for i in selected}
+                reward += r.lambda_cov * self.norm["v4g"](v4_set_gain)
+            else:
+                dc = M.difference_credit(sketch, ok_ids, 1.0 + deficit)
+                zg = norm("v4cg", {i: dc.get(i, 0.0) for i in selected})
+                client_adv = {i: -r.lambda_arl * zl[i] + r.lambda_cov * zg[i] for i in selected}
         elif r.damage_metric == "arl_v3" and self.cfg.policy.per_client_credit:
             zl, zg = norm("v3c", v3_loss), norm("v3cg", v3_gain)
             client_adv = {i: -r.lambda_arl * zl[i] + r.lambda_cov * zg[i] for i in selected}
@@ -896,6 +1087,7 @@ class Experiment:
             # For the baselines that learn from what arrived (FAVOR, DELTA, REFL).
             "acc": acc_r, "recv_ids": list(recv_ids), "updates": dict(zip(recv_ids, updates)),
             "stale": dict(zip(recv_ids, stale)), "grad_var": grad_var, "base_flat": base_flat,
+            "cost": round_cost,
         })
 
         weak = self.env.weak
@@ -903,9 +1095,20 @@ class Experiment:
             "round": t, "accuracy": acc, "acc_worst10": acc_worst,
             "accuracy_fixed": acc_fixed, "eval_fixed_n": eval_fixed_n,
             "test_loss": test_loss, "reward": reward,
-            "cost": round_cost, "latency": latency,
+            "cost": round_cost,
+            # K x mean Light cost: the scale of SAFE-PPO's spend target and cap,
+            # logged so a report can check the target (gap review A3)
+            "cost_ref": float(state["cost_ref"]), "latency": latency,
             "n_selected": len(selected), "n_success": n_succ,
             "fail_ratio": fail_ratio, "empty_round": int(not selected),
+            # clients reachable this round: a round with nobody online is not a
+            # scheduler's starvation (review 3, finding 3)
+            "n_online": int(self.env._draw["available"].sum()),
+            # the safety layer's exceptions, logged every round (fourth review,
+            # finding 5): clients ruled out this round, and clients allowed
+            # Light only on their optimistic bound (0 for other policies)
+            "n_abstain": int(getattr(self.policy, "mask_stats", {}).get("abstain", 0)),
+            "n_light_override": int(getattr(self.policy, "mask_stats", {}).get("light_override", 0)),
             "arl_online": arl_on, "arl_selected": arl_sel, "arl_oracle": arl_or,
             "cv": cv, "cv_selection": cv_sel, "jain": M.jain(self.x_succ),
             "ece": M.calibration_error(self.cal_probs[-200:], self.cal_out[-200:]),
@@ -915,13 +1118,15 @@ class Experiment:
             "weak_selected": int(sum(weak[i] for i in selected)),
             "weak_success": int(sum(weak[i] and success[i] for i in selected)),
             "late_delivered": late_delivered,
-            "budget_dropped": budget_dropped,
+            "budget_dropped": budget_dropped, "budget_lighter": budget_lighter,
             "debt_mean": float(self.debt.mean()),
             "arl_v2": arl_v2,
             "departed": int(self.env.departed.sum()),
             "arl_v3_loss": arl_v3_loss, "arl_v3_gain": arl_v3_gain,
+            "arl_v4_loss": arl_v4_loss, "arl_v4_deficit": arl_v4_deficit,
             "val_accuracy": acc_r, "cov_lost": cov_lost, "cov_lost_avoid": cov_lost_avoid,
-            **self._client_metrics(success, late_ids),
+            **(self._practice_metrics() if self.cfg.fl.practice
+               else self._client_metrics(success, late_ids)),
             "gate_filled": int(getattr(self.policy, "gate_filled", 0)),
             "wall_s": time.time() - t0,
         }
@@ -933,9 +1138,12 @@ class Experiment:
                                  "latency": latency, "damage_metric": r.damage_metric,
                                  "damage_raw": {"fail_ratio": fail_ratio, "arl_selected": arl_sel,
                                                 "arl_online": arl_on, "arl_v2": arl_v2,
-                                                "arl_v3_loss": arl_v3_loss, "arl_v3_gain": arl_v3_gain},
+                                                "arl_v3_loss": arl_v3_loss, "arl_v3_gain": arl_v3_gain,
+                                                "arl_v4_loss": arl_v4_loss, "arl_v4_deficit": arl_v4_deficit,
+                                                "arl_v4_set_gain": v4_set_gain},
                                  "fairness_raw": fairness_term, "debt_raw": float(self.debt.mean()),
                                  "z": {"acc": z_acc, "cost": z_cost, "lat": z_lat, "debt": z_debt,
+                                       "protect": z_prot,
                                        "damage_term": damage_term},
                                  "norm": {"acc": norm_state(self.norm["acc"], z_acc),
                                           "cost": norm_state(self.norm["cost"], z_cost),
@@ -1041,6 +1249,8 @@ class Experiment:
         return self.rows
 
     def save(self) -> str:
+        if self.cfg.fl.practice:
+            raise RuntimeError("a practice (pre-training) episode is never saved as a result")
         os.makedirs(self.cfg.out, exist_ok=True)
         path = os.path.join(self.cfg.out, f"{self.cfg.tag}.csv")
         # Write-then-rename: the sweep runners skip any run whose CSV exists,
@@ -1059,6 +1269,10 @@ class Experiment:
         # start-up. If the files changed while it ran, say so -- the sweep and
         # the confirmatory report then refuse to use the result.
         meta["code_hash"] = CODE_LOADED
+        if self.split_fp:
+            meta["split_fingerprint"] = self.split_fp
+        if getattr(self.policy, "checkpoint_sha", None):
+            meta["init_checkpoint_sha256"] = self.policy.checkpoint_sha
         if code_hash() != CODE_LOADED:
             meta["code_changed_during_run"] = True
             print(f"[{self.cfg.tag}] WARNING: simulator source changed during the run; "

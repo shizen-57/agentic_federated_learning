@@ -1,0 +1,32 @@
+30 runs selected, 0 already done, 30 to run with 3 job(s)
+[1/30] cifar_c00/ppo_full_mimic_s286 75s
+[2/30] cifar_c00/ppo_full_mimic_s285 77s
+[3/30] cifar_c00/ppo_full_mimic_s287 80s
+[4/30] cifar_c17/ppo_full_mimic_s285 62s
+[5/30] cifar_c00/ppo_full_mimic_s288 71s
+[6/30] cifar_c00/ppo_full_mimic_s289 73s
+[7/30] cifar_c17/ppo_full_mimic_s286 65s
+[8/30] cifar_c17/ppo_full_mimic_s287 67s
+[9/30] cifar_c17/ppo_full_mimic_s288 63s
+[10/30] cifar_c17/ppo_full_mimic_s289 63s
+[11/30] cifar_c20/ppo_full_mimic_s286 65s
+[12/30] cifar_c20/ppo_full_mimic_s285 66s
+[13/30] cifar_c20/ppo_full_mimic_s287 67s
+[14/30] cifar_c20/ppo_full_mimic_s288 63s
+[15/30] cifar_c20/ppo_full_mimic_s289 65s
+[16/30] cifar_c32/ppo_full_mimic_s285 64s
+[17/30] cifar_c32/ppo_full_mimic_s286 63s
+[18/30] cifar_c32/ppo_full_mimic_s287 63s
+[19/30] cifar_c32/ppo_full_mimic_s288 61s
+[20/30] cifar_c32/ppo_full_mimic_s289 61s
+[21/30] cifar_c33/ppo_full_mimic_s285 83s
+[22/30] cifar_c33/ppo_full_mimic_s286 82s
+[23/30] cifar_c33/ppo_full_mimic_s287 81s
+[24/30] cifar_c33/ppo_full_mimic_s288 84s
+[25/30] cifar_c34/ppo_full_mimic_s285 69s
+[26/30] cifar_c33/ppo_full_mimic_s289 81s
+[27/30] cifar_c34/ppo_full_mimic_s286 68s
+[28/30] cifar_c34/ppo_full_mimic_s287 65s
+[29/30] cifar_c34/ppo_full_mimic_s288 64s
+[30/30] cifar_c34/ppo_full_mimic_s289 60s
+finished 30, failed 0, wall 702s

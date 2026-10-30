@@ -91,6 +91,55 @@ CONDITIONS: dict[str, dict] = {
     "arl3_full":             {"policy.name": "rl", "fl.aggregator": "fedprox",
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3", "policy.per_client_credit": True},
+    # Development revision (docs/DIAGNOSTIC_FINDINGS.md): ARL-v3 with the
+    # success predictor's client features standardised per round.
+    "arl3_full_pn":          {"policy.name": "rl", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3", "policy.per_client_credit": True,
+                              "policy.predictor_norm": "round"},
+    # Development revision 2: ARL-v3 that may only draw feasible modes.
+    "arl3_full_fm":          {"policy.name": "rl", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3", "policy.per_client_credit": True,
+                              "policy.mode_mask": "feasible"},
+    # RL2 M1: ARL-v3 with predictor v2 and the Thompson gate (docs/RL2_DESIGN.md C1+C2).
+    "arl3_full_pg":          {"policy.name": "rl", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3", "policy.per_client_credit": True,
+                              "policy.predictor": "v2", "policy.gate_mode": "thompson"},
+    # RL2 M2: the PPO learner with ARL-v3's reward (docs/RL2_DESIGN.md C3).
+    "ppo_v3":                {"policy.name": "safe_ppo", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3", "policy.per_client_credit": True},
+    # RL2 M3: PPO with the attention set encoder and memory (C3 + C4 + C5).
+    "ppo_att":               {"policy.name": "safe_ppo", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3", "policy.per_client_credit": True,
+                              "policy.encoder": "attention", "policy.memory": True},
+    # RL2 M4: PPO + attention + memory + predictor v2 + Thompson gate + the
+    # safety layer (feasible mask with margin, cost constraint, trust curriculum).
+    "ppo_safe":              {"policy.name": "safe_ppo", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v3", "policy.per_client_credit": True,
+                              "policy.encoder": "attention", "policy.memory": True,
+                              "policy.predictor": "v2", "policy.gate_mode": "thompson",
+                              "policy.mode_mask": "feasible", "policy.mode_mask_z": 0.5,
+                              "policy.cost_target_mult": 1.25, "policy.curriculum": True},
+    # RL2 M5/M5b: everything -- SAFE-PPO (attention, memory, predictor v2 with
+    # evidence ageing, Thompson gate, safety layer: feasible mask, soft cost
+    # constraint, hard per-round cap, curriculum) with reward v2 (validation
+    # worst-class protection) and ARL-v4; cost handled by the constraint, not a
+    # fixed reward weight (beta 0).
+    "ppo_full":              {"policy.name": "safe_ppo", "fl.aggregator": "fedprox",
+                              "policy.value_feature": "marginal",
+                              "reward.damage_metric": "arl_v4", "policy.per_client_credit": True,
+                              "policy.encoder": "attention", "policy.memory": True,
+                              "policy.predictor": "v2", "policy.gate_mode": "thompson",
+                              "policy.pred_decay": 0.98,
+                              "policy.mode_mask": "feasible", "policy.mode_mask_z": 0.5,
+                              "policy.cost_target_mult": 1.25, "policy.hard_budget_mult": 2.0,
+                              "policy.curriculum": True,
+                              "reward.protect_weight": 0.5, "reward.beta": 0.0},
     "arl3_shared":           {"policy.name": "rl", "fl.aggregator": "fedprox",
                               "policy.value_feature": "marginal",
                               "reward.damage_metric": "arl_v3"},
@@ -137,6 +186,58 @@ CONDITIONS: dict[str, dict] = {
     "sens_fair01":           {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_fair": 0.1},
     "sens_fair1":            {"policy.name": "rl", "fl.aggregator": "fedprox", "reward.lambda_fair": 1.0},
 }
+
+
+
+def _variant(base: str, drop: tuple = (), **change) -> dict:
+    """A condition equal to `base` with keys removed (back to the group's value)
+    and/or changed; keys are written with "__" for "."."""
+    out = {k: v for k, v in CONDITIONS[base].items() if k not in drop}
+    out.update({k.replace("__", "."): v for k, v in change.items()})
+    return out
+
+
+# RL2 screen B (docs/RL2_SCREEN_B.md): ppo_full with exactly ONE component
+# removed, so each component's effect is measured on its own, plus MimiC
+# aggregation, the same stack without ARL-v4, and a repaired simple scheduler.
+CONDITIONS.update({
+    "ppo_full_mimic":   _variant("ppo_full", fl__aggregator="mimic"),
+    "ppo_full_mlp":     _variant("ppo_full", policy__encoder="mlp"),           # no attention
+    "ppo_full_nomem":   _variant("ppo_full", policy__memory=False),            # no memory
+    "ppo_full_pv1":     _variant("ppo_full", ("policy.pred_decay",),           # original predictor
+                                 policy__predictor="v1", policy__gate_mode="top",  # (Thompson needs v2)
+                                 policy__mode_mask_z=0.0),
+    "ppo_full_top":     _variant("ppo_full", policy__gate_mode="top"),         # no Thompson gate
+    "ppo_full_nodecay": _variant("ppo_full", policy__pred_decay=1.0),          # predictor never forgets
+    "ppo_full_nomask":  _variant("ppo_full", ("policy.mode_mask_z",),          # any mode may be drawn
+                                 policy__mode_mask="none"),
+    "ppo_full_fixcost": _variant("ppo_full", ("reward.beta",),                 # fixed cost weight, no
+                                 policy__cost_target_mult=0.0),                # Lagrangian constraint
+    "ppo_full_nocap":   _variant("ppo_full", policy__hard_budget_mult=0.0),    # no hard round cap
+    "ppo_full_nocurr":  _variant("ppo_full", policy__curriculum=False),        # no trust curriculum
+    "ppo_full_noprot":  _variant("ppo_full", reward__protect_weight=0.0),      # no protection reward
+    "ppo_full_arl3":    _variant("ppo_full", reward__damage_metric="arl_v3"),  # ARL-v3 instead of v4
+    "ppo_full_rawfail": _variant("ppo_full", reward__damage_metric="raw_fail",  # no ARL at all:
+                                 policy__per_client_credit=False),             # plain failure count
+    # always Light with MimiC aggregation: screen C / confirmation control, so
+    # a gain of the MimiC RL is not just MimiC's own
+    "rl_light_mimic":   _variant("rl_light", fl__aggregator="mimic"),
+    # the repaired simple scheduler: always Light, with the same repaired
+    # predictor and gate as ppo_full
+    "rl_light_pg":      _variant("rl_light", policy__predictor="v2", policy__gate_mode="thompson",
+                                 policy__pred_decay=0.98),
+})
+
+# Gap review (docs/GAP_REVIEW.md, A1 and C5). The tuned method aggregates with
+# MimiC, so every comparator gets a MimiC version: a comparison then differs
+# in the scheduler only. REFL keeps its own staleness-aware aggregation, which
+# is part of the published method. b_fairq_ew: a published-style
+# fairness-guaranteed selection (Lyapunov queues, after RBCS-F).
+CONDITIONS["b_fairq_ew"] = {"policy.name": "fairq", "fl.aggregator": "fedprox",
+                            "policy.mode_rule": "expected_work"}
+CONDITIONS.update({f"{c}_mimic": _variant(c, fl__aggregator="mimic")
+                   for c in ("arl3_full_pg", "v2_rawfail", "b_oort_ew", "b_favor_ew", "b_delta_ew",
+                             "b_cov_ew", "b_fairq_ew")})
 
 
 def apply(raw: dict, overrides: dict) -> dict:

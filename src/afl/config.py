@@ -21,6 +21,22 @@ class DataCfg:
     max_samples: int = 600
     num_classes: int = 10
     seed: int = 0
+    split: str = "per_seed"             # per_seed: validation/test (and FEMNIST writers and
+                                        # held-out examples) are drawn from each run's seed,
+                                        # as in s2. persistent: every example has ONE role
+                                        # (train / validation / test) for all seeds, and
+                                        # FEMNIST writers are split once into a practice
+                                        # pool (pre-training only) and an evaluation pool
+                                        # (afl.data.persistent_*; RL2 review finding 1)
+    split_seed: int = 20261027          # fixes the persistent split; never a run seed
+    practice_writer_share: float = 0.5  # FEMNIST: share of writers kept for practice
+    eval_pool: str = "dev"              # persistent split only: which reserved evaluation pool a
+                                        # run is measured on. dev: development (screens, tuning).
+                                        # confirm: the final confirmation only (FEMNIST: writers
+                                        # never seen in practice or development; pooled test sets:
+                                        # test examples never measured in development)
+    confirm_share: float = 0.5          # share of the evaluation writers / test examples reserved
+                                        # for the confirmation
 
 
 @dataclass
@@ -82,6 +98,8 @@ class SystemCfg:
                                         # round, as real FL servers do. Off = the
                                         # original runs, where only policies that read
                                         # the availability signal avoided offline clients
+    energy_scale: float = 1.0           # sensitivity: multiplies every device's battery capacity
+    bandwidth_scale: float = 1.0        # sensitivity: multiplies every device's bandwidth
     device_trace: str = "tiers"         # tiers: the three guessed device tiers;
                                         # fedscale: real per-device speed and
                                         # bandwidth from FedScale's trace
@@ -124,6 +142,10 @@ class FLCfg:
                                         # reported accuracy uses only the rest. 0 = the
                                         # original runs, where the reward was computed
                                         # on test images that the final score also used
+    practice: bool = False              # RL2 pre-training episode: the reward uses the
+                                        # validation set as always, and every test-set
+                                        # evaluation is skipped (reported metrics are NaN);
+                                        # a practice run can never be saved as a result
     clean_rng: bool = False             # protocol fix: the FL model is initialised from
                                         # its own seed (identical for every method with
                                         # the same seed), and policy init, policy
@@ -170,7 +192,13 @@ class RewardCfg:
                                         # work (success prob x local epochs) the chosen
                                         # mode gave up, plus credit (lambda_cov) for
                                         # useful work delivered on under-covered data
-    lambda_cov: float = 0.5             # ARL-v3 success-credit weight
+    lambda_cov: float = 0.5             # ARL-v3 / ARL-v4 success-credit weight
+    arl4_mu: float = 1.0                # ARL-v4: weight of the representation-deficit term
+    arl4_z: float = 1.0                 # ARL-v4: confident success = p - z*sd (predictor v2)
+    arl4_align: bool = True             # ARL-v4: weight clients by how well their delivered
+                                        # updates align with the validation gradient
+    protect_weight: float = 0.0         # reward v2 (RL2 C7): weight of the gain in the
+                                        # worst-10%-class accuracy on the VALIDATION set
     arl_v2_ema: float = 0.1             # rate of the class-coverage moving average that
                                         # ARL-v2 uses to tell short gaps from long ones
     robust_norm: bool = False           # protocol fix: every reward normaliser uses a
@@ -189,12 +217,68 @@ class RewardCfg:
 class PolicyCfg:
     name: str = "rl"                    # random | fedcs | powerofchoice | oort | rl
     elig_threshold: float = 0.5         # e^elig_{i,t} gate (Sec. 3.10)
+    predictor: str = "v1"               # v1: the original success predictor; v2: standardised
+                                        # features + per-client Beta correction + uncertainty
+                                        # (afl.predictor.SuccessPredictorV2, RL2 design C1)
+    gate_mode: str = "top"              # top: gate fallback = highest predicted success (original);
+                                        # thompson: eligibility on p + gate_z*sd and fallback
+                                        # by Thompson sampling (needs predictor v2; RL2 C2)
+    gate_z: float = 1.0
+    pred_decay: float = 1.0             # predictor v2: per-round weight of a client's own past
+                                        # outcomes (1 = never forgets, the M1 behaviour)
+    mode_mask_z: float = 0.0           # feasible-mode mask on p - z*sd (needs predictor v2)
+    # SAFE-PPO safety layer (RL2 design C6)
+    cost_target_mult: float = 0.0       # 0 = off; else Lagrangian constraint: mean round cost
+                                        # <= mult x (K x mean cost of a Light job)
+    lagrange_lr: float = 0.05           # dual ascent step on the cost multiplier
+    hard_budget_mult: float = 0.0       # 0 = off; else a HARD per-round cost cap of mult x
+                                        # (K x mean Light cost), enforced by projecting the
+                                        # action (lighter modes, then dropping the last pick)
+    curriculum: bool = False            # trust curriculum: Light only, then Standard, then
+                                        # Priority, unlocked by the predictor's recent calibration
+    curr_err: float = 0.1               # calibration error needed to unlock the next level
+    curr_min: int = 200                 # invitations observed before a level can unlock
+    mode_mask: str = "none"             # none: the RL policy may draw any mode (original).
+                                        # feasible: only modes whose predicted success is
+                                        # >= elig_threshold (else only the most likely
+                                        # one), with the log-probability of that masked
+                                        # draw (docs/DIAGNOSTIC_FINDINGS.md, option d)
+    predictor_norm: str = "none"        # none: the success predictor sees raw client
+                                        # features (original). round: they are centred
+                                        # and scaled by this round's whole client
+                                        # population first, so training on (mostly)
+                                        # failures cannot turn "slow, low battery" into
+                                        # "likely to succeed" (docs/DIAGNOSTIC_FINDINGS.md)
     strict_gate: bool = False           # protocol fix: when fewer than K clients pass the
                                         # gate, keep the ones that pass and fill the rest
                                         # with the highest predicted success (instead of
                                         # dropping the gate for everyone)
     rl_lr: float = 1e-2
     rl_hidden: int = 32
+    # SAFE-PPO (policy.name = safe_ppo; docs/RL2_DESIGN.md C3). Pre-tuning defaults.
+    ppo_lr: float = 3e-3
+    ppo_clip: float = 0.2
+    ppo_epochs: int = 4
+    ppo_batch: int = 8                  # rounds per update
+    ppo_gamma: float = 0.9
+    ppo_lambda: float = 0.95
+    ppo_vf_coef: float = 0.5
+    ppo_ent_start: float = 0.01
+    ppo_ent_end: float = 0.001
+    ppo_norm_adv: bool = True
+    ppo_grad_clip: float = 1.0
+    # SAFE-PPO network and memory (RL2 design C4, C5)
+    encoder: str = "mlp"                # mlp: each client on its own; attention: clients attend
+                                        # to each other + pointer picks (AttnNet)
+    attn_dim: int = 64
+    attn_heads: int = 4
+    attn_layers: int = 2
+    memory: bool = False                # per-client history features + GRU over recent rounds
+    mem_hidden: int = 32
+    mem_window: int = 5
+    mem_ema: float = 0.2
+    init_checkpoint: str = ""           # RL2 C9: start SAFE-PPO from pre-trained weights
+                                        # (scripts/pretrain.py); "" = from scratch
     entropy_coef: float = 0.01
     value_feature: str = "standalone"   # the RL policy's "value" input. standalone: the
                                         # original static prior (number of classes a
@@ -250,12 +334,19 @@ class PolicyCfg:
     oort_estimated_time: bool = False   # simulator fix: Oort's deadline penalty uses the
                                         # round time estimated from observed speed and
                                         # bandwidth, not this round's true time
+    oort_eps: float = 0.2               # Oort: share of the K slots given to exploration
+    oort_alpha: float = 2.0             # Oort: exponent of the deadline penalty
+    # Lyapunov fairness queues after RBCS-F (Huang et al., IEEE TPDS 2021;
+    # policies/published.py FairQueuePolicy)
+    fairq_beta: float = 0.05            # long-term selection rate promised to every client
+    fairq_v: float = 1.0                # weight of efficiency against the fairness queues
     # FAVOR (Wang et al., INFOCOM 2020)
     favor_target: float = 0.0           # target accuracy Omega; 0 = the paper's value
                                         # for the dataset (see FAVORPolicy)
     favor_pca: int = 100                # PCA dimensions per model
     favor_hidden: int = 512
     favor_gamma: float = 0.9
+    favor_lr: float = 1e-3              # Adam step of FAVOR's Q-network
     # DELTA (Wang et al., NeurIPS 2023)
     delta_alpha: float = 0.5            # alpha_1 = alpha_2 (the paper's default)
     # REFL (Abdelmoniem et al., EuroSys 2023)

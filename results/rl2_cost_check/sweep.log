@@ -1,0 +1,17 @@
+15 runs selected, 0 already done, 15 to run with 3 job(s)
+[1/15] femnist_base/ppo_full_mimic_s281 44s
+[2/15] femnist_base/ppo_full_mimic_s282 45s
+[3/15] femnist_base/ppo_full_mimic_s280 45s
+[4/15] femnist_base/ppo_full_mimic_s284 42s
+[5/15] femnist_cap_target/ppo_full_mimic_s280 45s
+[6/15] femnist_base/ppo_full_mimic_s283 52s
+[7/15] femnist_cap_target/ppo_full_mimic_s281 43s
+[8/15] femnist_cap_target/ppo_full_mimic_s282 40s
+[9/15] femnist_cap_target/ppo_full_mimic_s283 40s
+[10/15] femnist_cap_target/ppo_full_mimic_s284 40s
+[11/15] femnist_fast_dual/ppo_full_mimic_s280 44s
+[12/15] femnist_fast_dual/ppo_full_mimic_s281 46s
+[13/15] femnist_fast_dual/ppo_full_mimic_s282 47s
+[14/15] femnist_fast_dual/ppo_full_mimic_s283 49s
+[15/15] femnist_fast_dual/ppo_full_mimic_s284 46s
+finished 15, failed 0, wall 230s

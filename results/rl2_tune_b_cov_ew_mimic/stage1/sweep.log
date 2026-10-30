@@ -1,0 +1,37 @@
+35 runs selected, 0 already done, 35 to run with 4 job(s)
+[1/35] c00/b_cov_ew_mimic_s221 24s
+[2/35] c00/b_cov_ew_mimic_s222 35s
+[3/35] c00/b_cov_ew_mimic_s223 36s
+[4/35] c00/b_cov_ew_mimic_s220 40s
+[5/35] c00/b_cov_ew_mimic_s224 26s
+[6/35] c01/b_cov_ew_mimic_s221 28s
+[7/35] c01/b_cov_ew_mimic_s220 34s
+[8/35] c01/b_cov_ew_mimic_s222 32s
+[9/35] c01/b_cov_ew_mimic_s223 27s
+[10/35] c01/b_cov_ew_mimic_s224 25s
+[11/35] c02/b_cov_ew_mimic_s220 41s
+[12/35] c02/b_cov_ew_mimic_s221 48s
+[13/35] c02/b_cov_ew_mimic_s222 44s
+[14/35] c02/b_cov_ew_mimic_s223 45s
+[15/35] c03/b_cov_ew_mimic_s221 22s
+[16/35] c02/b_cov_ew_mimic_s224 45s
+[17/35] c03/b_cov_ew_mimic_s220 38s
+[18/35] c03/b_cov_ew_mimic_s222 33s
+[19/35] c03/b_cov_ew_mimic_s223 35s
+[20/35] c03/b_cov_ew_mimic_s224 25s
+[21/35] c04/b_cov_ew_mimic_s220 46s
+[22/35] c04/b_cov_ew_mimic_s221 46s
+[23/35] c04/b_cov_ew_mimic_s222 43s
+[24/35] c04/b_cov_ew_mimic_s223 48s
+[25/35] c04/b_cov_ew_mimic_s224 48s
+[26/35] c05/b_cov_ew_mimic_s220 39s
+[27/35] c05/b_cov_ew_mimic_s221 36s
+[28/35] c05/b_cov_ew_mimic_s222 36s
+[29/35] c05/b_cov_ew_mimic_s223 26s
+[30/35] c05/b_cov_ew_mimic_s224 31s
+[31/35] c06/b_cov_ew_mimic_s220 48s
+[32/35] c06/b_cov_ew_mimic_s221 46s
+[33/35] c06/b_cov_ew_mimic_s222 40s
+[34/35] c06/b_cov_ew_mimic_s223 47s
+[35/35] c06/b_cov_ew_mimic_s224 36s
+finished 35, failed 0, wall 342s

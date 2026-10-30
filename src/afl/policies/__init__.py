@@ -1,8 +1,9 @@
 from .baselines import (RandomPolicy, FedCSPolicy, PowerOfChoicePolicy, OortPolicy,
                         RoundRobinPolicy, FedCERPolicy, FedCGPolicy,
                         GreedyCoveragePolicy)
-from .published import FAVORPolicy, DELTAPolicy, REFLPolicy
+from .published import FAVORPolicy, DELTAPolicy, REFLPolicy, FairQueuePolicy
 from .rl import RLPolicy
+from .safe_rl import SafePPOPolicy
 
 REGISTRY = {
     "random": RandomPolicy,
@@ -16,7 +17,9 @@ REGISTRY = {
     "favor": FAVORPolicy,
     "delta": DELTAPolicy,
     "refl": REFLPolicy,
+    "fairq": FairQueuePolicy,
     "rl": RLPolicy,
+    "safe_ppo": SafePPOPolicy,
 }
 
 
