@@ -320,3 +320,26 @@ def test_second_development_block_is_registered():
     seeds.check([400, 401, 402], "dev")
     with pytest.raises(ValueError):
         seeds.check([399], "dev")
+
+
+# ------------------------------------------------- the two checking scripts
+
+def test_sim_truth_and_predictor_check_reports_render():
+    import predictor_check as pc
+    import sim_truth as stt
+    assert pc.ece([0.1, 0.1, 0.9, 0.9], [0, 0, 1, 1]) == pytest.approx(0.1)
+    mode = lambda ok: {"ok": ok, "energy": 0.0, "dropped": 0.3, "deadline": 0.1, "rejected": 0.0}  # noqa: E731
+    res = {"dataset": "femnist", "seeds": [403], "set": [], "rounds": 5, "groups": {
+        g: {"share": 0.25, "online": 0.8, "modes": {m: mode(0.5) for m in MODES}, "any_mode": 0.5,
+            "light_below_0.2": 0.0, "light_below_0.5": 0.4, "light_median": 0.5, "cost_light": 0.7}
+        for g in stt.GROUPS}}
+    text = stt.render(res)
+    assert "| weak | 25% | 0.80 | 0.50 | 0.50 | 0.50 | 0.50 | 0.30 / 0.10 / 0.00 | 40% | 0.70 |" in text
+    ver = {"brier": 0.2, "ece": 0.05, "by_mode": {m: [0.5, 0.4] for m in MODES},
+           "by_group": {g: [0.3, 0.2] for g in pc.GROUPS}, "rule_share": {m: 1 / 3 for m in MODES},
+           "rule_ok": 0.5, "rule_epochs_per_cost": 0.7,
+           "rules": {r: {"share": {m: 1 / 3 for m in MODES}, "ok": 0.5, "epochs_per_cost": 0.7,
+                         "jobs_per_cost": 0.6} for r in pc.RULES}}
+    out = pc.render({"dataset": "femnist", "seeds": [403], "set": [], "rounds": 5,
+                     "how": {h: {v: ver for v in pc.VERSIONS} for h in ("random", "rule")}})
+    assert "| v3 | 0.200 | 0.050 | 0.50 / 0.40 |" in out and "| always Light | 33% / 33% / 33% | 50% | 0.70 | 0.60 |" in out

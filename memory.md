@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-10-30 (handover file docs/HANDOVER.md written for another assistant; session 1 results checked: GPU=CPU, cost check keeps base, tuning holds on CIFAR, 8 comparators tuned -- tuned always-Light+MimiC and fairness queues score above c34; next: ARL screen)
+Last updated: 2026-11-09 (review 5: simulator and method weaknesses found and written up in docs/REVIEW_5.md; opt-in fixes built and tested; predictor and job-rule checks done; 60-run pilot running here; server session 2 = ARL screen still open)
 
 ---
 
@@ -72,6 +72,9 @@ Repo: `shizen-57/agentic_federated_learning`, working branch
 
 ## 4. Where things are
 
+- **Review 5 (2026-11-09):** `docs/REVIEW_5.md` -- what is not working and
+  why, the plan, and the results of the checks. Read it before any new
+  method work.
 - **Handover:** `docs/HANDOVER.md` -- a self-contained brief for another
   assistant (rules, history, setup, results, next steps, upload checks,
   open items). Keep it in step with this file when the status changes.
@@ -545,3 +548,70 @@ M6 pre-training -> M7 tuning -> M8 ablation -> M9 freeze -> M10 confirmation
   4. session 3: `screen2 configs/rl2_sensitivity.yaml`,
      `screen-c-pretrain`, `screen-c`; send; then freeze; confirm only with
      the user's go-ahead.
+
+## 13. Review 5 (2026-11-09): why the method does not win, and the fixes
+
+User asked: review everything, find simulator and code weaknesses and what
+is not working, plan the fixes, then work on the plan. Full text:
+docs/REVIEW_5.md. All development evidence; confirmation untouched.
+
+**Findings (measured)**
+- Simulator ground truth (`scripts/sim_truth.py`, FEMNIST, no training):
+  success of a job for an online client, Light / Standard / Priority --
+  slow devices (26%) 0.17 / 0 / 0; middle (25%) 0.69 / 0.50 / 0.06; fast
+  (19%) 0.84 / 0.83 / 0.65; weak (30%) 0.41 / 0.04 / 0. So the job size is a
+  real choice for under half the clients; slow devices can hardly ever
+  contribute; weak clients are truly below the 0.5 eligibility line (83% of
+  them).
+- Link drop is one coin flip per client and round, whatever the job
+  (14-45%); it is the largest failure cause. Every good method fails ~40%
+  of its jobs.
+- Cost is 1 : 2 : 4 for the three modes with no fixed cost per job, so
+  Light is the best buy by construction. Checked: the cost-best mode rule
+  is 98% Light (`scripts/predictor_check.py`).
+- All tuned methods end within 0.01 of each other (0.775-0.791 at round
+  200) but differ a lot early (0.40-0.57 at round 25): the end points sit
+  on the flat part of the curve.
+- Method: the safety mask ruled out 22-28 of ~75 online clients per round
+  (c34, cost-check runs); the tuned always-Light control (line 0.4) invites
+  more weak clients than c34; M7's search space had no eligibility line
+  while every comparator's had; the failed-job penalty pushes away from
+  weak clients; mode shares barely move in a run (Light 76% -> 80%); MimiC
+  averages updates of different length without scaling.
+- My guess that the predictor lacked a key input was mostly wrong:
+  predictor v3 (adds estimated time and energy need) = v2 on FEMNIST
+  (Brier 0.208 vs 0.209), a little better on CIFAR-10. Recorded as is.
+
+**Built (commit 7d637a8; all opt-in, defaults row-identical on 7
+conditions; code hash now 835ab6cc3030b78e)**
+- `system.drop_model: exposure` (+ `drop_ref_time`), `system.job_overhead`
+  (+ `job_overhead_time`), `system.energy_by_work`, `system.cap_latency`.
+  The "real" setting = all four (ref time 1.0, overhead 1.0 / 0.05). In it,
+  choosing the job by expected work per cost delivers 29% more training per
+  unit cost than always Light (0.40 vs 0.31): the job size becomes a real
+  decision.
+- `policy.predictor: v3`; `fl.aggregator: mimic_nova`;
+  `reward.damage_metric: waste`; oracle policies `oracle_light / work /
+  fair / cov` (conditions `o_*_mimic`; analysis only, they see the truth).
+- Reports: `auc`, `cost_to`, `rounds_to`, `time_to`, `fail`, `weak_share`
+  in `report_dev_screen.measures`; per-world budget; `screen_rl2.py` rule
+  kind `describe`; overrides on every arm type.
+- Seeds: second development block 400-599 (`dev2`); 400-402 pilot, 403-405
+  predictor check.
+- Tests: tests/test_review5.py (23). Suite 367 passed / 8 skipped before
+  adding them.
+
+**Running / next**
+- Pilot `configs/r5_pilot.yaml` -> `results/r5_pilot` (60 runs, seeds
+  400-402, worlds v1 and real; arms: tuned always-Light, c34, c34 + v3,
+  c34 + v3 + line 0.4, MimiC-nova versions, four oracles). Run from the
+  frozen worktree scratchpad/wt_r5 (commit 7d637a8). Report:
+  `python scripts/screen_rl2.py report --spec configs/r5_pilot.yaml --out
+  results/r5_pilot` (needs src/afl unchanged).
+- Then: write the pilot results into docs/REVIEW_5.md section 6, update
+  docs/HANDOVER.md, and put the Phase 3 choice to the user (re-tune on the
+  server or not; whether the "real" world becomes the main setting). Do
+  not choose for the user.
+- Server session 2 (ARL screen, old plan) is still open and still valid:
+  it tests the ARL term on c34 as tuned. Its runs must be checked with the
+  code that made them (commit 0da8f49 or earlier, code a1be0f1e34704d16).

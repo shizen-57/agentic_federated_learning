@@ -156,3 +156,48 @@ availability, battery and bandwidth one at a time, swaps the device tiers for
 the measured FedScale trace, and changes the scenario (random weak clients,
 no weak clients, churn), so that no conclusion rests on one chosen setting.
 The confirmation repeats the last two as secondary worlds.
+
+## Built-in limits, and more realistic options (review 5)
+
+`python scripts/sim_truth.py` measures the simulator's ground truth without
+any training: how often a job would succeed for each kind of client. In the
+main setting (FEMNIST, seeds 280-284):
+
+| client group | share | Light | Standard | Priority | Light fails by: drop / deadline |
+|---|---|---|---|---|---|
+| slow devices | 26% | 0.17 | 0.00 | 0.00 | 0.45 / 0.38 |
+| middle devices | 25% | 0.69 | 0.50 | 0.06 | 0.29 / 0.01 |
+| fast devices | 19% | 0.84 | 0.83 | 0.65 | 0.14 / 0.00 |
+| weak clients | 30% | 0.41 | 0.04 | 0.00 | 0.41 / 0.18 |
+
+What this means, and what the thesis must say (docs/REVIEW_5.md, section 2):
+
+- The job size is a real choice for fewer than half of the clients.
+- Slow devices can hardly ever contribute: a fairness ceiling no scheduler
+  can pass.
+- The link drop is one coin flip per client and round, whatever the job, and
+  it is the largest cause of failure. No job choice can avoid it.
+- Weak clients succeed 41% of the time with their best job, below the 0.5
+  eligibility line.
+- Modes cost 1 : 2 : 4 with no fixed cost per job, so Light always buys the
+  most training per unit of cost.
+
+Options that remove the unrealistic parts (all off by default; earlier runs
+are unchanged):
+
+| Option | What it does | Why |
+|---|---|---|
+| `system.drop_model: exposure`, `system.drop_ref_time` | the link holds with probability reliability ^ (job time / reference time), time capped at the deadline; the same roll decides every mode | a longer job is more likely to be interrupted (REFL and FedScale model drop-out through availability windows; Bonawitz et al. 2019 report 6-10% drop-out per round) |
+| `system.job_overhead`, `system.job_overhead_time` | a fixed cost and time for every job that starts: the download of the whole model | every invited client receives the full model, whatever its job; with 1.0 the download costs as much as a full upload (the same bytes) |
+| `system.energy_by_work` | the training part of the energy follows epochs x data | time and cost already do; before, a client with three times the data used the same energy |
+| `system.cap_latency` | a job that misses the deadline counts as one deadline of waiting | the server stops waiting at the deadline |
+
+The "real" setting of `configs/r5_pilot.yaml` turns on all four
+(`drop_ref_time` 1.0, `job_overhead` 1.0, `job_overhead_time` 0.05). Its
+ground truth: slow 0.09, middle 0.82 / 0.50 / 0.05, fast 0.94 / 0.90 / 0.66,
+weak 0.38 / 0.02 / 0.00 (Light / Standard / Priority). A Light job then
+costs 1.67 instead of 0.67, Standard 1.4 times a Light job and Priority 2.2
+times, so a heavier job on a reliable device becomes worth its cost.
+
+These values are assumed, like the rest of the cost model. They are a
+second world to report next to the first, not a calibration.

@@ -207,19 +207,75 @@ decision; the old world stays as a reported setting either way.
 
 | id | status |
 |---|---|
-| F1-F7 | in progress |
-| P1 | done |
-| P2-P4 | to do |
+| F1-F7 | done (commit 7d637a8; 23 new tests; default runs row-identical on 7 conditions) |
+| P1 | done (2.1) |
+| P3 | done (6.1, 6.2): predictor v3 does not matter; the job-rule table confirms 2.5 |
+| P2, P4 | running (`configs/r5_pilot.yaml`, 60 runs) |
 
 ## 6. Results of the checks
 
-(Filled in below as each check finishes.)
+All exploratory: a few development seeds, no test, no decision.
+
+### 6.1 P3 -- predictor check (`scripts/predictor_check.py`, seeds 403-405)
+
+No training is needed: only the simulator and the predictor run. Results in
+`results/r5_predictor/`.
+
+FEMNIST, jobs chosen by each version's own expected-work rule:
+
+| predictor | Brier (lower is better) | Priority predicted / real | weak clients predicted / real |
+|---|---|---|---|
+| v1 (original) | 0.217 | 0.68 / 0.62 | 0.41 / 0.37 |
+| v2 (repaired) | 0.209 | 0.72 / 0.69 | 0.40 / 0.37 |
+| v3 (knows the workload) | 0.208 | 0.70 / 0.65 | 0.39 / 0.38 |
+
+**My guess in 3.2 was mostly wrong.** v3 is not better than v2 on FEMNIST
+(Brier 0.208 vs 0.209; the mode rule delivers the same training per cost).
+v2 already learns each client's own record, and a client's speed and data
+do not change, so the record carries the same information. On CIFAR-10 v3
+is a little better (training delivered per unit cost by the mode rule:
+v1 0.70, v2 0.74, v3 0.78). v3 stays as an option; it is not a fix that
+matters. The over-prediction of Priority seen inside real runs comes from
+the scheduler picking exactly the jobs the predictor is too hopeful about
+(a selection effect), not from a missing input.
+
+### 6.2 Which job-choice rule is the best buy? (same script)
+
+Every online client, every round, is given the job a rule would choose, and
+the round's true outcome is looked up. FEMNIST, predictor v2:
+
+| rule | world | Light / Standard / Priority | jobs that succeed | epochs delivered per unit cost | successful jobs per unit cost |
+|---|---|---|---|---|---|
+| always Light | current | 100 / 0 / 0 | 50% | 0.67 | 0.67 |
+| expected work (the baselines' rule) | current | 71 / 14 / 15 | 46% | 0.74 | 0.40 |
+| expected work per unit cost | current | 98 / 2 / 0 | 50% | 0.66 | 0.66 |
+| oracle: heaviest job that finishes | current | 40 / 33 / 26 | 100% | 1.47 | 0.69 |
+| always Light | more realistic | 100 / 0 / 0 | 54% | 0.31 | 0.31 |
+| expected work (the baselines' rule) | more realistic | 69 / 16 / 15 | 46% | 0.40 | 0.21 |
+| expected work per unit cost | more realistic | 68 / 21 / 11 | 49% | 0.40 | 0.23 |
+| oracle: heaviest job that finishes | more realistic | 41 / 34 / 24 | 100% | 0.86 | 0.42 |
+
+- **Current world: the cost-best rule is always Light** (98% Light). This
+  confirms 2.5 with numbers: the mode decision is settled by the cost model
+  before any scheduler acts. Heavier jobs buy 10% more epochs per cost but
+  40% fewer successful contributions per cost.
+- **More realistic world: heavier jobs are worth it.** Choosing the job by
+  expected work per cost delivers 29% more training per unit of cost than
+  always Light (0.40 vs 0.31). Here the job size is a real decision.
+- The oracle shows how much is lost to jobs that fail: about half of all
+  spend, in both worlds.
+- CIFAR-10 gives the same picture (`results/r5_predictor/cifar*`): the
+  cost-best rule is 98% Light in the current world (0.67 against 0.68 for
+  always Light), and delivers 30% more training per cost than always Light
+  in the more realistic one (0.43 against 0.33).
 
 ## 7. How the numbers in this review were made
 
 - Section 2.1-2.3: the simulator alone, no training: for every online client
   and every mode, `ClientEnv.outcome` with the round's fixed random numbers
   (`scripts/sim_truth.py`).
+- Section 6.1, 6.2: `scripts/predictor_check.py` (simulator and predictor
+  only; random clients each round).
 - Section 2.7, 3.1, 3.3: the saved runs in `results/rl2_tune*` and
   `results/rl2_cost_check` (per-round CSV columns `mode_*`, `n_abstain`,
   `weak_selected`, `fail_ratio`, `cost`, `accuracy_fixed`).
