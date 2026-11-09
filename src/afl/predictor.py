@@ -141,3 +141,59 @@ class SuccessPredictorV2(SuccessPredictor):
         d = self.s if y else self.f
         d[key] += 1.0
         self.t_last[key] = self.t
+
+
+class SuccessPredictorV3(SuccessPredictorV2):
+    """Predictor v3 (docs/REVIEW_5.md, 3.2): predictor v2 that also knows the
+    job. v1 and v2 see the device (speed, bandwidth, battery, history) and
+    which mode, but not how much work the client has, and they have no
+    "this mode on this device" term -- although a job's run time is
+    epochs x data / speed. Two inputs are added per (client, mode), both
+    from quantities the server already has:
+
+    - how long the job should take against the deadline,
+      log(estimated time / deadline) (base.est_time: observed speed and
+      bandwidth, the client's data volume, the mode's epochs and upload);
+    - how much energy it needs against the battery level,
+      log(energy need / battery), with energy need ~ epochs / speed (times
+      the client's relative data volume under system.energy_by_work).
+
+    Everything else (smooth prior, per-client Beta correction, evidence
+    ageing, uncertainty) is v2's.
+    """
+
+    JOB_SCALE = 3.0          # a log-time step of 1/3 moves the logit by one weight unit
+    JOB_CLIP = 6.0
+
+    def __init__(self, cfg, **kw):
+        super().__init__(cfg, dim=11, **kw)
+        self._jobs: dict | None = None     # {client: {mode: (log time ratio, log energy ratio)}}
+        self._cur: int | None = None       # the client features() is being asked about
+
+    def set_jobs(self, t_est: dict, obs: dict, n_work) -> None:
+        """This round's job descriptors, from the server's own estimates."""
+        sysc = self.cfg.system
+        ref = sysc.work_ref_samples if sysc.work_ref_samples > 0 else max(float(np.mean(n_work)), 1e-9)
+        jobs = {}
+        for i, per_mode in t_est.items():
+            speed = max(obs[i]["speed_hat"], 1e-3)
+            rel = float(n_work[i]) / ref if sysc.energy_by_work else 1.0
+            jobs[i] = {m: (np.log(max(t, 1e-6) / sysc.deadline),
+                           np.log(sysc.local_epochs[m] * rel / speed / (obs[i]["energy_hat"] + 0.05)))
+                       for m, t in per_mode.items()}
+        self._jobs = jobs
+
+    def features(self, obs: dict, hist: dict, mode: str) -> np.ndarray:
+        if self._jobs is None or self._cur is None:
+            raise RuntimeError("predictor v3 needs set_jobs() each round and a client index")
+        lt, le = self._jobs[self._cur][mode]
+        job = np.clip(self.JOB_SCALE * np.array([lt, le]), -self.JOB_CLIP, self.JOB_CLIP)
+        return np.concatenate([super().features(obs, hist, mode), job])
+
+    def posterior(self, i: int, obs: dict, hist: dict, mode: str) -> tuple[float, float]:
+        self._cur = i
+        return super().posterior(i, obs, hist, mode)
+
+    def update_client(self, i: int, obs: dict, hist: dict, mode: str, y: int) -> None:
+        self._cur = i
+        super().update_client(i, obs, hist, mode, y)

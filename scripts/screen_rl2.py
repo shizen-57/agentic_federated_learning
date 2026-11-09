@@ -83,8 +83,9 @@ def arm_entry(spec: dict, tuned: dict, src: dict, shared: dict, a: dict) -> dict
         with open(path) as fh:
             t = json.load(fh)
         e = rl2lib.group_entry(src, shared, spec["rounds"], [t["base"]], spec["seeds"])
-        if t["overrides"]:
-            e["override"] = rl2lib.resolve(e, t["overrides"])
+        ov = {**t["overrides"], **(a.get("override") or {})}
+        if ov:
+            e["override"] = rl2lib.resolve(e, ov)
         return e
     if a.get("tuned") or a.get("candidate"):
         e = rl2lib.group_entry(src, shared, spec["rounds"], [tuned["base"]], spec["seeds"])
@@ -96,7 +97,10 @@ def arm_entry(spec: dict, tuned: dict, src: dict, shared: dict, a: dict) -> dict
         if ov:
             e["override"] = rl2lib.resolve(e, ov)
         return e
-    return rl2lib.group_entry(src, shared, spec["rounds"], [a["condition"]], spec["seeds"])
+    e = rl2lib.group_entry(src, shared, spec["rounds"], [a["condition"]], spec["seeds"])
+    if a.get("override"):
+        e["override"] = rl2lib.resolve(e, a["override"])
+    return e
 
 
 def build_plan(spec: dict, tuned: dict) -> dict:
@@ -253,6 +257,57 @@ def rule_transfer(spec: dict, R: dict) -> tuple[list[str], dict]:
     return L, {"kind": "transfer", "holds": holds, "rank": rank, "vs_base": st.mean(diff)}
 
 
+def _med(vals) -> float | None:
+    v = [x for x in vals if x is not None and x == x]
+    return st.median(v) if v else None
+
+
+def rule_describe(spec: dict, R: dict) -> tuple[list[str], dict]:
+    """No decision: a description (review 5). Per dataset and setting, every
+    arm against the `reference` arm, paired by seed: both equal-spend end
+    points, the area under the accuracy-spend curve, the spend needed to
+    reach each accuracy target, failures and how many invitations went to
+    weak clients. Arms listed under `bounds` are oracles (they see each
+    job's true outcome): upper bounds, never methods."""
+    rule = spec["rule"]
+    ref, bounds = rule["reference"], set(rule.get("bounds") or [])
+    targets = rule.get("targets") or [0.70, 0.75]
+    settings = spec.get("settings") or {None: {}}
+    L, out = [], {}
+    for d in spec["datasets"]:
+        for s in settings:
+            base = R[(d, s, ref)]
+            L += [f"**{d}{', ' + s if s else ''}** (differences are arm minus `{ref}`, paired by seed; "
+                  "cost-to-target: median over the seeds that reach it)", "",
+                  "| arm | eq5 | diff | w10b | diff | auc | diff | "
+                  + " | ".join(f"cost to {t:.2f}" for t in targets)
+                  + " | failed jobs | to weak clients | Light/Std/Prio % | spend |",
+                  "|---|---|---|---|---|---|---|" + "---|" * (len(targets) + 4)]
+            for arm in spec["arms"]:
+                r = R[(d, s, arm)]
+                v = list(r.values())
+                diff = {k: (st.mean(paired(r, base, k)) if arm != ref else None) for k in ("eq5", "w10b", "auc")}
+                fmt = lambda x: "-" if x is None else f"{x:+.3f}"  # noqa: E731
+                ct = [_med(m["cost_to"][t] for m in v) for t in targets]
+                reach = [sum(m["cost_to"][t] is not None for m in v) for t in targets]
+                modes = [st.mean(float(m["modes"].split("/")[k]) for m in v) for k in range(3)]
+                L.append(f"| {arm}{' (bound)' if arm in bounds else ''} | {st.mean(m['eq5'] for m in v):.3f} | "
+                         f"{fmt(diff['eq5'])} | {st.mean(m['w10b'] for m in v):.3f} | {fmt(diff['w10b'])} | "
+                         f"{st.mean(m['auc'] for m in v):.3f} | {fmt(diff['auc'])} | "
+                         + " | ".join(("-" if c is None else f"{c:.0f}") + f" ({n}/{len(v)})"
+                                      for c, n in zip(ct, reach))
+                         + f" | {st.mean(m['fail'] for m in v):.0%} | {st.mean(m['weak_share'] for m in v):.0%} | "
+                         f"{modes[0]:.0f}/{modes[1]:.0f}/{modes[2]:.0f} | {st.mean(m['spend'] for m in v):.0f} |")
+                out[f"{d}/{s or '-'}/{arm}"] = {
+                    "eq5": st.mean(m["eq5"] for m in v), "w10b": st.mean(m["w10b"] for m in v),
+                    "auc": st.mean(m["auc"] for m in v), "diff": diff, "per_seed": {
+                        k: paired(r, base, k) for k in ("eq5", "w10b", "auc")} if arm != ref else {},
+                    "cost_to": dict(zip(map(str, targets), ct)), "spend": st.mean(m["spend"] for m in v)}
+            L.append("")
+    L.append("Exploratory: a few seeds, no test, no decision.")
+    return L, {"kind": "describe", "reference": ref, "bounds": sorted(bounds), "arms": out}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("command", choices=("plan", "run", "report"))
@@ -295,7 +350,14 @@ def main() -> int:
         print("\n**INCOMPLETE -- no decision.**\n\n" + "\n".join(f"- {p}" for p in problems))
         return 2
     ok = set(valid)
-    mg = rl2lib.measures_by_group([j for j in jobs if os.path.join(j["raw"]["out"], j["raw"]["tag"] + ".csv") in ok])
+    # A setting with another cost scale names its own equal-spend budget
+    # (spec `budgets: {setting: value}`); otherwise the standard 1,400.
+    budgets = spec.get("budgets") or {}
+    world = {gname(d, s, arm): s for d in spec["datasets"] for s in (spec.get("settings") or {None: {}})
+             for arm in spec["arms"]}
+    mg = rl2lib.measures_by_group(
+        [j for j in jobs if os.path.join(j["raw"]["out"], j["raw"]["tag"] + ".csv") in ok],
+        (lambda g: budgets.get(world[g])) if budgets else None)
     R = runs(spec, mg)
     L = [f"# {spec['title']}", "", f"Evidence complete: {n} runs, one code version.", "",
          "| dataset | setting | arm | eq5 | w10b | w10 (whole run) | acc10 | spend | starved |",
@@ -308,7 +370,8 @@ def main() -> int:
                  f"{sum(m['starved'] for m in v)}/{len(r)} |")
     kind = spec["rule"]["kind"]
     body, verdict = {"arl": lambda: rule_arl(spec, R), "sensitivity": lambda: rule_sensitivity(spec, R),
-                     "cost": lambda: rule_cost(spec, tuned, R), "transfer": lambda: rule_transfer(spec, R)}[kind]()
+                     "cost": lambda: rule_cost(spec, tuned, R), "transfer": lambda: rule_transfer(spec, R),
+                     "describe": lambda: rule_describe(spec, R)}[kind]()
     L += [""] + body
     text = "\n".join(L) + "\n"
     with open(os.path.join(out, "report.md"), "w") as fh:

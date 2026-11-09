@@ -23,8 +23,11 @@ def est_time(cfg, state, i: int, mode: str, frac: float | None = None) -> float:
     sysc = cfg.system
     obs = state["obs"][i]
     frac = sysc.upload_frac[mode] if frac is None else frac
-    return (sysc.local_epochs[mode] * (state["n_work"][i] / 1200.0) / max(obs["speed_hat"], 1e-3)
-            + 0.25 * frac / max(obs["bw_hat"], 1e-3))
+    t = (sysc.local_epochs[mode] * (state["n_work"][i] / 1200.0) / max(obs["speed_hat"], 1e-3)
+         + 0.25 * frac / max(obs["bw_hat"], 1e-3))
+    if sysc.job_overhead_time > 0:
+        t = t + sysc.job_overhead_time / max(obs["bw_hat"], 1e-3)     # the model download
+    return t
 
 
 def pool(state, N: int) -> list[int]:

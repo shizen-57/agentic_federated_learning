@@ -62,6 +62,11 @@ class ClientEnv:
         self.n_work = (n_i * (sysc.work_ref_samples / max(float(n_i.mean()), 1e-9))
                        if sysc.work_ref_samples > 0 else n_i)
         rng = np.random.default_rng(seed + 1000)
+        if sysc.drop_model not in ("coin", "exposure"):
+            raise ValueError(f"unknown system.drop_model {sysc.drop_model}")
+        # Reference amount of work for system.energy_by_work: the mean client.
+        self._work_ref = (sysc.work_ref_samples if sysc.work_ref_samples > 0
+                          else max(float(np.mean(self.n_work)), 1e-9))
 
         # Persistently weak clients (off unless system.weak_frac > 0). Drawn from
         # their own stream so the default device profile below is unchanged.
@@ -231,13 +236,20 @@ class ClientEnv:
         t_train = epochs * (self.n_work[i] / 1200.0) / self.speed[i] * d["compute_jitter"][i]
         t_comm = 0.25 * frac / self.bandwidth[i] * d["channel"][i]
         energy = 0.08 * epochs / self.speed[i] + 0.05 * frac
+        if sysc.energy_by_work:
+            # Training energy follows the work done (epochs x data), as time does.
+            energy = 0.08 * epochs * (self.n_work[i] / self._work_ref) / self.speed[i] + 0.05 * frac
+        if sysc.job_overhead_time > 0:
+            # The model download every job starts with, over this round's channel.
+            t_comm = t_comm + sysc.job_overhead_time / self.bandwidth[i] * d["channel"][i]
         return t_train, t_comm, energy
 
     def cost(self, i: int, mode: str, frac: float | None = None) -> float:
         """C^comp + C^comm of Sec. 3.6, in normalised units."""
         sysc = self.cfg.system
         frac = sysc.upload_frac[mode] if frac is None else frac
-        return sysc.local_epochs[mode] * self.n_work[i] / 1000.0 + frac * 1.0
+        c = sysc.local_epochs[mode] * self.n_work[i] / 1000.0 + frac * 1.0
+        return c + sysc.job_overhead if sysc.job_overhead > 0 else c
 
     def outcome(self, i: int, mode: str, frac: float | None = None) -> dict:
         """tilde-Y^succ_{i,t}(E): completion, upload, deadline, acceptance.
@@ -253,15 +265,17 @@ class ClientEnv:
 
         t_train, t_comm, energy = self.workload(i, mode, frac)
         total = t_train + t_comm
+        # What the round waits for this job: the server stops at the deadline.
+        waited = min(total, sysc.deadline) if sysc.cap_latency else total
 
         if energy > self._energy_at_round_start[i]:
-            return dict(success=0, latency=total, reason="energy",
+            return dict(success=0, latency=waited, reason="energy",
                         t_train=t_train, t_comm=t_comm)
-        if d["drop"][i] > self.reliability[i]:
-            return dict(success=0, latency=total, reason="dropped",
+        if d["drop"][i] > self._survive_prob(i, total):
+            return dict(success=0, latency=waited, reason="dropped",
                         t_train=t_train, t_comm=t_comm)
         if total > sysc.deadline:
-            return dict(success=0, latency=total, reason="deadline",
+            return dict(success=0, latency=waited, reason="deadline",
                         t_train=t_train, t_comm=t_comm)
         # Acceptance (Eq. 3.18) is mostly decided by the norm check inside the
         # trainer; the simulator only injects a small residual rejection rate.
@@ -270,6 +284,17 @@ class ClientEnv:
                         t_train=t_train, t_comm=t_comm)
         return dict(success=1, latency=total, reason="ok",
                     t_train=t_train, t_comm=t_comm)
+
+    def _survive_prob(self, i: int, total: float) -> float:
+        """P(the link holds for this job). coin: the device's reliability,
+        whatever the job. exposure: reliability ** (job time / drop_ref_time),
+        the time capped at the deadline -- the same roll decides every mode,
+        so a heavier job fails whenever a lighter one does (common random
+        numbers stay valid)."""
+        sysc = self.cfg.system
+        if sysc.drop_model == "coin":
+            return self.reliability[i]
+        return float(self.reliability[i] ** (min(total, sysc.deadline) / sysc.drop_ref_time))
 
     def late_ok(self, i: int, mode: str, frac: float | None = None) -> bool:
         """Would a client that missed the deadline finish within the staleness bound?
@@ -283,7 +308,7 @@ class ClientEnv:
         if out["reason"] != "deadline":
             return False
         sysc = self.cfg.system
-        return (out["latency"] <= sysc.deadline * (1 + sysc.staleness_max)
+        return (out["t_train"] + out["t_comm"] <= sysc.deadline * (1 + sysc.staleness_max)
                 and self._draw["accept"][i] <= 0.98)
 
     def record(self, i: int, reason: str) -> None:

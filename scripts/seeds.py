@@ -25,9 +25,9 @@ def _in(seed: int, rng) -> bool:
 
 def kind(seed: int, reg: dict | None = None) -> str:
     reg = reg or registry()
-    for name in ("confirmation", "practice", "dev"):
-        if _in(seed, reg[name]):
-            return name
+    for name in ("confirmation", "practice", "dev", "dev2"):
+        if name in reg and _in(seed, reg[name]):
+            return "dev" if name == "dev2" else name
     if any(_in(seed, r) for r in reg["used"]):
         return "used"
     return "unregistered"

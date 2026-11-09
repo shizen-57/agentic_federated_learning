@@ -240,6 +240,16 @@ CONDITIONS.update({f"{c}_mimic": _variant(c, fl__aggregator="mimic")
                              "b_cov_ew", "b_fairq_ew")})
 
 
+# Review 5 (docs/REVIEW_5.md). Oracles: upper bounds, never methods -- they
+# see each job's true outcome. Same aggregation as the tuned method.
+CONDITIONS.update({f"o_{k}_mimic": {"policy.name": f"oracle_{k}", "fl.aggregator": "mimic",
+                                    "policy.mode_rule": "own"}
+                   for k in ("light", "work", "fair", "cov")})
+# The same conditions with step-normalised MimiC (3.5).
+CONDITIONS.update({c.replace("_mimic", "_mnova"): _variant(c, fl__aggregator="mimic_nova")
+                   for c in ("ppo_full_mimic", "rl_light_mimic", "b_oort_ew_mimic", "b_fairq_ew_mimic",
+                             "o_light_mimic", "o_work_mimic")})
+
 def apply(raw: dict, overrides: dict) -> dict:
     """Apply dotted-key overrides to a nested config dict, in place."""
     for key, val in overrides.items():

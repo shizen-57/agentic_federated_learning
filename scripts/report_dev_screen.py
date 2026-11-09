@@ -37,6 +37,7 @@ STARVE = 50          # rounds in a row with no successful contribution (see meas
 BUDGET = 1400.0      # simulated cost units, fixed before the runs
 CHECKPOINTS = (500, 800, 1100, 1400, 1700, 2000)   # common budgets for the cost curves
 NAN = float("nan")
+TARGETS = (0.35, 0.40, 0.45, 0.50, 0.60, 0.70, 0.75)   # accuracy targets of efficiency()
 
 
 def _longest(flags: list[bool | None]) -> int:
@@ -51,7 +52,43 @@ def _longest(flags: list[bool | None]) -> int:
     return best
 
 
-def measures(path: str) -> dict:
+def efficiency(rows: list[dict], budget: float, deadline: float = 1.0) -> dict:
+    """How fast and how cheaply a run learns (docs/REVIEW_5.md 2.7). The end
+    points sit on the flat part of the learning curve, where good methods end
+    within 0.01 of each other; these look at the whole curve.
+    - auc: area under the accuracy-against-spend curve up to the budget,
+      divided by the budget (if the run ends having spent less, its last
+      accuracy holds for the rest) -- the mean accuracy bought per unit spent;
+    - cost_to / rounds_to / time_to: spend, rounds and waiting time (each
+      round's latency, at most one deadline) until the 5-round mean of the
+      fixed-set accuracy first reaches each target; None if it never does."""
+    f = lambda r, k: float(r[k])  # noqa: E731
+    acc = [f(r, "accuracy_fixed") for r in rows]
+    cost = [f(r, "cost") for r in rows]
+    lat = [min(f(r, "latency"), deadline) for r in rows]
+    area = spent = 0.0
+    last = 0.0
+    for a, c in zip(acc, cost):
+        if spent + c > budget:
+            break
+        area, spent, last = area + a * c, spent + c, a
+    area += last * max(budget - spent, 0.0)
+    cost_to, rounds_to, time_to = {}, {}, {}
+    cum_c = cum_t = 0.0
+    hit = {t: None for t in TARGETS}
+    for k in range(len(rows)):
+        cum_c, cum_t = cum_c + cost[k], cum_t + lat[k]
+        m = sum(acc[max(0, k - 4):k + 1]) / len(acc[max(0, k - 4):k + 1])
+        for t in TARGETS:
+            if hit[t] is None and m >= t:
+                hit[t] = (cum_c, k + 1, cum_t)
+    for t, v in hit.items():
+        cost_to[t], rounds_to[t], time_to[t] = v if v else (None, None, None)
+    return {"auc": area / budget if budget > 0 else NAN, "cost_to": cost_to,
+            "rounds_to": rounds_to, "time_to": time_to}
+
+
+def measures(path: str, budget: float | None = None) -> dict:
     """Starvation (review 3, finding 3) is the longest run of rounds with NO
     successful contribution -- invitations that all failed and rounds with no
     invitation (abstention) alike. A round in which no client was online
@@ -59,6 +96,9 @@ def measures(path: str) -> dict:
     extending nor breaking a run. The two parts are also reported apart."""
     rows = list(csv.DictReader(open(path)))
     f = lambda r, k: float(r[k])  # noqa: E731
+    # The common budget of the equal-spend endpoints. A world with another
+    # cost scale (e.g. a fixed cost per job) names its own (review 5).
+    BUDGET = globals()["BUDGET"] if budget is None else float(budget)
     online = [f(r, "n_online") > 0 if "n_online" in r else True for r in rows]
     dry = [None if not on else not f(r, "n_success") for r, on in zip(rows, online)]
     inv_fail = [None if not on else bool(f(r, "n_selected")) and not f(r, "n_success")
@@ -123,7 +163,13 @@ def measures(path: str) -> dict:
                                  / max(len(rows) - len(rows) // 2, 1) / f(last, "cost_ref")
                                  if has("cost_ref") and f(last, "cost_ref") > 0 else NAN),
             "budget_dropped": sum(f(r, "budget_dropped") for r in rows) if has("budget_dropped") else NAN,
-            "budget_lighter": sum(f(r, "budget_lighter") for r in rows) if has("budget_lighter") else NAN}
+            "budget_lighter": sum(f(r, "budget_lighter") for r in rows) if has("budget_lighter") else NAN,
+            # jobs that failed, of all invitations; weak clients among the invited
+            "fail": 1.0 - sum(f(r, "n_success") for r in rows) / max(inv, 1),
+            "weak_share": (sum(f(r, "weak_selected") for r in rows) / max(inv, 1)
+                           if has("weak_selected") else NAN),
+            # the whole learning curve, not only its end (review 5)
+            **efficiency(rows, BUDGET)}
 
 
 def spend_at(rows: list[dict], k: int) -> float:

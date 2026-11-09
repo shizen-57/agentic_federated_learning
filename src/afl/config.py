@@ -100,6 +100,25 @@ class SystemCfg:
                                         # the availability signal avoided offline clients
     energy_scale: float = 1.0           # sensitivity: multiplies every device's battery capacity
     bandwidth_scale: float = 1.0        # sensitivity: multiplies every device's bandwidth
+    # Review 5 (docs/REVIEW_5.md, section 2): more realistic failure and cost
+    # mechanics. All off by default, so earlier runs are unchanged.
+    drop_model: str = "coin"            # coin: a link drop is one coin flip per client and
+                                        # round, whatever the job (original). exposure: a longer
+                                        # job is more likely to be interrupted -- the job survives
+                                        # with probability reliability ** (time / drop_ref_time),
+                                        # time capped at the deadline
+    drop_ref_time: float = 0.5          # exposure model: the job length (in deadlines) at which
+                                        # a device shows its nominal reliability
+    job_overhead: float = 0.0           # fixed cost of every job that starts: the client first
+                                        # downloads the whole model, whatever its mode
+    job_overhead_time: float = 0.0      # time of that download on a mid-tier link (scaled by the
+                                        # client's bandwidth and this round's channel)
+    energy_by_work: bool = False        # the training part of a job's energy follows the amount
+                                        # of work (epochs x data), like its time and cost; off =
+                                        # original (energy ignores the client's data volume)
+    cap_latency: bool = False           # a job that misses the deadline counts as one deadline
+                                        # of waiting (the server stops there); off = original
+                                        # (its full run time is reported)
     device_trace: str = "tiers"         # tiers: the three guessed device tiers;
                                         # fedscale: real per-device speed and
                                         # bandwidth from FedScale's trace
@@ -115,6 +134,9 @@ class FLCfg:
     mu: float = 0.01                    # FedProx proximal weight (Sec. 3.17)
     aggregator: str = "fedprox"         # fedavg | fedprox | fednova | fedprox_fednova
                                         # | mifa | mimic | fedcg (published baselines)
+                                        # | mimic_nova: MimiC on step-normalised updates, so
+                                        # jobs of different length are averaged on one scale
+                                        # (docs/REVIEW_5.md 3.5)
     model: str = "mlp"                  # mlp | cnn | cnn_femnist | cnn_cifar
     device: str = "cpu"                 # cpu | cuda | auto
     deterministic: bool = False         # ask PyTorch for deterministic kernels so a GPU
@@ -192,6 +214,10 @@ class RewardCfg:
                                         # work (success prob x local epochs) the chosen
                                         # mode gave up, plus credit (lambda_cov) for
                                         # useful work delivered on under-covered data
+                                        # | "waste": the cost charged to jobs that failed,
+                                        # relative to the Light reference cost of a round --
+                                        # a failure counts by what it cost, not as one
+                                        # (docs/REVIEW_5.md 3.1)
     lambda_cov: float = 0.5             # ARL-v3 / ARL-v4 success-credit weight
     arl4_mu: float = 1.0                # ARL-v4: weight of the representation-deficit term
     arl4_z: float = 1.0                 # ARL-v4: confident success = p - z*sd (predictor v2)
@@ -220,6 +246,9 @@ class PolicyCfg:
     predictor: str = "v1"               # v1: the original success predictor; v2: standardised
                                         # features + per-client Beta correction + uncertainty
                                         # (afl.predictor.SuccessPredictorV2, RL2 design C1)
+                                        # v3: v2 + the job's estimated run time and energy need
+                                        # as inputs, so the shared model knows the client's
+                                        # workload (SuccessPredictorV3, docs/REVIEW_5.md 3.2)
     gate_mode: str = "top"              # top: gate fallback = highest predicted success (original);
                                         # thompson: eligibility on p + gate_z*sd and fallback
                                         # by Thompson sampling (needs predictor v2; RL2 C2)

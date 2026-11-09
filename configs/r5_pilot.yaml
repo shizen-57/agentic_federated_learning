@@ -1,0 +1,49 @@
+# Review 5 pilot (docs/REVIEW_5.md, Phase 2). Exploratory, three fresh
+# development seeds, no decision. Two questions:
+#  1. Head-room: how much could a scheduler that never wastes a job gain over
+#     the tuned always-Light control -- in the current world (v1) and in a
+#     more realistic one (real: link drops grow with job time, every job
+#     pays for the model download, energy follows the work, the server
+#     stops waiting at the deadline)?
+#  2. Do the review's fixes move the method: the workload-aware predictor
+#     (v3), a lower eligibility line, step-normalised MimiC?
+# The o_* arms are oracles (they see each job's true outcome): bounds, never
+# methods. Every tuned setting was tuned in world v1.
+# Runner: scripts/screen_rl2.py.
+version: 1
+title: Review 5 pilot (head-room and fixes; exploratory)
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+datasets: {femnist: s2_femnist}
+tuned: configs/rl2_tuned_cost.json
+set: {data.split: persistent}          # development pool
+rounds: 200
+seeds: [400, 401, 402]
+settings:
+  v1: {}
+  real:
+    system.drop_model: exposure
+    system.drop_ref_time: 1.0
+    system.job_overhead: 1.0
+    system.job_overhead_time: 0.05
+    system.energy_by_work: true
+    system.cap_latency: true
+# equal-spend budget per world: 1,400 x (cost of a round of Light jobs) / 7.5
+budgets: {v1: 1400, real: 3267}
+arms:
+  light: {tuned_file: configs/rl2_tuned_rl_light_mimic.json}            # the tuned control
+  o_light: {condition: o_light_mimic}                                   # bound: Light, no wasted job
+  o_work: {condition: o_work_mimic}                                     # bound: heaviest job that finishes
+  c34: {tuned: true}                                                    # the method as tuned (M7)
+  c34_v3: {tuned: true, override: {policy.predictor: v3}}               # + workload-aware predictor
+  c34_x: {tuned: true, override: {policy.predictor: v3, policy.elig_threshold: 0.4}}   # + lower line
+  o_fair: {condition: o_fair_mimic}                                     # bound: most equal contributions
+  o_cov: {condition: o_cov_mimic}                                       # bound: contribution-aware picks
+  light_nova: {tuned_file: configs/rl2_tuned_rl_light_mimic.json, override: {fl.aggregator: mimic_nova}}
+  c34_nova: {tuned: true, override: {fl.aggregator: mimic_nova}}
+rule:
+  kind: describe
+  reference: light
+  bounds: [o_light, o_work, o_fair, o_cov]
+  targets: [0.60, 0.70, 0.75]
+out: results/r5_pilot

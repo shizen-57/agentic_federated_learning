@@ -88,7 +88,7 @@ def test_config_guards():
     with pytest.raises(ValueError):
         Experiment(Cfg.from_dict({"policy": {"gate_mode": "thompson"}}))
     with pytest.raises(ValueError):
-        Experiment(Cfg.from_dict({"policy": {"predictor": "v3"}}))
+        Experiment(Cfg.from_dict({"policy": {"predictor": "v9"}}))
 
 
 def test_engine_runs_with_v2_and_thompson(tmp_path):

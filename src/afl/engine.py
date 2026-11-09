@@ -25,7 +25,7 @@ from .local import accepted, local_train
 from .models import build_model, get_flat, set_flat
 from .policies import build_policy
 from .policies.base import best_work_mode, est_time, mode_by_rule
-from .predictor import SuccessPredictor, SuccessPredictorV2
+from .predictor import SuccessPredictor, SuccessPredictorV2, SuccessPredictorV3
 from .provenance import LOADED as CODE_LOADED, code_hash
 from .sim import ClientEnv
 from .diagnostics import DiagWriter, norm_state
@@ -75,14 +75,16 @@ class Experiment:
         self.d = build_data(cfg)
         self.N = cfg.data.num_clients
         self.env = ClientEnv(cfg, self.d["n_i"], cfg.seed, sketch=self.d["sketch"])
-        if cfg.policy.predictor not in ("v1", "v2"):
+        if cfg.policy.predictor not in ("v1", "v2", "v3"):
             raise ValueError(f"unknown policy.predictor {cfg.policy.predictor}")
         if cfg.policy.gate_mode not in ("top", "thompson"):
             raise ValueError(f"unknown policy.gate_mode {cfg.policy.gate_mode}")
-        if cfg.policy.gate_mode == "thompson" and cfg.policy.predictor != "v2":
-            raise ValueError("policy.gate_mode=thompson needs policy.predictor=v2")
-        self.pv2 = cfg.policy.predictor == "v2"
-        self.predictor = SuccessPredictorV2(cfg) if self.pv2 else SuccessPredictor(cfg)
+        if cfg.policy.gate_mode == "thompson" and cfg.policy.predictor == "v1":
+            raise ValueError("policy.gate_mode=thompson needs policy.predictor=v2 or v3")
+        self.pv2 = cfg.policy.predictor in ("v2", "v3")     # per-client posterior + uncertainty
+        self.pv3 = cfg.policy.predictor == "v3"             # + the job's time and energy inputs
+        self.predictor = (SuccessPredictorV3(cfg) if self.pv3 else
+                          SuccessPredictorV2(cfg) if self.pv2 else SuccessPredictor(cfg))
         # Own stream for the Thompson gate, so it never shifts any other draw.
         self.gate_rng = np.random.default_rng(cfg.seed + 7100)
         self.policy = build_policy(cfg)
@@ -305,6 +307,12 @@ class Experiment:
         if self.cfg.policy.predictor_norm == "round" or self.pv2:
             self.predictor.set_reference(np.array(
                 [self.predictor.client_features(obs[i], hist[i]) for i in range(self.N)]))
+        if self.pv3:
+            # The server's own run-time estimates (observed speed and bandwidth,
+            # the client's data volume): the job inputs of predictor v3.
+            self.predictor.set_jobs(
+                {i: {m: self._est_time(i, m, {"obs": obs}, None) for m in self.cfg.system.modes}
+                 for i in range(self.N)}, obs, self.env.n_work)
         p_sd = None
         if self.pv2:
             post = {i: {m: self.predictor.predict_client(i, obs[i], hist[i], m)
@@ -367,6 +375,12 @@ class Experiment:
             "candidates": ([int(i) for i in np.where(self.env._draw["available"])[0]]
                            if self.cfg.system.checkin_pool else None),
         }
+        if self.cfg.policy.name.startswith("oracle"):
+            # Analysis only (docs/REVIEW_5.md, F4): the true outcome of every
+            # (client, mode) this round, for the oracle schedulers that bound
+            # what any real scheduler could gain. No other policy ever sees it.
+            state["truth_ok"] = {i: {m: int(self.env.outcome(i, m)["success"])
+                                     for m in self.cfg.system.modes} for i in range(self.N)}
         if self.hist_sketch is not None:
             self._probe_missing_history()
             state["update_sketch"] = self.hist_sketch
@@ -666,6 +680,7 @@ class Experiment:
         self.late = []
         pending_spends: list[tuple[int, str]] = []
         round_cost = 0.0
+        charged_by: dict[int, float] = {}     # what each invitation was charged
         latencies = []
         mode_counts = {m: 0 for m in self.cfg.system.modes}
 
@@ -686,6 +701,7 @@ class Experiment:
             charged = self.env.cost(i, mode, frac) if ran else 0.0
             if ran:
                 round_cost += charged
+            charged_by[i] = charged
             reasons[i] = out["reason"]
             latencies.append(out["latency"])
             # Energy spend is deferred until after the oracle diagnostic below
@@ -813,6 +829,27 @@ class Experiment:
                 delta = sum(corrected) / len(corrected)
                 for i, u in zip(recv_ids, updates):
                     self.mimic_c[i] = delta - u
+            else:
+                delta = None
+        elif agg == "mimic_nova":
+            # MimiC on step-normalised updates (docs/REVIEW_5.md 3.5). MimiC
+            # assumes every update is the same amount of local work; with
+            # modes an update is 1, 2 or 4 epochs long (and clients differ in
+            # data), so plain MimiC averages updates of different size and
+            # keeps corrections on the wrong scale when a client's mode
+            # changes. Here every update is first divided by its number of
+            # local steps (FedNova, Wang et al. 2020): g_i = u_i / tau_i is a
+            # per-step direction; MimiC's correction works on those
+            # (v_i = g_i + c_i, c_i = mean v - g_i); the model then moves by
+            # the mean corrected direction times the mean number of steps.
+            if updates:
+                dirs = [u / max(s_, 1) for u, s_ in zip(updates, steps)]
+                corrected = [g + self.mimic_c[i] if i in self.mimic_c else g
+                             for i, g in zip(recv_ids, dirs)]
+                mean_v = sum(corrected) / len(corrected)
+                for i, g in zip(recv_ids, dirs):
+                    self.mimic_c[i] = mean_v - g
+                delta = mean_v * (float(sum(steps)) / len(steps))
             else:
                 delta = None
         else:
@@ -992,6 +1029,11 @@ class Experiment:
         r = self.cfg.reward
         if r.damage_metric == "raw_fail":
             damage_term = self.norm["faildmg"](fail_ratio)
+        elif r.damage_metric == "waste":
+            # Cost charged to jobs that delivered nothing, in units of a
+            # round of Light jobs: a failure counts by what it cost.
+            wasted = sum(c for i, c in charged_by.items() if not success.get(i, 0))
+            damage_term = self.norm["faildmg"](wasted / max(float(state["cost_ref"]), 1e-9))
         elif r.damage_metric == "arl_selected":
             damage_term = self.norm["arl"](arl_sel)
         elif r.damage_metric == "arl":

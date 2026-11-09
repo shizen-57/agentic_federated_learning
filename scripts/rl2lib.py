@@ -242,13 +242,16 @@ def check_evidence(out: str, plan: dict, inputs: dict[str, str],
     return problems, jobs, valid
 
 
-def measures_by_group(jobs: list[dict]) -> dict[str, dict[str, dict[int, dict]]]:
-    """{group: {condition: {seed: measures}}} for the given (valid) jobs."""
+def measures_by_group(jobs: list[dict], budget_of=None) -> dict[str, dict[str, dict[int, dict]]]:
+    """{group: {condition: {seed: measures}}} for the given (valid) jobs.
+    budget_of(group) -> the equal-spend budget of that group's world, or None
+    for the standard one (review 5: a world with another cost scale)."""
     import report_dev_screen as rep
     out: dict = {}
     for j in jobs:
         path = os.path.join(j["raw"]["out"], j["raw"]["tag"] + ".csv")
-        out.setdefault(j["group"], {}).setdefault(j["cond"], {})[j["seed"]] = rep.measures(path)
+        b = budget_of(j["group"]) if budget_of else None
+        out.setdefault(j["group"], {}).setdefault(j["cond"], {})[j["seed"]] = rep.measures(path, b)
     return out
 
 
