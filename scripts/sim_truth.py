@@ -44,6 +44,7 @@ def truth(dataset: str, seeds: list[int], sets: list[str], rounds: int = 200) ->
     from afl.data import build as build_data
     from afl.sim import ClientEnv
     agg: dict = {}
+    by_state: dict = {}                      # (group, in good state, mode) -> [jobs, successes]
     per: dict = {g: {"n": 0, "online": [], "p_light": [], "cost_light": [], "best": []} for g in GROUPS}
     modes = None
     for seed in seeds:
@@ -65,6 +66,9 @@ def truth(dataset: str, seeds: list[int], sets: list[str], rounds: int = 200) ->
                     a = agg.setdefault((grp[i], m), {"n": 0, "ok": 0, **{r: 0 for r in REASONS}})
                     a["n"] += 1
                     a[o["reason"]] += 1
+                    b = by_state.setdefault((grp[i], bool(env.good[i]), m), [0, 0])
+                    b[0] += 1
+                    b[1] += o["success"]
                     ok[m][i] += o["success"]
                     hit |= o["success"]
                 anyok[i] += hit
@@ -76,7 +80,15 @@ def truth(dataset: str, seeds: list[int], sets: list[str], rounds: int = 200) ->
             p["p_light"] += list(ok[modes[0]][sel] / np.maximum(online[sel], 1))
             p["best"] += list(anyok[sel] / np.maximum(online[sel], 1))
             p["cost_light"] += [env.cost(int(i), modes[0]) for i in np.where(sel)[0]]
-    out = {"dataset": dataset, "seeds": seeds, "set": sets, "rounds": rounds, "groups": {}}
+    out = {"dataset": dataset, "seeds": seeds, "set": sets, "rounds": rounds, "groups": {}, "states": {}}
+    if any(not good for (_, good, _) in by_state):       # system.state_model = diurnal
+        for g in GROUPS:
+            n_all = sum(v[0] for (gg, _, m), v in by_state.items() if gg == g and m == modes[0])
+            for good in (True, False):
+                cell = {m: by_state.get((g, good, m), [0, 0]) for m in modes}
+                out["states"][f"{g}, {'good' if good else 'poor'} state"] = {
+                    "share": cell[modes[0]][0] / max(n_all, 1),
+                    "ok": {m: v[1] / max(v[0], 1) for m, v in cell.items()}}
     for g in GROUPS:
         p = per[g]
         pl = np.array(p["p_light"]) if p["p_light"] else np.zeros(1)
@@ -106,6 +118,12 @@ def render(res: dict) -> str:
                  + " | ".join(f"{v['modes'][m]['ok']:.2f}" for m in modes)
                  + f" | {v['any_mode']:.2f} | {lm['dropped']:.2f} / {lm['deadline']:.2f} / {lm['energy']:.2f}"
                  f" | {v['light_below_0.5']:.0%} | {v['cost_light']:.2f} |")
+    if res.get("states"):
+        L += ["", "By the device's state that round (share = of the group's online rounds):", "",
+              "| group and state | share | " + " | ".join(f"{m} ok" for m in modes) + " |",
+              "|---|---|" + "---|" * len(modes)]
+        for name, v in res["states"].items():
+            L.append(f"| {name} | {v['share']:.0%} | " + " | ".join(f"{v['ok'][m]:.2f}" for m in modes) + " |")
     return "\n".join(L) + "\n"
 
 

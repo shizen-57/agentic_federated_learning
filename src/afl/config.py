@@ -116,6 +116,21 @@ class SystemCfg:
     energy_by_work: bool = False        # the training part of a job's energy follows the amount
                                         # of work (epochs x data), like its time and cost; off =
                                         # original (energy ignores the client's data volume)
+    # A device is not always the same device (docs/REVIEW_5.md 2.8): at night it
+    # is plugged in and on Wi-Fi, in the afternoon it runs on battery and mobile
+    # data. static = original (a client's speed and bandwidth never change).
+    state_model: str = "static"         # static | diurnal: each round a client is in a good
+                                        # state (charging, Wi-Fi, idle) or a poor one (on
+                                        # battery, mobile data, in use); the chance of the good
+                                        # state follows the client's own day/night cycle and
+                                        # is sticky like availability
+    state_good_p: float = 0.5           # mean share of rounds in the good state
+    state_good_speed: float = 1.25      # speed multiplier, good state (no throttling)
+    state_poor_speed: float = 0.6       # speed multiplier, poor state (in use, throttled)
+    state_good_bandwidth: float = 1.5   # bandwidth multiplier, good state (Wi-Fi)
+    state_poor_bandwidth: float = 0.4   # bandwidth multiplier, poor state (mobile data)
+    state_poor_charge: float = 0.0      # share of the usual recharge in the poor state
+                                        # (0 = the battery only recharges while plugged in)
     cap_latency: bool = False           # a job that misses the deadline counts as one deadline
                                         # of waiting (the server stops there); off = original
                                         # (its full run time is reported)

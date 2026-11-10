@@ -192,12 +192,19 @@ are unchanged):
 | `system.energy_by_work` | the training part of the energy follows epochs x data | time and cost already do; before, a client with three times the data used the same energy |
 | `system.cap_latency` | a job that misses the deadline counts as one deadline of waiting | the server stops waiting at the deadline |
 
-The "real" setting of `configs/r5_pilot.yaml` turns on all four
+| `system.state_model: diurnal` (+ `state_good_p`, `state_good_speed`, `state_poor_speed`, `state_good_bandwidth`, `state_poor_bandwidth`, `state_poor_charge`) | each round a client is in a good state (plugged in, Wi-Fi, idle) or a poor one (battery, mobile data, in use), on its own day/night cycle and sticky like availability; speed x1.25 / x0.6, bandwidth x1.5 / x0.4, recharge only in the good state | a real device is not the same device all day (Hard et al. 2018: eligibility = charging, idle, unmetered network); without it a weak client is weak in every round and no decision can ever save its contribution |
+
+The "real" setting of `configs/r5_pilot.yaml` turns on the first four
 (`drop_ref_time` 1.0, `job_overhead` 1.0, `job_overhead_time` 0.05). Its
 ground truth: slow 0.09, middle 0.82 / 0.50 / 0.05, fast 0.94 / 0.90 / 0.66,
 weak 0.38 / 0.02 / 0.00 (Light / Standard / Priority). A Light job then
 costs 1.67 instead of 0.67, Standard 1.4 times a Light job and Priority 2.2
 times, so a heavier job on a reliable device becomes worth its cost.
+
+The "life" setting adds the device states to "real". Its ground truth is
+in docs/REVIEW_5.md, section 2.8: a weak client succeeds 58% of the time
+with Light in its good state and 2% in its poor state, so when to invite
+whom becomes a real decision.
 
 These values are assumed, like the rest of the cost model. They are a
 second world to report next to the first, not a calibration.

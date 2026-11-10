@@ -112,6 +112,12 @@ class ClientEnv:
         self.bandwidth = self.bandwidth * sysc.bandwidth_scale
         self.avail_shift = np.where(self.weak, -sysc.weak_avail_drop, 0.0)
         self._prev_available: np.ndarray | None = None
+        if sysc.state_model not in ("static", "diurnal"):
+            raise ValueError(f"unknown system.state_model {sysc.state_model}")
+        # What the device can do THIS round. static: its fixed profile.
+        self.good = np.ones(self.N, dtype=bool)
+        self._speed_now, self._bw_now = self.speed, self.bandwidth
+        self._prev_good: np.ndarray | None = None
 
         # Diurnal availability profile: each client gets its own peak hour and
         # amplitude scale, matching Hard et al. 2018's finding that the cycle's
@@ -179,6 +185,15 @@ class ClientEnv:
         wave = sysc.diurnal_amplitude * self.amplitude_scale * np.cos(phase)
         return np.clip(sysc.availability_p + wave + self.avail_shift, 0.03, 0.99)
 
+    def good_state_prob(self, t: int) -> np.ndarray:
+        """P(client is in its good state in round t): the same per-client
+        day/night wave as availability, around system.state_good_p."""
+        sysc = self.cfg.system
+        hour = 24.0 * (t % sysc.rounds_per_day) / sysc.rounds_per_day
+        phase = 2 * np.pi * (hour - self.peak_hour) / 24.0
+        wave = sysc.diurnal_amplitude * self.amplitude_scale * np.cos(phase)
+        return np.clip(sysc.state_good_p + wave, 0.03, 0.97)
+
     # ------------------------------------------------------------------ round
 
     def new_round(self, t: int) -> None:
@@ -206,9 +221,27 @@ class ClientEnv:
         # A client that has left never comes back.
         self._draw["available"] = self._draw["available"] & ~self.departed
         self._prev_available = self._draw["available"].copy()
-        # Energy recharges a little each round; a client drained last round may
-        # be back but weaker, which is what makes availability non-stationary.
-        self.energy = np.minimum(self.energy_cap, self.energy + 0.25 * self.energy_cap)
+        sysc = self.cfg.system
+        if sysc.state_model == "diurnal":
+            # Good state (plugged in, Wi-Fi, idle) or poor state (battery,
+            # mobile data, in use), on the client's own day/night cycle and
+            # sticky like availability. Drawn after every other draw, and
+            # before any action, so common random numbers hold.
+            good = rng.random(self.N) < self.good_state_prob(t)
+            if rho > 0:
+                keep_g = rng.random(self.N) < rho
+                if self._prev_good is not None:
+                    good = np.where(keep_g, self._prev_good, good)
+            self.good = self._prev_good = good
+            self._speed_now = self.speed * np.where(good, sysc.state_good_speed, sysc.state_poor_speed)
+            self._bw_now = self.bandwidth * np.where(good, sysc.state_good_bandwidth,
+                                                      sysc.state_poor_bandwidth)
+            charge = 0.25 * np.where(good, 1.0, sysc.state_poor_charge)
+            self.energy = np.minimum(self.energy_cap, self.energy + charge * self.energy_cap)
+        else:
+            # Energy recharges a little each round; a client drained last round may
+            # be back but weaker, which is what makes availability non-stationary.
+            self.energy = np.minimum(self.energy_cap, self.energy + 0.25 * self.energy_cap)
         # Snapshot for outcome()'s feasibility check (see there): every query
         # this round, real or counterfactual, must see the same pre-spend
         # energy regardless of how many spend() calls happen in between, or
@@ -233,15 +266,16 @@ class ClientEnv:
         # compression ratio); None keeps the mode's own.
         frac = sysc.upload_frac[mode] if frac is None else frac
         d = self._draw
-        t_train = epochs * (self.n_work[i] / 1200.0) / self.speed[i] * d["compute_jitter"][i]
-        t_comm = 0.25 * frac / self.bandwidth[i] * d["channel"][i]
-        energy = 0.08 * epochs / self.speed[i] + 0.05 * frac
+        speed, bw = self._speed_now[i], self._bw_now[i]      # this round's device state
+        t_train = epochs * (self.n_work[i] / 1200.0) / speed * d["compute_jitter"][i]
+        t_comm = 0.25 * frac / bw * d["channel"][i]
+        energy = 0.08 * epochs / speed + 0.05 * frac
         if sysc.energy_by_work:
             # Training energy follows the work done (epochs x data), as time does.
-            energy = 0.08 * epochs * (self.n_work[i] / self._work_ref) / self.speed[i] + 0.05 * frac
+            energy = 0.08 * epochs * (self.n_work[i] / self._work_ref) / speed + 0.05 * frac
         if sysc.job_overhead_time > 0:
             # The model download every job starts with, over this round's channel.
-            t_comm = t_comm + sysc.job_overhead_time / self.bandwidth[i] * d["channel"][i]
+            t_comm = t_comm + sysc.job_overhead_time / bw * d["channel"][i]
         return t_train, t_comm, energy
 
     def cost(self, i: int, mode: str, frac: float | None = None) -> float:
@@ -330,8 +364,8 @@ class ClientEnv:
         """Noisy descriptors the server is allowed to condition on (Sec. 3.8)."""
         rng = self._round_rng
         return {
-            "bw_hat": float(self.bandwidth[i] * rng.lognormal(0, 0.15)),
-            "speed_hat": float(self.speed[i] * rng.lognormal(0, 0.15)),
+            "bw_hat": float(self._bw_now[i] * rng.lognormal(0, 0.15)),
+            "speed_hat": float(self._speed_now[i] * rng.lognormal(0, 0.15)),
             "energy_hat": float(self.energy[i] / self.energy_cap[i]),
             "avail_hint": float(self._draw["available"][i] * rng.uniform(0.7, 1.0)
                                 + (1 - self._draw["available"][i]) * rng.uniform(0.0, 0.3)),

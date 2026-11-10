@@ -117,6 +117,50 @@ Methods differ a lot early (0.40 to 0.57 at round 25) and end within 0.01 of
 each other. Both primary endpoints are measured near the end, where the curve
 is flat. They have little power to tell methods apart.
 
+### 2.8 A device never changes (added after the user's remark, 2026-11-10)
+
+The user's point: the simulator is too simple to show what ARL could do in
+real life. The strongest version of that point is this. In the simulator a
+client's device is fixed: a weak client is weak in every round and can only
+ever finish a Light job. So there is never a moment where a better decision
+(another job, or another time) would have saved its contribution -- and
+"avoidable loss" is exactly what ARL measures.
+
+A real phone changes during the day: at night it is plugged in, idle and on
+Wi-Fi; in the afternoon it runs on battery and mobile data while in use.
+
+Option built (off by default): `system.state_model: diurnal`. Each round a
+client is in a good or a poor state, on its own day/night cycle, sticky like
+availability. Speed x1.25 / x0.6, bandwidth x1.5 / x0.4, and the battery only
+recharges in the good state. The server sees the current (noisy) speed and
+bandwidth, as before. Values assumed.
+
+Ground truth with this option and the four of 2.3-2.6 ("life" setting),
+FEMNIST, seeds 403-405:
+
+| group and state | share of online rounds | Light | Standard | Priority |
+|---|---|---|---|---|
+| slow, good state | 58% | 0.29 | 0.01 | 0.00 |
+| slow, poor state | 42% | 0.00 | 0.00 | 0.00 |
+| middle, good state | 57% | 0.86 | 0.68 | 0.17 |
+| middle, poor state | 43% | 0.48 | 0.05 | 0.00 |
+| fast, good state | 56% | 0.95 | 0.93 | 0.82 |
+| fast, poor state | 44% | 0.91 | 0.69 | 0.11 |
+| weak, good state | 58% | 0.58 | 0.10 | 0.00 |
+| weak, poor state | 42% | 0.02 | 0.00 | 0.00 |
+
+Job rules in this setting (`results/r5_predictor/femnist_life`; epochs of
+training delivered per unit of cost): always Light 0.28, the baselines'
+expected-work rule 0.37, the oracle 0.85. Knowing which job a device can
+finish *right now* is worth far more here than in the current world.
+
+Now the right decision depends on the moment: a weak client is worth
+inviting in its good state (0.58, above the eligibility line) and a waste in
+its poor state (0.02); a middle device can take Standard at night and only
+Light by day. Whom to invite, when, and with which job are all real
+decisions here. Whether ARL then helps is an open question that only runs
+can answer (Phase 3).
+
 ## 3. Method and code weaknesses
 
 ### 3.1 The safety layer works against inclusion

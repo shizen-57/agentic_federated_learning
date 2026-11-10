@@ -378,3 +378,67 @@ def test_dips_are_counted_after_the_early_phase():
     rows = [{"accuracy_fixed": a, "cost": 1.0, "latency": 0.5} for a in acc]
     e = rep.efficiency(rows, budget=100.0)
     assert e["dips"] == 2 and e["low_late"] == pytest.approx(0.6)
+
+
+# ------------------------------------------------ 2.8 devices that change
+
+def test_static_devices_are_the_default_and_never_change():
+    _, env = _env()
+    for t in range(1, 6):
+        env.new_round(t)
+        assert env._speed_now is env.speed and env._bw_now is env.bandwidth and env.good.all()
+
+
+def test_day_night_states_change_what_a_device_can_do():
+    cfg, env = _env({"state_model": "diurnal", "avail_persistence": 0.8}, n=60)
+    sysc = cfg.system
+    share, flips, seen_poor_fail = [], 0, 0
+    prev = None
+    for t in range(1, 193):                                 # two simulated days
+        before = env.energy.copy()
+        env.new_round(t)
+        g = env.good
+        assert np.allclose(env._speed_now, env.speed * np.where(g, sysc.state_good_speed, sysc.state_poor_speed))
+        assert np.allclose(env._bw_now, env.bandwidth * np.where(g, sysc.state_good_bandwidth,
+                                                                  sysc.state_poor_bandwidth))
+        # the battery only recharges while plugged in (good state)
+        assert np.allclose(env.energy[~g], before[~g])
+        assert (env.energy[g] >= before[g]).all()
+        share.append(g.mean())
+        if prev is not None:
+            flips += int((g != prev).sum())
+        prev = g.copy()
+        for i in range(0, env.N, 7):
+            a, b = env.outcome(i, "standard"), env.outcome(i, "standard")
+            assert a == b                                   # pure within the round
+            if env._draw["available"][i]:
+                o = env.observe(i)
+                assert 0.5 < o["speed_hat"] / env._speed_now[i] < 2.0
+                seen_poor_fail += (not g[i]) and a["success"] == 0
+    assert 0.35 < np.mean(share) < 0.65                      # around state_good_p
+    assert flips < 0.35 * 191 * env.N                        # sticky: far fewer flips than coin tosses
+    assert seen_poor_fail > 0
+    with pytest.raises(ValueError):
+        _env({"state_model": "nope"})
+
+
+def test_a_job_is_easier_in_the_good_state():
+    cfg, env = _env({"state_model": "diurnal"}, n=80)
+    ok = {True: [], False: []}
+    for t in range(1, 97):
+        env.new_round(t)
+        for i in np.where(env._draw["available"])[0]:
+            ok[bool(env.good[i])].append(env.outcome(int(i), "standard")["success"])
+    assert np.mean(ok[True]) > np.mean(ok[False]) + 0.15
+
+
+def test_engine_runs_with_changing_devices(tmp_path):
+    from afl.engine import Experiment
+    cfg = _cfg({"name": "safe_ppo", "predictor": "v2", "gate_mode": "thompson", "mode_mask": "feasible",
+                "mode_mask_z": 0.25, "pred_decay": 0.98},
+               system={"state_model": "diurnal", "drop_model": "exposure", "drop_ref_time": 1.0,
+                       "job_overhead": 1.0, "job_overhead_time": 0.05, "energy_by_work": True,
+                       "cap_latency": True, "avail_persistence": 0.8}, rounds=8)
+    cfg.out = str(tmp_path)
+    rows = Experiment(cfg).run(verbose=False)
+    assert len(rows) == 8 and all(np.isfinite(r["reward"]) and r["latency"] <= 1.0 + 1e-9 for r in rows)
