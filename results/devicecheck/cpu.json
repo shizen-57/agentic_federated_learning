@@ -1,0 +1,116 @@
+{
+ "code_hash": "a1be0f1e34704d16",
+ "device": "cpu",
+ "python": "3.13.17",
+ "runs": {
+  "cifar_light_s900": {
+   "acc10": 0.30890688073394496,
+   "cost": 378.86631663974157,
+   "heavy_share": 0.0,
+   "invites": 600,
+   "seconds": 232.8,
+   "successes": 447,
+   "w10": 0.10382647034136558
+  },
+  "cifar_light_s901": {
+   "acc10": 0.32045366972477063,
+   "cost": 435.15665438899566,
+   "heavy_share": 0.0,
+   "invites": 600,
+   "seconds": 244.7,
+   "successes": 401,
+   "w10": 0.11068532680941268
+  },
+  "cifar_light_s902": {
+   "acc10": 0.3628204128440367,
+   "cost": 468.60440657147257,
+   "heavy_share": 0.0,
+   "invites": 600,
+   "seconds": 245.8,
+   "successes": 353,
+   "w10": 0.14317045774909284
+  },
+  "cifar_tuned_s900": {
+   "acc10": 0.39084426605504585,
+   "cost": 556.3077544426494,
+   "heavy_share": 0.185,
+   "invites": 600,
+   "seconds": 235.8,
+   "successes": 331,
+   "w10": 0.2416522542530505
+  },
+  "cifar_tuned_s901": {
+   "acc10": 0.4018956422018349,
+   "cost": 620.4789595488768,
+   "heavy_share": 0.3,
+   "invites": 600,
+   "seconds": 243.9,
+   "successes": 312,
+   "w10": 0.24954289186776532
+  },
+  "cifar_tuned_s902": {
+   "acc10": 0.4073465596330275,
+   "cost": 618.531705819131,
+   "heavy_share": 0.22166666666666668,
+   "invites": 600,
+   "seconds": 255.3,
+   "successes": 339,
+   "w10": 0.2374444926835839
+  },
+  "femnist_light_s900": {
+   "acc10": 0.6030120481927711,
+   "cost": 408.80598616742185,
+   "heavy_share": 0.0,
+   "invites": 600,
+   "seconds": 886.7,
+   "successes": 406,
+   "w10": 0.3496416062116623
+  },
+  "femnist_light_s901": {
+   "acc10": 0.7188335358444715,
+   "cost": 442.5335856196782,
+   "heavy_share": 0.0,
+   "invites": 600,
+   "seconds": 539.3,
+   "successes": 378,
+   "w10": 0.4453424036502838
+  },
+  "femnist_light_s902": {
+   "acc10": 0.6223833543505675,
+   "cost": 433.9992194741209,
+   "heavy_share": 0.0,
+   "invites": 600,
+   "seconds": 314.5,
+   "successes": 394,
+   "w10": 0.33749854266643525
+  },
+  "femnist_tuned_s900": {
+   "acc10": 0.6493975903614457,
+   "cost": 534.695325542571,
+   "heavy_share": 0.155,
+   "invites": 600,
+   "seconds": 746.3,
+   "successes": 348,
+   "w10": 0.39879800081253053
+  },
+  "femnist_tuned_s901": {
+   "acc10": 0.7170716889428919,
+   "cost": 548.4728003784295,
+   "heavy_share": 0.15166666666666667,
+   "invites": 600,
+   "seconds": 883.1,
+   "successes": 323,
+   "w10": 0.4505720227956772
+  },
+  "femnist_tuned_s902": {
+   "acc10": 0.6836065573770492,
+   "cost": 517.4726328113566,
+   "heavy_share": 0.10833333333333334,
+   "invites": 600,
+   "seconds": 447.1,
+   "successes": 335,
+   "w10": 0.42687295377254486
+  }
+ },
+ "torch": "2.14.1+cpu"
+}

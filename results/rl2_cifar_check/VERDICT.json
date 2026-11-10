@@ -1,0 +1,11 @@
+{
+ "holds": true,
+ "kind": "transfer",
+ "manifest_sha256": "f5cfb3b756bd2b945f14b24b63fd9993bc89efb6cda9c39f773240b8118bc533",
+ "rank": 1,
+ "spec": "configs/rl2_cifar_check.yaml",
+ "spec_sha256": "30b0943073284800fa164e16314bc9f01b61efc3506dc41328e1a30ffba4dbcb",
+ "tuned": "configs/rl2_tuned.json",
+ "tuned_sha256": "799c83109a17239ff54dc5ab68581a6283db83607121afc1b5c4121b35bcc492",
+ "vs_base": 0.0071815688962765245
+}

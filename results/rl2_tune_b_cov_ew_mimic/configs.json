@@ -1,0 +1,36 @@
+{
+ "c00": {},
+ "c01": {
+  "policy.elig_threshold": 0.4,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "c02": {
+  "policy.elig_threshold": 0.4,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "c03": {
+  "policy.elig_threshold": 0.5,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "c04": {
+  "policy.elig_threshold": 0.5,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ },
+ "c05": {
+  "policy.elig_threshold": 0.6,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "c06": {
+  "policy.elig_threshold": 0.6,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2"
+ }
+}

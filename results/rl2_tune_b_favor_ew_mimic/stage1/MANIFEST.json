@@ -1,0 +1,26 @@
+{
+  "created": "2026-10-30 02:06:54 UTC",
+  "code_hash": "a1be0f1e34704d16",
+  "git_commit": "281261469560bf6722196816995c68176c54629d",
+  "git_dirty": false,
+  "inputs": {
+    "spec": "a18e0a28a611b7829c4256d15aadb0eeb7b6a467cb3c5bb664588e3fe66ab2ed",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8",
+    "configs": "058b4f550743ff7697c8867e147f8c93349f8d5123a6a2a6f0312ec94622c0d8"
+  },
+  "generated": "6cc7b26e8b5e37ce73e3de971570e88046d7854e94cd0e0fa2ec8f7dad1271dc",
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "data.split",
+    "fl.device=auto"
+  ],
+  "python": "3.11.16",
+  "torch": "2.5.1+cu121",
+  "numpy": "2.4.6",
+  "cuda": "12.1",
+  "device": "NVIDIA GeForce RTX 3070",
+  "stage": 1,
+  "title": "Matched tuning of b_favor_ew_mimic"
+}

@@ -1,0 +1,21 @@
+# RL2 ARL screen: does the contribution-aware reward add value? The tuned
+# method (M7's c34 after the cost check: configs/rl2_tuned_cost.json) with
+# ONLY the damage term changed. Version 2 (gap review, before any run): both
+# endpoints at equal spend (eq5, w10b); runs after the cost check.
+# Rule: docs/RL2_ARL_SCREEN.md and the `rule` block, written before any run.
+# Runner: scripts/screen_rl2.py.
+version: 2
+title: RL2 ARL screen (the reward term alone)
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+datasets: {femnist: s2_femnist, cifar: s2_cifar}
+tuned: configs/rl2_tuned_cost.json      # made by scripts/finalize_tuned.py cost
+set: {data.split: persistent}          # development pool (data.eval_pool dev)
+rounds: 200
+seeds: [250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269]
+arms:
+  plain: {tuned: true, override: {reward.damage_metric: raw_fail, policy.per_client_credit: false}}
+  arl3:  {tuned: true, override: {reward.damage_metric: arl_v3, policy.per_client_credit: true}}
+  arl4:  {tuned: true, override: {reward.damage_metric: arl_v4, policy.per_client_credit: true}}
+rule: {kind: arl, plain: plain, contrasts: [arl3, arl4], alpha: 0.05}
+out: results/rl2_arl_screen

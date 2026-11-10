@@ -1,0 +1,21 @@
+# RL2 cost check (gap review A3): the tuned method's soft cost constraint does
+# not reach its target (M7 stage 2: 9.4 per round in the second half against
+# 7.5). Two tighter variants are compared with it; the rule picks one or keeps
+# the base. Rule: the `rule` block and docs/RL2_ARL_SCREEN.md ("Order"),
+# written before any run. Runner: scripts/screen_rl2.py. Then:
+# python scripts/finalize_tuned.py cost --spec configs/rl2_cost_check.yaml --out <run folder>
+version: 1
+title: RL2 cost check (does the spend target bind?)
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+datasets: {femnist: s2_femnist}
+tuned: configs/rl2_tuned.json
+set: {data.split: persistent}          # development pool
+rounds: 200
+seeds: [280, 281, 282, 283, 284]
+arms:
+  base: {tuned: true}                                            # c34 as tuned
+  fast_dual: {tuned: true, override: {policy.lagrange_lr: 0.5}}  # 10x faster price adjustment
+  cap_target: {tuned: true, override: {policy.hard_budget_mult: 1.0}}   # hard cap at the target
+rule: {kind: cost, base: base, variants: [fast_dual, cap_target], slack: 1.05, max_loss: 0.01}
+out: results/rl2_cost_check

@@ -1,0 +1,30 @@
+# Matched tuning of a comparator (gap review B1): the same budget and rule as
+# M7's tuning of our method (configs/rl2_tune.yaml) -- up to 40 candidates on
+# seeds 220-224, the best 5 (and the untouched base c00) on seeds 225-239,
+# ranked by the same score (eq5 + w10) / 2, FEMNIST only, as M7 was. The
+# search may also give the comparator the repaired success predictor and
+# gate our method uses (predictor v2 + Thompson gate + evidence ageing; gap
+# review A7). Rule: docs/RL2_BASELINE_TUNING.md, written before any run.
+# Runner: scripts/tune_rl2.py. The winner -> configs/rl2_tuned_b_oort_ew_mimic.json.
+version: 1
+title: Matched tuning of b_oort_ew_mimic
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+source_group: s2_femnist
+base: b_oort_ew_mimic
+set: {data.split: persistent}
+rounds: 200
+n_configs: 40
+sampler_seed: 20261103
+stage1_seeds: [220, 221, 222, 223, 224]
+stage2_seeds: [225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239]
+top_k: 5
+references: []
+space:
+  policy.oort_eps: [0.1, 0.2, 0.3, 0.5]         # exploration share
+  policy.oort_alpha: [1.0, 2.0, 4.0]            # deadline penalty exponent
+  predictor:                                   # the original or the repaired predictor
+    - {policy.predictor: v1, policy.gate_mode: top}
+    - {policy.predictor: v2, policy.gate_mode: thompson, policy.pred_decay: 0.98}
+  policy.elig_threshold: [0.4, 0.5, 0.6]       # gate and mode-rule threshold
+out: results/rl2_tune_b_oort_ew_mimic

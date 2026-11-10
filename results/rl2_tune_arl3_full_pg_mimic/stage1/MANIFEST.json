@@ -1,0 +1,26 @@
+{
+  "created": "2026-10-29 23:29:25 UTC",
+  "code_hash": "a1be0f1e34704d16",
+  "git_commit": "281261469560bf6722196816995c68176c54629d",
+  "git_dirty": false,
+  "inputs": {
+    "spec": "dcfb3236d74754d3e17ba7b57f8b922bc0c34f460fd4c954454d5e564bed4c27",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8",
+    "configs": "6bfdaebb1ccf8f504ad43b3d0d437eb0405454b0b77118db7cd2fa122f96f600"
+  },
+  "generated": "b108417fdb57cfc8759d52f5efc62dd641a6ad6cb5fc5c3bbabd4f82acb051eb",
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "data.split",
+    "fl.device=auto"
+  ],
+  "python": "3.11.16",
+  "torch": "2.5.1+cu121",
+  "numpy": "2.4.6",
+  "cuda": "12.1",
+  "device": "NVIDIA GeForce RTX 3070",
+  "stage": 1,
+  "title": "Matched tuning of arl3_full_pg_mimic"
+}

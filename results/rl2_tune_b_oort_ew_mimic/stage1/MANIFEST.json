@@ -1,0 +1,26 @@
+{
+  "created": "2026-10-30 00:19:00 UTC",
+  "code_hash": "a1be0f1e34704d16",
+  "git_commit": "281261469560bf6722196816995c68176c54629d",
+  "git_dirty": false,
+  "inputs": {
+    "spec": "9d721c7981ae010352e233528a650c861eaadd18f38dba1fe5b2eeffd468572e",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8",
+    "configs": "705d254f689029c3277b15d2e62a434d83f6864cb7e91e606261c6770c04dccb"
+  },
+  "generated": "765719e2015a7d67dab46cb1f62905607bfd29b394d02914f24a83ec04e8adf3",
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "data.split",
+    "fl.device=auto"
+  ],
+  "python": "3.11.16",
+  "torch": "2.5.1+cu121",
+  "numpy": "2.4.6",
+  "cuda": "12.1",
+  "device": "NVIDIA GeForce RTX 3070",
+  "stage": 1,
+  "title": "Matched tuning of b_oort_ew_mimic"
+}

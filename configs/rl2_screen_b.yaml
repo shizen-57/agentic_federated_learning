@@ -1,0 +1,49 @@
+# RL2 screen B, version 2 (after the second external review; version 1 was
+# never run). The full SAFE-PPO stack with each component removed one at a
+# time, plus the required comparisons, from scratch (no pre-training). Every
+# condition uses the persistent data split. Rule: docs/RL2_SCREEN_B.md and the
+# `rule` block below (read by scripts/report_dev_screen.py), written first.
+version: 2
+title: RL2 screen B v2 (SAFE-PPO leave-one-out)
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+source_group: s2_femnist
+seeds: [215, 216, 217, 218, 219]
+set: {data.split: persistent}
+conditions: [arl3_full, arl3_full_pg, v2_rawfail, rl_light, rl_light_pg, ppo_v3,
+             ppo_full, ppo_full_mimic,
+             ppo_full_mlp, ppo_full_nomem, ppo_full_pv1, ppo_full_top, ppo_full_nodecay,
+             ppo_full_nomask, ppo_full_fixcost, ppo_full_nocap, ppo_full_nocurr,
+             ppo_full_noprot, ppo_full_arl3, ppo_full_rawfail]
+reference: arl3_full
+base_of: {arl3_full_pg: arl3_full, rl_light_pg: rl_light}
+allowed_extra: [policy.predictor, policy.gate_mode, policy.pred_decay]
+new_conditions: [ppo_v3, ppo_full, ppo_full_mimic,
+                 ppo_full_mlp, ppo_full_nomem, ppo_full_pv1, ppo_full_top, ppo_full_nodecay,
+                 ppo_full_nomask, ppo_full_fixcost, ppo_full_nocap, ppo_full_nocurr,
+                 ppo_full_noprot, ppo_full_arl3, ppo_full_rawfail]
+variants:
+  full: 200
+out: results/rl2_screen_b
+rule:
+  kind: screen_b
+  gate: [ppo_full, ppo_full_mimic]   # judged against the references below
+  equal_spend_ref: rl_light
+  accuracy_ref: arl3_full
+  margin: 0.02
+  full: ppo_full
+  flag_delta: 0.01
+  compare: [rl_light, rl_light_pg, arl3_full, arl3_full_pg, v2_rawfail, ppo_v3, ppo_full_mimic]
+  ablations:                          # condition: the one component it removes
+    ppo_full_mlp: attention set encoder
+    ppo_full_nomem: memory
+    ppo_full_pv1: predictor v2 + Thompson gate
+    ppo_full_top: Thompson gate
+    ppo_full_nodecay: predictor evidence ageing
+    ppo_full_nomask: feasible-mode mask
+    ppo_full_fixcost: cost constraint (fixed cost weight instead)
+    ppo_full_nocap: hard round cap
+    ppo_full_nocurr: trust curriculum
+    ppo_full_noprot: protection reward
+    ppo_full_arl3: ARL-v4 (ARL-v3 instead)
+    ppo_full_rawfail: ARL-v4 (plain failure count instead)

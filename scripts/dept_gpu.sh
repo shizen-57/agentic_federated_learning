@@ -9,6 +9,17 @@
 #   bash scripts/dept_gpu.sh lockseeds  # the other lock-up seeds 103 110 112 116 (~30 min)
 #   bash scripts/dept_gpu.sh diag short # collapse diagnostics, 8 runs x 30 rounds
 #   bash scripts/dept_gpu.sh diag full  # the same 8 runs at the full 200 rounds
+#   bash scripts/dept_gpu.sh pretrain femnist ppo_full   # RL2 pre-training -> checkpoints/
+#   bash scripts/dept_gpu.sh screen configs/rl2_screen_b.yaml   # a development screen
+#   bash scripts/dept_gpu.sh tune       # RL2 M7: tuning (docs/RL2_M7_TUNING.md)
+#   bash scripts/dept_gpu.sh tunebase b_oort_ew_mimic   # matched tuning of one comparator ("all" = all 8)
+#   bash scripts/dept_gpu.sh screen-c-pretrain   # RL2 M8: the checkpoints screen C needs
+#   bash scripts/dept_gpu.sh screen-c   # RL2 M8: screen C (docs/RL2_SCREEN_C.md)
+#   bash scripts/dept_gpu.sh confirm    # RL2 M10: checks only; "confirm go" runs it (user's go-ahead)
+#   bash scripts/dept_gpu.sh screen2 configs/rl2_arl_screen.yaml   # a controlled screen (ARL, sensitivity)
+#   bash scripts/dept_gpu.sh devicecheck  # short real-data runs to compare with the CPU
+#   bash scripts/dept_gpu.sh stress cifar # predictor stress test on CIFAR-10 (FEMNIST: stress femnist)
+#   bash scripts/dept_gpu.sh packsmall rl2_tune   # small results file to send (no big logs)
 #   bash scripts/dept_gpu.sh pack       # pack the results to copy back home
 #
 # Server rules this script follows: everything goes into our own conda env
@@ -24,6 +35,20 @@ activate() {
     # shellcheck disable=SC1091
     source "$(conda info --base)/etc/profile.d/conda.sh"
     conda activate "$ENV"
+    in_own_env
+    # less GPU memory lost to fragmentation when several runs share the card
+    export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+}
+
+# Server rule: never install into (or run from) the base environment.
+in_own_env() {
+    local base; base="$(conda info --base)"
+    if [ "${CONDA_DEFAULT_ENV:-}" != "$ENV" ] || [ -z "${CONDA_PREFIX:-}" ] \
+       || [ "$CONDA_PREFIX" = "$base" ] \
+       || [ "$(python -c 'import sys; print(sys.prefix)')" != "$CONDA_PREFIX" ]; then
+        echo "STOP: not inside the '$ENV' conda env (python is $(command -v python)); nothing installed."
+        exit 1
+    fi
 }
 
 jobs_default() {
@@ -39,6 +64,7 @@ setup)
     source "$(conda info --base)/etc/profile.d/conda.sh"
     conda env list | grep -q "^$ENV " || conda create -y -n "$ENV" python=3.11
     conda activate "$ENV"
+    in_own_env
     # Pick a PyTorch build the installed driver supports; never change the driver.
     cuda=$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9]*\)\.\([0-9]*\).*/\1\2/p' | head -1)
     if [ -z "$cuda" ]; then echo "nvidia-smi shows no CUDA version"; exit 1; fi
@@ -46,8 +72,9 @@ setup)
     elif [ "$cuda" -ge 118 ]; then idx=cu118
     else echo "Driver supports CUDA ${cuda:0:2}.${cuda:2}: too old for current PyTorch. Ask the admin; do not update the driver yourself."; exit 1
     fi
-    pip install --index-url "https://download.pytorch.org/whl/$idx" torch
-    pip install numpy pyyaml matplotlib pytest pyarrow pillow pandas
+    # pip of the env's own python, so packages can only land in the env
+    python -m pip install --index-url "https://download.pytorch.org/whl/$idx" torch
+    python -m pip install numpy pyyaml matplotlib pytest pyarrow pillow pandas
     python scripts/prepare_femnist.py
     PYTHONPATH=src python -c "from afl.data import ensure; ensure('cifar10')"
     echo "setup done"
@@ -90,14 +117,101 @@ diag)
         > "$OUT/diagnostic_v1/${2:-short}/report.md"
     echo "report: $OUT/diagnostic_v1/${2:-short}/report.md"
     ;;
+screen)
+    # a pre-registered development screen: bash scripts/dept_gpu.sh screen configs/<spec>.yaml
+    activate; jobs_default; mkdir -p "$OUT"
+    spec=${2:?give the screen spec, e.g. configs/rl2_screen_b.yaml}
+    name=$(basename "$spec" .yaml)
+    # pre-flight: every condition runs 2 rounds on this machine first (~1 min)
+    python scripts/smoke_screen.py --spec "$spec" --set fl.device=auto \
+        || { echo "STOP: a condition crashed in the 2-round check; send the output above"; exit 1; }
+    python scripts/diagnose_collapse.py --spec "$spec" --variant full --jobs "$JOBS" \
+        --set fl.device=auto --out "$OUT/$name" 2>&1 | tee -a "$OUT/$name.log"
+    # the pre-registered rule, applied only if every expected run is complete and valid
+    group=$(python -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["source_group"])' "$spec")
+    python scripts/report_dev_screen.py "$OUT/$name/full/$group" --spec "$spec" \
+        > "$OUT/$name/full/report.md" \
+        || echo "report says INCOMPLETE -- no decision (see $OUT/$name/full/report.md)"
+    echo "report: $OUT/$name/full/report.md"
+    ;;
+pretrain)
+    activate; mkdir -p checkpoints
+    ds=${2:-femnist}; cond=${3:-ppo_full}
+    python scripts/pretrain.py --group "s2_$ds" --condition "$cond" --iterations "${ITER:-20}" \
+        --workers "${WORKERS:-8}" --set fl.device=auto --out "checkpoints/${cond}_${ds}.pt" \
+        2>&1 | tee -a "$OUT/pretrain_${cond}_${ds}.log"
+    ;;
+tune)
+    activate; jobs_default; mkdir -p "$OUT"
+    python scripts/tune_rl2.py --spec configs/rl2_tune.yaml --out "$OUT/rl2_tune" --jobs "$JOBS" \
+        --set fl.device=auto 2>&1 | tee -a "$OUT/rl2_tune.log"
+    ;;
+tunebase)
+    # matched tuning of the comparators (docs/RL2_BASELINE_TUNING.md); resumable
+    activate; jobs_default; mkdir -p "$OUT"
+    which=${2:?give a comparator, e.g. b_oort_ew_mimic, or all}
+    if [ "$which" = all ]; then
+        names="rl_light_mimic arl3_full_pg_mimic b_oort_ew_mimic b_refl_ew b_favor_ew_mimic b_delta_ew_mimic b_cov_ew_mimic b_fairq_ew_mimic"
+    else
+        names=$which
+    fi
+    for n in $names; do
+        python scripts/tune_rl2.py --spec "configs/rl2_tune_$n.yaml" --out "$OUT/rl2_tune_$n" --jobs "$JOBS" \
+            --set fl.device=auto 2>&1 | tee -a "$OUT/rl2_tune_$n.log"
+    done
+    ;;
+stress)
+    activate; mkdir -p "$OUT"
+    ds=${2:-cifar}
+    python scripts/predictor_stress.py --dataset "$ds" --out "$OUT/predictor_stress_$ds" --jobs "${JOBS:-3}" \
+        --set fl.device=auto 2>&1 | tee -a "$OUT/predictor_stress_$ds.log"
+    ;;
+screen-c-pretrain)
+    activate; mkdir -p "$OUT"
+    # resumable: run it again after an interruption. MAXPROCS=2 if the GPU runs out of memory.
+    python scripts/screen_c_rl2.py pretrain --set fl.device=auto ${MAXPROCS:+--max-procs "$MAXPROCS"} \
+        2>&1 | tee -a "$OUT/rl2_screen_c_pretrain.log"
+    ;;
+screen-c)
+    activate; JOBS=${JOBS:-3}; mkdir -p "$OUT"     # 3: four CIFAR-10 runs do not fit the 8 GB GPU
+    python scripts/screen_c_rl2.py run --out "$OUT/rl2_screen_c" --jobs "$JOBS" --set fl.device=auto \
+        2>&1 | tee -a "$OUT/rl2_screen_c.log"
+    ;;
+confirm)
+    # without "go": every check, nothing run. "confirm go" = the user's go-ahead.
+    activate; JOBS=${JOBS:-3}; mkdir -p "$OUT"     # 3: four CIFAR-10 runs do not fit the 8 GB GPU
+    python scripts/confirm_rl2.py --out "$OUT/rl2_confirm" --jobs "$JOBS" --set fl.device=auto \
+        ${MAXPROCS:+--max-procs "$MAXPROCS"} $( [ "${2:-}" = go ] && echo --go ) 2>&1 | tee -a "$OUT/rl2_confirm.log"
+    ;;
+screen2)
+    # a controlled development screen: bash scripts/dept_gpu.sh screen2 configs/<spec>.yaml
+    activate; JOBS=${JOBS:-3}; mkdir -p "$OUT"     # 3: CIFAR-10 runs need ~1.8 GB each
+    spec=${2:?give the spec, e.g. configs/rl2_arl_screen.yaml}
+    name=$(basename "$spec" .yaml)
+    python scripts/screen_rl2.py run --spec "$spec" --out "$OUT/$name" --jobs "$JOBS" --set fl.device=auto \
+        2>&1 | tee -a "$OUT/$name.log"
+    ;;
+devicecheck)
+    activate; mkdir -p "$OUT/devicecheck"
+    python scripts/check_devices.py --out "$OUT/devicecheck/gpu.json" --set fl.device=auto 2>&1 | tee -a "$OUT/devicecheck.log"
+    ;;
+packsmall)
+    # what Claude needs to check a stage: tables, configs, manifests, reports and
+    # the (small) checkpoints; no diagnostic sidecars, no quarantined runs
+    name=${2:?give the runs folder, e.g. rl2_tune}
+    tar --exclude='*.diag_*' --exclude='*/quarantine/*' -czf "${name}_small.tar.gz" "$OUT/$name" \
+        $( [ -d checkpoints ] && echo checkpoints )
+    ls -la "${name}_small.tar.gz"
+    echo "Copy it home (on YOUR computer): scp -P <port> <user>@<server>:$(pwd)/${name}_small.tar.gz ."
+    ;;
 pack)
     stamp=$(date +%Y%m%d_%H%M)
-    tar -czf "results_$stamp.tar.gz" "$OUT"
+    tar -czf "results_$stamp.tar.gz" "$OUT" $( [ -d checkpoints ] && echo checkpoints )
     ls -la "results_$stamp.tar.gz"
     echo "Now copy it home (run this on YOUR computer):"
     echo "  scp -P <port> <user>@<server>:$(pwd)/results_$stamp.tar.gz ."
     ;;
 *)
-    sed -n '2,17p' "$0"; exit 1
+    sed -n '2,29p' "$0"; exit 1
     ;;
 esac

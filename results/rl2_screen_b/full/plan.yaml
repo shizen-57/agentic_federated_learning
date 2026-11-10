@@ -1,0 +1,59 @@
+groups:
+  s2_femnist:
+    conditions:
+    - arl3_full
+    - arl3_full_pg
+    - v2_rawfail
+    - rl_light
+    - rl_light_pg
+    - ppo_v3
+    - ppo_full
+    - ppo_full_mimic
+    - ppo_full_mlp
+    - ppo_full_nomem
+    - ppo_full_pv1
+    - ppo_full_top
+    - ppo_full_nodecay
+    - ppo_full_nomask
+    - ppo_full_fixcost
+    - ppo_full_nocap
+    - ppo_full_nocurr
+    - ppo_full_noprot
+    - ppo_full_arl3
+    - ppo_full_rawfail
+    config: configs/adv/femnist.yaml
+    seeds:
+    - 215
+    - 216
+    - 217
+    - 218
+    - 219
+    set:
+      data.split: persistent
+      diag.enabled: true
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+seeds:
+- 215
+- 216
+- 217
+- 218
+- 219
+sets: {}

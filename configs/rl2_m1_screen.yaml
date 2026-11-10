@@ -1,0 +1,12 @@
+# RL2 M1 screen: predictor v2 + Thompson gate. Rule: docs/RL2_M1_SCREEN.md (written first).
+version: 1
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+source_group: s2_femnist
+seeds: [210, 211, 212, 213, 214]
+conditions: [arl3_full, arl3_full_pg, v2_rawfail, rl_light]
+base_of: {arl3_full_pg: arl3_full}
+allowed_extra: [policy.predictor, policy.gate_mode]
+variants:
+  full: 200
+out: results/rl2_m1_screen

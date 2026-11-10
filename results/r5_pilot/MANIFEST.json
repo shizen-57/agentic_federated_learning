@@ -1,0 +1,26 @@
+{
+  "created": "2026-11-09 21:38:00 UTC",
+  "code_hash": "835ab6cc3030b78e",
+  "git_commit": "7d637a8f4864e77fe3c16b3482a633b958224c75",
+  "git_dirty": false,
+  "inputs": {
+    "spec": "b1b9587183586b3890fadde15a71d3443200915595ad7bfdd714118edaaa4829",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8",
+    "tuned": "b8fe36d207e5ee4a8c5855d3352f2222dca590ddb6833fa3d2b6f64a09bb348a",
+    "tuned settings of light": "687c55dc4af022201b4091c124a434633c5eaeead6ca821ec6720fc5d93f8975",
+    "tuned settings of light_nova": "687c55dc4af022201b4091c124a434633c5eaeead6ca821ec6720fc5d93f8975"
+  },
+  "generated": "e94e949c317ac1c25eb82ed97c7c32758d2d09a8a8f08530d4915ccdbd554114",
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "data.split"
+  ],
+  "python": "3.13.17",
+  "torch": "2.14.1+cpu",
+  "numpy": "2.5.3",
+  "cuda": null,
+  "device": "cpu",
+  "title": "Review 5 pilot (head-room and fixes; exploratory)"
+}

@@ -7,8 +7,9 @@
     python scripts/report_diagnostics.py results/diagnostic_v1/short
 
 Every run is expanded from the original s2 group by sweep.build_jobs, exactly
-as the s2 runs were, with only fl.rounds and diag.enabled changed; --dry-run
-prints that difference for every job, so nothing is approximated by hand.
+as the s2 runs were, with only fl.rounds, diag.enabled and the spec's shared
+`set` (e.g. data.split) changed; --dry-run prints that difference for every
+job, so nothing is approximated by hand.
 The runs themselves go through scripts/sweep.py (resume, quarantine, and the
 refusal to write into results/adv all apply). Each variant has its own
 folder; a short run is never reused as, or padded into, a full one.
@@ -37,6 +38,15 @@ import yaml  # noqa: E402
 from afl.run import _load  # noqa: E402
 from sweep import build_jobs, expected_config  # noqa: E402
 
+# --set may only change HOW a screen runs, never WHAT it tests: anything else
+# belongs in the spec (its `set`), where the report rebuilds it from
+# (third external review, finding 2). The device is not part of the config check.
+OPERATIONAL_OVERRIDES = ("fl.device",)
+
+
+def non_operational(overrides: list[str]) -> list[str]:
+    return [o for o in overrides if o.split("=", 1)[0].strip() not in OPERATIONAL_OVERRIDES]
+
 
 def _sha(path: str, limit: int | None = None) -> str | None:
     if not os.path.exists(path):
@@ -62,8 +72,10 @@ def plan_for(spec: dict, variant: str) -> tuple[dict, dict]:
     src = _load(os.path.join(ROOT, spec["source_plan"]))
     g = src["groups"][spec["source_group"]]
     rounds = int(spec["variants"][variant])
-    group = {"config": g["config"], "set": {**(g.get("set") or {}), "fl.rounds": rounds,
-                                            "diag.enabled": True},
+    # spec "set": settings shared by every condition of this screen (e.g. the
+    # persistent data split), applied on top of the s2 group's own
+    group = {"config": g["config"], "set": {**(g.get("set") or {}), **(spec.get("set") or {}),
+                                            "fl.rounds": rounds, "diag.enabled": True},
              "conditions": list(spec["conditions"]), "seeds": list(spec["seeds"])}
     return {"seeds": list(spec["seeds"]), "sets": {}, "groups": {spec["source_group"]: group}}, src
 
@@ -74,10 +86,13 @@ def compare(spec: dict, plan: dict, src: dict, out: str) -> list[tuple[dict, lis
     mine = build_jobs(plan, None, None, out, [])
     orig = {(j["cond"], j["seed"]): j for j in
             build_jobs(src, [spec["source_group"]], list(spec["seeds"]), "ORIGINAL", [])}
+    base_of = dict(spec.get("base_of", {}))    # revised condition -> the s2 one it modifies
+    for c in spec.get("new_conditions", []):   # new methods: compared with the reference
+        base_of.setdefault(c, spec["reference"])
     res = []
     for j in mine:
         a = _flat(expected_config(j["raw"]))
-        b = _flat(expected_config(orig[(j["cond"], j["seed"])]["raw"]))
+        b = _flat(expected_config(orig[(base_of.get(j["cond"], j["cond"]), j["seed"])]["raw"]))
         diff = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
         res.append((j, diff))
     return res
@@ -102,7 +117,8 @@ def manifest(spec_path: str, spec: dict, variant: str, plan_path: str, overrides
         "git_dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
         "plan_sha256": {"diagnostic": _sha(spec_path), "generated": _sha(plan_path),
                         "source": _sha(os.path.join(ROOT, spec["source_plan"]))},
-        "overrides_vs_source": ["fl.rounds", "diag.enabled", "out"] + overrides,
+        "overrides_vs_source": ["fl.rounds", "diag.enabled", "out"]
+                               + sorted(spec.get("set") or {}) + overrides,
         "python": platform.python_version(), "torch": torch.__version__,
         "numpy": np.__version__, "cuda": torch.version.cuda,
         "device": (torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"),
@@ -136,7 +152,8 @@ def main() -> int:
     ap.add_argument("--out", default=None, help="default: the spec's out")
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--set", action="append", default=[],
-                    help="extra override passed to sweep.py, e.g. fl.device=auto (recorded)")
+                    help="operational override passed to sweep.py, e.g. fl.device=auto (recorded); "
+                         "experimental settings go in the spec's `set`")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -144,16 +161,31 @@ def main() -> int:
         spec = yaml.safe_load(fh)
     if args.variant not in spec["variants"]:
         raise SystemExit(f"unknown variant {args.variant}; have {list(spec['variants'])}")
+    if non_operational(args.set):
+        raise SystemExit(f"--set may only change {OPERATIONAL_OVERRIDES}; put "
+                         f"{non_operational(args.set)} in the spec's `set` instead")
+    import seeds as seedreg
+    seedreg.check(spec["seeds"], spec.get("purpose", "diagnostic"), spec.get("frozen_manifest"))
     out = os.path.join(args.out or os.path.join(ROOT, spec["out"]), args.variant)
     plan, src = plan_for(spec, args.variant)
     rows = compare(spec, plan, src, out)
+    if any(j["raw"].get("data", {}).get("eval_pool") == "confirm" for j, _ in rows):
+        raise SystemExit("a screen may not use the confirmation pool (data.eval_pool=confirm)")
 
     print(f"diagnostic v{spec['version']} / {args.variant}: {len(rows)} runs of "
           f"{spec['variants'][args.variant]} rounds -> {out}")
     print("source: " + spec["source_plan"] + " group " + spec["source_group"]
           + " (same build_jobs expansion)")
+    allowed = {"fl.rounds", "diag.enabled", "out", *spec.get("allowed_extra", []),
+               *(spec.get("set") or {})}
+    from afl.conditions import CONDITIONS
     for j, diff in rows:
-        bad = [k for k in diff if k not in ("fl.rounds", "diag.enabled", "out")]
+        ok = allowed | ({"tag"} if j["cond"] in spec.get("base_of", {}) else set())
+        if j["cond"] in spec.get("new_conditions", []):
+            # a new method may differ from the reference only in what its own
+            # condition sets (and its name) -- every s2 setting else is shared
+            ok = ok | {"tag"} | set(CONDITIONS[j["cond"]])
+        bad = [k for k in diff if k not in ok]
         flag = "  <-- UNEXPECTED" if bad else ""
         print(f"  {j['cond']:16s} seed {j['seed']}  {os.path.join(j['raw']['out'], j['raw']['tag'])}"
               f"  differs from s2 in: {', '.join(diff)}{flag}")

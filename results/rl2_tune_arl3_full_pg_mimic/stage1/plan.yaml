@@ -1,0 +1,1717 @@
+groups:
+  c00:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c01:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.03
+      policy.gate_z: 0.5
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.03
+      reward.beta: 0.0
+      reward.lambda_arl: 1.0
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c02:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.003
+      policy.gate_z: 1.5
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.03
+      reward.beta: 0.3
+      reward.lambda_arl: 0.5
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c03:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.4
+      policy.entropy_coef: 0.01
+      policy.gate_z: 1.0
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.003
+      reward.beta: 0.0
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 1.0
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c04:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.4
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.5
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.01
+      reward.beta: 0.1
+      reward.lambda_arl: 1.0
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c05:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.0
+      policy.pred_decay: 1.0
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.01
+      reward.beta: 0.3
+      reward.lambda_arl: 1.0
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c06:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.01
+      policy.gate_z: 0.5
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.01
+      reward.beta: 0.1
+      reward.lambda_arl: 1.0
+      reward.lambda_cov: 1.0
+      reward.lambda_fair: 0.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c07:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.01
+      policy.gate_z: 1.5
+      policy.pred_decay: 1.0
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.01
+      reward.beta: 0.0
+      reward.lambda_arl: 1.0
+      reward.lambda_cov: 1.0
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c08:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.003
+      policy.gate_z: 1.5
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.003
+      reward.beta: 0.0
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 1.0
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c09:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.003
+      policy.gate_z: 1.0
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.03
+      reward.beta: 0.0
+      reward.lambda_arl: 0.5
+      reward.lambda_cov: 1.0
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c10:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.4
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.0
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.03
+      reward.beta: 0.0
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c11:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.003
+      policy.gate_z: 1.5
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.01
+      reward.beta: 0.1
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 1.0
+      reward.lambda_fair: 0.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c12:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.5
+      policy.pred_decay: 1.0
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.03
+      reward.beta: 0.3
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 0.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c13:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.003
+      policy.gate_z: 1.0
+      policy.pred_decay: 1.0
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.01
+      reward.beta: 0.3
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 0.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c14:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.4
+      policy.entropy_coef: 0.01
+      policy.gate_z: 1.5
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.01
+      reward.beta: 0.3
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c15:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.0
+      policy.pred_decay: 1.0
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.003
+      reward.beta: 0.0
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 0.5
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c16:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.4
+      policy.entropy_coef: 0.01
+      policy.gate_z: 1.0
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.003
+      reward.beta: 0.3
+      reward.lambda_arl: 1.0
+      reward.lambda_cov: 0.5
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c17:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.5
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.01
+      reward.beta: 0.3
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 0.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c18:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.0
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.03
+      reward.beta: 0.1
+      reward.lambda_arl: 1.0
+      reward.lambda_cov: 0.5
+      reward.lambda_fair: 0.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c19:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.003
+      policy.gate_z: 1.0
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.003
+      reward.beta: 0.3
+      reward.lambda_arl: 1.0
+      reward.lambda_cov: 0.5
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c20:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.01
+      policy.gate_z: 0.5
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.003
+      reward.beta: 0.1
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 1.0
+      reward.lambda_fair: 0.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c21:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.003
+      policy.gate_z: 1.5
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.03
+      reward.beta: 0.1
+      reward.lambda_arl: 0.5
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c22:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.4
+      policy.entropy_coef: 0.003
+      policy.gate_z: 1.5
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.003
+      reward.beta: 0.0
+      reward.lambda_arl: 0.5
+      reward.lambda_cov: 0.5
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c23:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.0
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.03
+      reward.beta: 0.0
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c24:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.003
+      policy.gate_z: 0.5
+      policy.pred_decay: 1.0
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.03
+      reward.beta: 0.0
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 0.5
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c25:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.01
+      policy.gate_z: 1.0
+      policy.pred_decay: 1.0
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.03
+      reward.beta: 0.0
+      reward.lambda_arl: 1.0
+      reward.lambda_cov: 1.0
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c26:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.01
+      policy.gate_z: 0.5
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.003
+      reward.beta: 0.0
+      reward.lambda_arl: 1.0
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c27:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.0
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.003
+      reward.beta: 0.1
+      reward.lambda_arl: 0.5
+      reward.lambda_cov: 0.5
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c28:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.4
+      policy.entropy_coef: 0.03
+      policy.gate_z: 0.5
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.01
+      reward.beta: 0.3
+      reward.lambda_arl: 1.0
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c29:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.003
+      policy.gate_z: 0.5
+      policy.pred_decay: 1.0
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.03
+      reward.beta: 0.0
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 0.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c30:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.4
+      policy.entropy_coef: 0.003
+      policy.gate_z: 1.5
+      policy.pred_decay: 1.0
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.003
+      reward.beta: 0.0
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 0.5
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c31:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.03
+      policy.gate_z: 0.5
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.01
+      reward.beta: 0.1
+      reward.lambda_arl: 0.5
+      reward.lambda_cov: 0.5
+      reward.lambda_fair: 0.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c32:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.4
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.0
+      policy.pred_decay: 1.0
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.003
+      reward.beta: 0.1
+      reward.lambda_arl: 0.5
+      reward.lambda_cov: 1.0
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c33:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.01
+      policy.gate_z: 1.5
+      policy.pred_decay: 1.0
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.01
+      reward.beta: 0.0
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 0.3
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c34:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.003
+      policy.gate_z: 1.0
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.03
+      reward.beta: 0.0
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c35:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.5
+      policy.entropy_coef: 0.003
+      policy.gate_z: 0.5
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 32
+      policy.rl_lr: 0.003
+      reward.beta: 0.3
+      reward.lambda_arl: 0.25
+      reward.lambda_cov: 1.0
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c36:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.5
+      policy.pred_decay: 1.0
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.01
+      reward.beta: 0.1
+      reward.lambda_arl: 0.5
+      reward.lambda_cov: 0.5
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c37:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.4
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.0
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.003
+      reward.beta: 0.0
+      reward.lambda_arl: 0.5
+      reward.lambda_cov: 1.0
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c38:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.03
+      policy.gate_z: 1.5
+      policy.pred_decay: 0.95
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.03
+      reward.beta: 0.1
+      reward.lambda_arl: 1.0
+      reward.lambda_cov: 0.5
+      reward.lambda_fair: 0.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+  c39:
+    conditions:
+    - arl3_full_pg_mimic
+    config: configs/adv/femnist.yaml
+    override:
+      policy.elig_threshold: 0.6
+      policy.entropy_coef: 0.003
+      policy.gate_z: 0.5
+      policy.pred_decay: 0.98
+      policy.rl_hidden: 64
+      policy.rl_lr: 0.01
+      reward.beta: 0.0
+      reward.lambda_arl: 0.5
+      reward.lambda_cov: 0.25
+      reward.lambda_fair: 1.0
+    seeds:
+    - 220
+    - 221
+    - 222
+    - 223
+    - 224
+    set:
+      data.split: persistent
+      diag.enabled: false
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+seeds:
+- 220
+- 221
+- 222
+- 223
+- 224
+sets: {}

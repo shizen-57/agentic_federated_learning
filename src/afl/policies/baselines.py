@@ -177,11 +177,11 @@ class OortPolicy(Policy):
     overruns the deadline.
     """
 
-    def __init__(self, cfg, eps: float = 0.2, alpha: float = 2.0):
+    def __init__(self, cfg):
         super().__init__(cfg)
         self.rng = np.random.default_rng(cfg.seed + 13)
-        self.eps = eps
-        self.alpha = alpha
+        self.eps = cfg.policy.oort_eps
+        self.alpha = cfg.policy.oort_alpha
 
     def act(self, state, t):
         N = self.cfg.data.num_clients

@@ -1,0 +1,22 @@
+20 runs selected, 0 already done, 20 to run with 4 job(s)
+[1/20] s2_femnist/arl3_full_fm_s205 253s
+[2/20] s2_femnist/rl_light_s205 267s
+[3/20] s2_femnist/v2_rawfail_s205 292s
+[4/20] s2_femnist/arl3_full_s205 318s
+[5/20] s2_femnist/arl3_full_fm_s206 268s
+[6/20] s2_femnist/rl_light_s206 253s
+[7/20] s2_femnist/v2_rawfail_s206 290s
+[8/20] s2_femnist/arl3_full_s206 394s
+[9/20] s2_femnist/arl3_full_s207 253s
+[10/20] s2_femnist/v2_rawfail_s207 270s
+[11/20] s2_femnist/arl3_full_fm_s207 294s
+[12/20] s2_femnist/rl_light_s207 258s
+[13/20] s2_femnist/arl3_full_s208 205s
+[14/20] s2_femnist/v2_rawfail_s208 209s
+[15/20] s2_femnist/arl3_full_fm_s208 274s
+[16/20] s2_femnist/rl_light_s208 258s
+[17/20] s2_femnist/arl3_full_s209 271s
+[18/20] s2_femnist/arl3_full_fm_s209 245s
+[19/20] s2_femnist/v2_rawfail_s209 250s
+[20/20] s2_femnist/rl_light_s209 259s
+finished 20, failed 0, wall 1426s

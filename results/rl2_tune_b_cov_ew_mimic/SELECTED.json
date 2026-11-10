@@ -1,0 +1,36 @@
+{
+ "base": "b_cov_ew_mimic",
+ "code_hash": "a1be0f1e34704d16",
+ "no_eligible_candidate": false,
+ "overrides": {
+  "policy.elig_threshold": 0.4,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "resolved_s2_femnist": {
+  "policy.elig_threshold": 0.4,
+  "policy.gate_mode": "top",
+  "policy.predictor": "v1"
+ },
+ "spec": "configs/rl2_tune_b_cov_ew_mimic.yaml",
+ "spec_sha256": "c9ee8da25c1542bd443b9e5429889bef069a94a9526a4d23f3179199753cf1cb",
+ "stage1": {
+  "acc10": 0.7561829769831796,
+  "eq5": 0.7329810466937982,
+  "id": "c01",
+  "n": 5,
+  "score": 0.6097043914880734,
+  "starved": 0,
+  "w10": 0.48642773628234864
+ },
+ "stage2": {
+  "acc10": 0.7543234469905815,
+  "eq5": 0.7447957174425617,
+  "id": "c01",
+  "n": 15,
+  "score": 0.6156773626032122,
+  "starved": 0,
+  "w10": 0.4865590077638626
+ },
+ "winner": "c01"
+}

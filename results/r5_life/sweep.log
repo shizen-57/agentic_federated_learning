@@ -1,0 +1,26 @@
+24 runs selected, 0 already done, 24 to run with 4 job(s)
+[1/24] femnist_life_arl3/ppo_full_mimic_s401 263s
+[2/24] femnist_life_arl3/ppo_full_mimic_s400 278s
+[3/24] femnist_life_arl3/ppo_full_mimic_s402 282s
+[4/24] femnist_life_arl4/ppo_full_mimic_s400 337s
+[5/24] femnist_life_arl4/ppo_full_mimic_s401 306s
+[6/24] femnist_life_arl4/ppo_full_mimic_s402 311s
+[7/24] femnist_life_fairq/b_fairq_ew_mimic_s400 309s
+[8/24] femnist_life_fairq/b_fairq_ew_mimic_s401 272s
+[9/24] femnist_life_light/rl_light_mimic_s401 235s
+[10/24] femnist_life_light/rl_light_mimic_s400 251s
+[11/24] femnist_life_light/rl_light_mimic_s402 234s
+[12/24] femnist_life_fairq/b_fairq_ew_mimic_s402 283s
+[13/24] femnist_life_o_cov/o_cov_mimic_s401 290s
+[14/24] femnist_life_o_cov/o_cov_mimic_s400 309s
+[15/24] femnist_life_o_cov/o_cov_mimic_s402 295s
+[16/24] femnist_life_o_light/o_light_mimic_s400 296s
+[17/24] femnist_life_o_light/o_light_mimic_s401 285s
+[18/24] femnist_life_o_light/o_light_mimic_s402 283s
+[19/24] femnist_life_o_work/o_work_mimic_s401 386s
+[20/24] femnist_life_o_work/o_work_mimic_s400 417s
+[21/24] femnist_life_plain/ppo_full_mimic_s400 290s
+[22/24] femnist_life_plain/ppo_full_mimic_s401 259s
+[23/24] femnist_life_plain/ppo_full_mimic_s402 253s
+[24/24] femnist_life_o_work/o_work_mimic_s402 401s
+finished 24, failed 0, wall 1818s

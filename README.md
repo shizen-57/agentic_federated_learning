@@ -9,6 +9,32 @@ Chapter 3 of the thesis specifies the formulation. This repository is Chapters 4
 and 5: the simulator, the policy, the baselines, and the scripts that produce the
 numbers.
 
+## Where the project stands (RL2)
+
+The original method (Chapter 3: a REINFORCE scheduler with the ARL' reward)
+was evaluated under a frozen protocol (s2, tag `s2-frozen`) and did not pass
+its pre-specified tests (`docs/ADVANCED_RESULTS.md`). The diagnosis
+(`docs/DIAGNOSTIC_FINDINGS.md`) led to **RL2: the SAFE-PPO scheduler**
+(`docs/RL2_METHOD.md`, design `docs/RL2_DESIGN.md`). It is being developed
+and checked step by step, each step with its rule written before it runs:
+
+| step | doc | status |
+|---|---|---|
+| screens A and B, tuning (M7) | `docs/RL2_M1_SCREEN.md`, `docs/RL2_SCREEN_B.md`, `docs/RL2_M7_TUNING.md` | done |
+| validation of the simulator and the repairs | `docs/VALIDATION.md`, `docs/SIMULATOR_MODEL.md` | done (GPU device check pending) |
+| project gap review and its fixes | `docs/GAP_REVIEW.md` | done |
+| cost check, CIFAR-10 check of the tuning | `docs/RL2_COST_AND_CIFAR_CHECKS.md` | to run |
+| matched tuning of the comparators | `docs/RL2_BASELINE_TUNING.md` | to run |
+| ARL screen (does the contribution-aware reward help?) | `docs/RL2_ARL_SCREEN.md` | to run |
+| sensitivity screen | `docs/RL2_SENSITIVITY.md` | to run |
+| screen C (pre-trained or not, against tuned comparators) | `docs/RL2_SCREEN_C.md` | to run on the new code |
+| freeze and confirmation, on reserved data | `docs/RL2_CONFIRMATION.md` | after screen C, with the user's go-ahead |
+
+Heavy runs go to a GPU with `scripts/dept_gpu.sh` (run `bash
+scripts/dept_gpu.sh` for the list of steps). Every runner checks its
+evidence (every run, one code version, a clean checkout, recorded hashes)
+before it applies a rule. Project notes: `memory.md`.
+
 ## Why this runs on nothing
 
 The thesis is simulation-only by design -- Section 3.11's oracle ARL* is
@@ -123,6 +149,8 @@ reproduced exactly), and has its own experiment group in
 | Protocol fix: validation set for rewards, same start model, absence counter | `fl.val_frac`, `fl.clean_rng`, `fl.absence_counter` | `s2_*` |
 | Coverage inputs for the RL policy, Shapley client value, set-level coverage loss | `policy.coverage_features`, `metrics.coverage_shapley`, `cov_lost` | `s2_*` |
 | Second review: order-free credit, charge only what ran, check-in pool for all, strict gate | `reward.batch_client_norm`, `system.charge_actual`, `system.checkin_pool`, `policy.strict_gate` | `s2_*` |
+| RL2: SAFE-PPO (predictor v2, Thompson gate, safety layer, attention, PPO, pre-training) | `policy.name: safe_ppo` and its switches (`docs/RL2_DESIGN.md`) | `configs/rl2_*.yaml` |
+| Fairness-guaranteed selection with Lyapunov queues, after RBCS-F (Huang et al., TPDS 2021) | `policy.name: fairq` (`b_fairq_ew`, `b_fairq_ew_mimic`) | `configs/rl2_screen_c.yaml` |
 
 ## Known gaps
 

@@ -1,0 +1,32 @@
+{
+  "variant": "full",
+  "rounds": 200,
+  "label": "full-length diagnostic",
+  "purpose": "failure reproduction on already-inspected seeds; not a test",
+  "created": "2026-10-27 19:09:30 UTC",
+  "code_hash": "64487e6f86fe1001",
+  "git_commit": "d391e327ed0da2dedd78c4aa806ce6e69189636d",
+  "git_dirty": false,
+  "plan_sha256": {
+    "diagnostic": "52416d17aa20bf1d96c8f0116f1cb68575089ea54b703d54d2157ea7b3e11ff7",
+    "generated": "e8a49ab1a02cc86bb8b21bbec0ca9f76fd4f2817e807f52b3bd11ba0b1c9ec40",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8"
+  },
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "fl.device=auto"
+  ],
+  "python": "3.11.16",
+  "torch": "2.5.1+cu121",
+  "numpy": "2.4.6",
+  "cuda": "12.1",
+  "device": "NVIDIA GeForce RTX 3070",
+  "dataset": {
+    "femnist_y.npy": "58164f89db75e0efacc0e118af55d928dd162857330861cbd82558e91c544443",
+    "femnist_writer.npy": "83994b13c094e73b5b1b527a30df8e33cee88d140d33099f36bb780ab9210cea",
+    "femnist_x.npy_first_64MB": "e4322653119b5bbc24c75ee9e47f818972f1ede7af24ffd870c8ae6de19ceca1",
+    "femnist_x.npy_bytes": 638393296
+  }
+}

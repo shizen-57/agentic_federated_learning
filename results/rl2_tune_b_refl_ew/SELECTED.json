@@ -1,0 +1,42 @@
+{
+ "base": "b_refl_ew",
+ "code_hash": "a1be0f1e34704d16",
+ "no_eligible_candidate": false,
+ "overrides": {
+  "policy.elig_threshold": 0.5,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2",
+  "policy.refl_beta": 0.2,
+  "policy.refl_hold": 2
+ },
+ "resolved_s2_femnist": {
+  "policy.elig_threshold": 0.5,
+  "policy.gate_mode": "thompson",
+  "policy.pred_decay": 0.98,
+  "policy.predictor": "v2",
+  "policy.refl_beta": 0.2,
+  "policy.refl_hold": 2
+ },
+ "spec": "configs/rl2_tune_b_refl_ew.yaml",
+ "spec_sha256": "b52554581ccd418c1987ab7dc640cd468028908500a01f94bb289ecb65dfb1e2",
+ "stage1": {
+  "acc10": 0.7826534032189117,
+  "eq5": 0.7764421662753949,
+  "id": "c34",
+  "n": 5,
+  "score": 0.6346654005381529,
+  "starved": 0,
+  "w10": 0.49288863480091094
+ },
+ "stage2": {
+  "acc10": 0.7895373968557223,
+  "eq5": 0.7780561817603987,
+  "id": "c34",
+  "n": 15,
+  "score": 0.6490784109094581,
+  "starved": 0,
+  "w10": 0.5201006400585174
+ },
+ "winner": "c34"
+}

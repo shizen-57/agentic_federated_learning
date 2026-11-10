@@ -1,0 +1,17 @@
+# Development screen v1 for the predictor revision (policy.predictor_norm).
+# Criteria were written BEFORE any run: docs/DEV_SCREEN_PREDICTOR_V1.md.
+# Exploratory only. Seeds 200-204 have never been used; confirmation seeds
+# (300+) stay unrun until the revision is frozen.
+#
+# Run with the diagnostic runner (same s2 expansion, diagnostics on):
+#   python scripts/diagnose_collapse.py --spec configs/dev_predictor_v1.yaml --variant full --jobs 4
+version: 1
+source_plan: configs/sweep_advanced.yaml
+source_group: s2_femnist
+seeds: [200, 201, 202, 203, 204]
+conditions: [arl3_full, arl3_full_pn, v2_rawfail, rl_light]
+base_of: {arl3_full_pn: arl3_full}       # the revision is ARL-v3 plus one switch
+allowed_extra: [policy.predictor_norm]
+variants:
+  full: 200
+out: results/dev_predictor_v1

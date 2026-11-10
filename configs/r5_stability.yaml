@@ -1,0 +1,35 @@
+# Review 5, second pilot (docs/REVIEW_5.md 3.7). Exploratory, three
+# development seeds, no decision. Question: in every method, accuracy often
+# falls sharply in a round where only a few updates arrive (the server
+# applies the mean of one or two clients' updates at full size). Does a
+# proportionally smaller step in such rounds (fl.min_full_step) remove the
+# dips, and what does it do to the end points?
+# Each method runs as tuned and with the smaller step (5 = half of K;
+# for the control also 10 = the plain "missing update counts as zero" rule).
+# Runner: scripts/screen_rl2.py.
+version: 1
+title: Review 5 stability pilot (smaller server step in few-update rounds; exploratory)
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+datasets: {femnist: s2_femnist}
+tuned: configs/rl2_tuned_cost.json
+set: {data.split: persistent}          # development pool
+rounds: 200
+seeds: [400, 401, 402]
+arms:
+  light: {tuned_file: configs/rl2_tuned_rl_light_mimic.json}
+  light_d5: {tuned_file: configs/rl2_tuned_rl_light_mimic.json, override: {fl.min_full_step: 5}}
+  light_d10: {tuned_file: configs/rl2_tuned_rl_light_mimic.json, override: {fl.min_full_step: 10}}
+  c34: {tuned: true}
+  c34_d5: {tuned: true, override: {fl.min_full_step: 5}}
+  c34_x: {tuned: true, override: {policy.predictor: v3, policy.elig_threshold: 0.4}}
+  c34_x_d5: {tuned: true, override: {policy.predictor: v3, policy.elig_threshold: 0.4, fl.min_full_step: 5}}
+  refl: {tuned_file: configs/rl2_tuned_b_refl_ew.json}
+  refl_d5: {tuned_file: configs/rl2_tuned_b_refl_ew.json, override: {fl.min_full_step: 5}}
+  fairq: {tuned_file: configs/rl2_tuned_b_fairq_ew_mimic.json}
+  fairq_d5: {tuned_file: configs/rl2_tuned_b_fairq_ew_mimic.json, override: {fl.min_full_step: 5}}
+rule:
+  kind: describe
+  reference: light
+  targets: [0.60, 0.70, 0.75]
+out: results/r5_stability

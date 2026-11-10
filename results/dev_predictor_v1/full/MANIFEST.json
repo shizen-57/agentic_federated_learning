@@ -1,0 +1,31 @@
+{
+  "variant": "full",
+  "rounds": 200,
+  "label": "full-length diagnostic",
+  "purpose": "failure reproduction on already-inspected seeds; not a test",
+  "created": "2026-10-27 18:11:39 UTC",
+  "code_hash": "a0c6cf82a66eb1f4",
+  "git_commit": "b3ebfeb71df763850ee01ee75895eeed3d067763",
+  "git_dirty": false,
+  "plan_sha256": {
+    "diagnostic": "8389af5f58f61eca5de1b86150908b5468e8907ac89b656c1cd0be83eea77335",
+    "generated": "46bb9849fb9f248e5101619aa5540d2b5fc8c4cc0170ad97d49d78c0279d1a38",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8"
+  },
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out"
+  ],
+  "python": "3.13.17",
+  "torch": "2.14.1+cpu",
+  "numpy": "2.5.3",
+  "cuda": null,
+  "device": "cpu",
+  "dataset": {
+    "femnist_y.npy": "58164f89db75e0efacc0e118af55d928dd162857330861cbd82558e91c544443",
+    "femnist_writer.npy": "83994b13c094e73b5b1b527a30df8e33cee88d140d33099f36bb780ab9210cea",
+    "femnist_x.npy_first_64MB": "e4322653119b5bbc24c75ee9e47f818972f1ede7af24ffd870c8ae6de19ceca1",
+    "femnist_x.npy_bytes": 638393296
+  }
+}

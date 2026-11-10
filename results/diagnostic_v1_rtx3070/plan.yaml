@@ -1,0 +1,36 @@
+groups:
+  s2_femnist:
+    conditions:
+    - arl3_full
+    - c2_rl_fedprox
+    - v2_rawfail
+    - rl_light
+    config: configs/adv/femnist.yaml
+    seeds:
+    - 110
+    - 113
+    set:
+      diag.enabled: true
+      fl.absence_counter: true
+      fl.clean_rng: true
+      fl.compress_upload: true
+      fl.rounds: 200
+      fl.val_frac: 0.3
+      policy.coverage_features: true
+      policy.credit_total: true
+      policy.oort_estimated_time: true
+      policy.prior_baseline: true
+      policy.shared_time_estimate: true
+      policy.strict_gate: true
+      policy.value_feature: marginal
+      reward.batch_client_norm: true
+      reward.robust_norm: true
+      system.avail_persistence: 0.8
+      system.charge_actual: true
+      system.checkin_pool: true
+      system.weak_frac: 0.3
+      system.weak_select: rarity
+seeds:
+- 110
+- 113
+sets: {}

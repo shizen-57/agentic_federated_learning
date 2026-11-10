@@ -23,8 +23,11 @@ def est_time(cfg, state, i: int, mode: str, frac: float | None = None) -> float:
     sysc = cfg.system
     obs = state["obs"][i]
     frac = sysc.upload_frac[mode] if frac is None else frac
-    return (sysc.local_epochs[mode] * (state["n_work"][i] / 1200.0) / max(obs["speed_hat"], 1e-3)
-            + 0.25 * frac / max(obs["bw_hat"], 1e-3))
+    t = (sysc.local_epochs[mode] * (state["n_work"][i] / 1200.0) / max(obs["speed_hat"], 1e-3)
+         + 0.25 * frac / max(obs["bw_hat"], 1e-3))
+    if sysc.job_overhead_time > 0:
+        t = t + sysc.job_overhead_time / max(obs["bw_hat"], 1e-3)     # the model download
+    return t
 
 
 def pool(state, N: int) -> list[int]:
@@ -44,8 +47,16 @@ def gate(cfg, state, cands: list[int], K: int) -> tuple[list[int], list[int]]:
     elig = [i for i in cands if state["eligible"][i]]
     if len(elig) >= K or not cfg.policy.strict_gate:
         return elig, []
-    rest = sorted((i for i in cands if not state["eligible"][i]),
-                  key=lambda i: -max(state["p_succ"][i].values()))
+    rest = [i for i in cands if not state["eligible"][i]]
+    if cfg.policy.gate_mode == "thompson":
+        # Gate v2: rank by one draw from each client's posterior (best mode), so
+        # the fallback explores instead of re-picking the same clients forever
+        # -- the absorbing state in docs/DIAGNOSTIC_FINDINGS.md.
+        rng, post = state["gate_rng"], state["p_post"]
+        draw = {i: max(rng.beta(a, b) for a, b in post[i].values()) for i in rest}
+        rest = sorted(rest, key=lambda i: -draw[i])
+    else:
+        rest = sorted(rest, key=lambda i: -max(state["p_succ"][i].values()))
     return elig, rest[:K - len(elig)]
 
 

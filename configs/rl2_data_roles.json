@@ -1,0 +1,36 @@
+{
+ "cifar10_disjoint": true,
+ "cifar10_examples": {
+  "confirm_test": {
+   "n": 3506,
+   "sha256": "8be12e3d7fbb32c2d31e20fd82b98ca702c7ad8d6f62be141116553d61e5e24d"
+  },
+  "dev_test": {
+   "n": 3488,
+   "sha256": "1b4ac606b760a3f02bede0dac8835cb472abb1c8d45ecd46a1c667b3dfbee559"
+  },
+  "validation": {
+   "n": 3006,
+   "sha256": "aef12bd418ee10149e8ed0e77a87665a019d5c70034aef020e0ca6fddccc4860"
+  }
+ },
+ "confirm_share": 0.5,
+ "femnist_disjoint": true,
+ "femnist_writers": {
+  "confirm": {
+   "n": 900,
+   "sha256": "81a18be9b99632a9a13aeb1ef4fb892b39dd35aaaa321424d8fa9f42ddfadd89"
+  },
+  "dev": {
+   "n": 899,
+   "sha256": "28b61b15dc487f4690671638333dae169aa394883365349c593fee35c3450be2"
+  },
+  "practice": {
+   "n": 1798,
+   "sha256": "4ae2eb5fa775a0c35d92e63277d46af4f40f204f340a249d4a0c01c3dc676560"
+  }
+ },
+ "practice_writer_share": 0.5,
+ "split_seed": 20261027,
+ "val_frac": 0.3
+}

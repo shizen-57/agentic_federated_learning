@@ -1,0 +1,26 @@
+{
+  "created": "2026-11-10 03:43:03 UTC",
+  "code_hash": "60f1655a64c8085c",
+  "git_commit": "fcf179864429c87efe4118ebe4ce10d7e56bfe6b",
+  "git_dirty": false,
+  "inputs": {
+    "spec": "50a9f5a99d9923edd0bfcb0bbba1c8a78ed174d136ae66469b07e19ad36aefc5",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8",
+    "tuned": "b8fe36d207e5ee4a8c5855d3352f2222dca590ddb6833fa3d2b6f64a09bb348a",
+    "tuned settings of light": "687c55dc4af022201b4091c124a434633c5eaeead6ca821ec6720fc5d93f8975",
+    "tuned settings of fairq": "c19e5dd7e6cc183b5a0d5ed69904989f40366d8ac1c8aba3369ce679efc44764"
+  },
+  "generated": "a7cc8aa64cca870f89c9b5202e3d17caa11a2f056a822c0b4af97c8b8b03df6b",
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "data.split"
+  ],
+  "python": "3.13.17",
+  "torch": "2.14.1+cpu",
+  "numpy": "2.5.3",
+  "cuda": null,
+  "device": "cpu",
+  "title": "Review 5 life pilot (devices that change over the day; exploratory)"
+}

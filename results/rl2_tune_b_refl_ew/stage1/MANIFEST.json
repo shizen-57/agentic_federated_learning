@@ -1,0 +1,26 @@
+{
+  "created": "2026-10-30 01:06:52 UTC",
+  "code_hash": "a1be0f1e34704d16",
+  "git_commit": "281261469560bf6722196816995c68176c54629d",
+  "git_dirty": false,
+  "inputs": {
+    "spec": "b52554581ccd418c1987ab7dc640cd468028908500a01f94bb289ecb65dfb1e2",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8",
+    "configs": "823a323be9f72b5e782c2860dd0501a114b462b43946f2496aa84232e0ef1bf8"
+  },
+  "generated": "c79d8188a5a88d5ba5469d30e447aca35b803e585618cf0e6963b2b08fdfb9d8",
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "data.split",
+    "fl.device=auto"
+  ],
+  "python": "3.11.16",
+  "torch": "2.5.1+cu121",
+  "numpy": "2.4.6",
+  "cuda": "12.1",
+  "device": "NVIDIA GeForce RTX 3070",
+  "stage": 1,
+  "title": "Matched tuning of b_refl_ew"
+}

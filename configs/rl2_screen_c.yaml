@@ -1,0 +1,46 @@
+# RL2 M8 screen C: the tuned method pre-trained vs from scratch, with and
+# without ARL-v4, against tuned comparators that aggregate like it does
+# (MimiC), on both datasets. Rule: docs/RL2_SCREEN_C.md, written before any
+# run. Runner: scripts/screen_c_rl2.py.
+# Version 2 (gap review, 2026-10-29, before any new-code run): equal-spend
+# P2 endpoint (w10b); MimiC-matched comparators (A1); every comparator tuned
+# with the same budget as our method (B1); P1 and P2 comparators chosen as
+# the best tuned comparator on each endpoint (A6); the tuned settings carry
+# the cost-check and ARL-screen verdicts (A3, A4).
+version: 2
+title: RL2 screen C (M8)
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+datasets: {femnist: s2_femnist, cifar: s2_cifar}
+base: ppo_full_mimic
+tuned: configs/rl2_tuned_final.json  # M7's c34 + the cost-check and ARL verdicts (scripts/finalize_tuned.py)
+set: {data.split: persistent}
+rounds: 200
+seeds: [240, 241, 242, 243, 244, 245, 246, 247, 248, 249]
+methods:                             # each = the tuned settings, then these on top
+  tuned: {}
+  tuned_arl4: {reward.damage_metric: arl_v4, policy.per_client_credit: true}
+  tuned_noarl: {reward.damage_metric: raw_fail, policy.per_client_credit: false}
+pretrained: [tuned, tuned_arl4, tuned_noarl]   # a method equal to an earlier one is run once
+scratch: [tuned]
+control: rl_light_mimic_tuned        # always Light, MimiC, tuned: the first comparator of P1 and P2
+tuned_references:                    # each comparator with the winner of its matched tuning
+  rl_light_mimic_tuned: configs/rl2_tuned_rl_light_mimic.json
+  arl3_full_pg_mimic_tuned: configs/rl2_tuned_arl3_full_pg_mimic.json
+  b_oort_ew_mimic_tuned: configs/rl2_tuned_b_oort_ew_mimic.json
+  b_refl_ew_tuned: configs/rl2_tuned_b_refl_ew.json    # REFL keeps its own aggregation (part of the method)
+  b_favor_ew_mimic_tuned: configs/rl2_tuned_b_favor_ew_mimic.json
+  b_delta_ew_mimic_tuned: configs/rl2_tuned_b_delta_ew_mimic.json
+  b_cov_ew_mimic_tuned: configs/rl2_tuned_b_cov_ew_mimic.json
+  b_fairq_ew_mimic_tuned: configs/rl2_tuned_b_fairq_ew_mimic.json
+references: [rl_light]               # untuned, FedProx: shows MimiC's own share (descriptive)
+pretrain:
+  iterations: 20
+  workers: 8                         # episodes per iteration, averaged
+  procs: {femnist: 4, cifar: 3}      # run at once (same result): ~1 GB per FEMNIST and ~1.8 GB per
+                                     # CIFAR-10 episode on the 8 GB GPU (8 at once ran out of memory)
+  mode: average
+  rounds: 200
+  seed_start: {femnist: 1000, cifar: 1200}   # practice seeds (1000-1999), never evaluated
+  checkpoints: checkpoints
+out: results/rl2_screen_c
