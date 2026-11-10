@@ -1,0 +1,35 @@
+# ARL screen in the "life" setting (docs/REVIEW_5.md 2.8, docs/RL2_ARL_SCREEN.md
+# "A second screen"). Written before any run of it.
+# The question the user raised: does the contribution-aware reward add value
+# when the simulator is closer to real life -- a device changes between a
+# good and a poor state over the day, link drops grow with job time, every
+# job pays for the model download, energy follows the work, and the server
+# stops waiting at the deadline? Same design and rule as the first ARL
+# screen: the tuned method with ONLY the damage term changed, fresh
+# development seeds. It does not feed the tuned settings (the first screen
+# does); it is its own, separately reported test.
+# Runner: scripts/screen_rl2.py. GPU: bash scripts/dept_gpu.sh screen2 configs/rl2_arl_screen_life.yaml
+version: 1
+title: ARL screen in the life setting (the reward term alone)
+purpose: dev
+source_plan: configs/sweep_advanced.yaml
+datasets: {femnist: s2_femnist, cifar: s2_cifar}
+tuned: configs/rl2_tuned_cost.json
+set:
+  data.split: persistent               # development pool
+  system.state_model: diurnal
+  system.drop_model: exposure
+  system.drop_ref_time: 1.0
+  system.job_overhead: 1.0
+  system.job_overhead_time: 0.05
+  system.energy_by_work: true
+  system.cap_latency: true
+budget: 3267                           # 1,400 x (cost of a round of Light jobs: 17.5) / 7.5
+rounds: 200
+seeds: [410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429]
+arms:
+  plain: {tuned: true, override: {reward.damage_metric: raw_fail, policy.per_client_credit: false}}
+  arl3:  {tuned: true, override: {reward.damage_metric: arl_v3, policy.per_client_credit: true}}
+  arl4:  {tuned: true, override: {reward.damage_metric: arl_v4, policy.per_client_credit: true}}
+rule: {kind: arl, plain: plain, contrasts: [arl3, arl4], alpha: 0.05}
+out: results/rl2_arl_screen_life

@@ -5,7 +5,7 @@ how we work. Read this first in every session. Update it whenever progress is
 made, a decision is taken, or a result comes in (newest facts win; keep it
 short and true).
 
-Last updated: 2026-11-09 (review 5: simulator and method weaknesses found and written up in docs/REVIEW_5.md; opt-in fixes built and tested; predictor and job-rule checks done; 60-run pilot running here; server session 2 = ARL screen still open)
+Last updated: 2026-11-10 (review 5 finished here: three pilots done and written up in docs/REVIEW_5.md; new opt-in options incl. devices that change over the day and a smaller server step in few-update rounds; ARL screen for the life setting prepared; waiting for the user's choice of server runs)
 
 ---
 
@@ -601,17 +601,63 @@ conditions; code hash now 835ab6cc3030b78e)**
 - Tests: tests/test_review5.py (23). Suite 367 passed / 8 skipped before
   adding them.
 
-**Running / next**
-- Pilot `configs/r5_pilot.yaml` -> `results/r5_pilot` (60 runs, seeds
-  400-402, worlds v1 and real; arms: tuned always-Light, c34, c34 + v3,
-  c34 + v3 + line 0.4, MimiC-nova versions, four oracles). Run from the
-  frozen worktree scratchpad/wt_r5 (commit 7d637a8). Report:
-  `python scripts/screen_rl2.py report --spec configs/r5_pilot.yaml --out
-  results/r5_pilot` (needs src/afl unchanged).
-- Then: write the pilot results into docs/REVIEW_5.md section 6, update
-  docs/HANDOVER.md, and put the Phase 3 choice to the user (re-tune on the
-  server or not; whether the "real" world becomes the main setting). Do
-  not choose for the user.
-- Server session 2 (ARL screen, old plan) is still open and still valid:
-  it tests the ARL term on c34 as tuned. Its runs must be checked with the
-  code that made them (commit 0da8f49 or earlier, code a1be0f1e34704d16).
+**Pilots (all exploratory, FEMNIST, seeds 400-402, evidence complete)**
+- `results/r5_pilot` (60 runs, worlds v1 and real; reference = tuned
+  always-Light): an oracle that never wastes a job gains at most +0.022
+  eq5 / +0.049 w10b (v1) and +0.008 / +0.015 (real). The heaviest-job
+  oracle LOSES in v1 (-0.017 eq5 for 2x the spend). c34 as tuned: -0.010 /
+  -0.004 (v1). c34 + v3 + eligibility line 0.4: -0.008 / +0.002 (v1),
+  0.000 / +0.016 (real). mimic_nova: worse -> not pursued. Predictor v3
+  alone: no gain -> not pursued.
+- Instability (REVIEW_5 3.7), found in the pilot and confirmed on the
+  saved tuning runs: with 1 update in a round ~40% of rounds lose > 0.05
+  accuracy, with 6+ updates 2%; rounds with <= 4 updates make the model
+  worse on average; ~3 drops > 0.08 per run after round 40. Fix
+  `fl.min_full_step` (commit b1a8f4d): step scaled by updates / m when
+  fewer than m arrive.
+- `results/r5_stability` (33 runs, v1): with m = 5 dips per run fall
+  (always-Light 6.3 -> 4.0, c34 5.7 -> 3.0, REFL 2.3 -> 1.0), end points
+  unchanged or slightly better, a little slower early; m = 10 is too
+  strong (-0.026 eq5). Partial fix. If adopted it must be a shared setting
+  for every method.
+- User (2026-11-10): "the simulator is too simple; in a simulator closer
+  to real life ARL would have worked." Strongest form of that point: a
+  device never changes, so a weak client can only ever do Light and no
+  decision can save it. Built `system.state_model: diurnal` (commit
+  fcf1798; good / poor state on the client's day-night cycle, sticky;
+  speed x1.25 / x0.6, bandwidth x1.5 / x0.4, recharge only in the good
+  state). "life" setting = real + this. Ground truth: weak client Light
+  0.58 (good state) / 0.02 (poor); middle Standard 0.68 / 0.05; fast
+  Priority 0.82 / 0.11.
+- `results/r5_life` (24 runs, life): the end-point ceiling stays close
+  (best oracle +0.009 eq5 / +0.013 w10b) -- the task tops out near
+  0.79-0.80 for every sensible scheduler; room is in speed (area +0.02 to
+  +0.03). ARL-v4 minus plain: +0.011 eq5 (3/3 seeds), +0.020 weak-client
+  accuracy (3/3), -0.005 w10b, +0.004 area. A hint only (3 seeds, from
+  scratch); in v1 ARL-v4 was the weakest option.
+- Told the user plainly: ARL is NOT working now; nothing in this review
+  made it work; reasons are measured (REVIEW_5 sections 2-3); "ARL would
+  work in a real-life simulator" is a prediction until tested.
+
+**Prepared for the server (user decides; not run)**
+- `configs/rl2_arl_screen_life.yaml`: the ARL screen in the life setting
+  (plain / ARL-v3 / ARL-v4, 20 fresh seeds 410-429, both datasets, 120
+  runs, same rule as the first screen, budget 3,267; rule text in
+  docs/RL2_ARL_SCREEN.md "A second screen"). Smoke-tested here. Command:
+  `bash scripts/dept_gpu.sh screen2 configs/rl2_arl_screen_life.yaml`,
+  then `packsmall rl2_arl_screen_life`.
+- The first ARL screen (session 2, current world) is still open and valid.
+  After `git pull` the server runs the new code (hash 60f1655a64c8085c or
+  later); defaults are row-identical, so the tuned settings stay valid.
+  Runs made before the pull must be checked with the code that made them
+  (commit 0da8f49, code a1be0f1e34704d16).
+- Open choices for the user (do not choose for them): (1) run the life
+  ARL screen; (2) adopt `fl.min_full_step: 5` and the lower eligibility
+  line as shared settings before screen C (needs a re-tune or a disclosed
+  change); (3) report whole-curve measures (area, spend to an accuracy)
+  next to or instead of the end points; (4) whether the life setting
+  becomes the thesis's main setting or a second reported world.
+- Confirmation report already shows area, spend-to-accuracy, dips and
+  lowest late accuracy (descriptive; scripts/prespec_rl2.py).
+- Worktree for runs here: scratchpad/wt_r5 (detached; move it to HEAD
+  before each run; never edit src/afl while it runs).

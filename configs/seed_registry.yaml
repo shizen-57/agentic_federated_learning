@@ -13,7 +13,8 @@ dev: [210, 299]           # development, tuning and ablation (RL2 plan):
                           #   290-292 predictor stress test, 293-299 spare; the matched
                           #   tuning of the comparators reuses M7's 220-239 (same worlds)
 dev2: [400, 599]          # second development block (review 5, 2026-11-09): 400-402 pilot
-                          #   (docs/REVIEW_5.md), 403-409 spare for small checks,
-                          #   410-599 for the next method iteration's screens
+                          #   (docs/REVIEW_5.md), 403-405 predictor check, 406-409 spare,
+                          #   410-429 ARL screen in the life setting
+                          #   (configs/rl2_arl_screen_life.yaml), 430-599 free
 practice: [1000, 1999]    # pre-training episodes only; never evaluated
 confirmation: [300, 399]  # reserved, unrun; only with a frozen manifest

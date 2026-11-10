@@ -300,7 +300,7 @@ decision; the old world stays as a reported setting either way.
 | P2 | done (6.3): the ceiling is close; heavier jobs lose even with perfect knowledge in the current world |
 | P4 | done (6.4): step-scaled MimiC does not help; the lower eligibility line helps a little |
 | 3.7 | found during the pilot; fix built (`fl.min_full_step`); second pilot done (6.5): with 5, a third to a half fewer dips and no loss at the end points -- a partial fix |
-| 2.8 | built after the user's remark: devices that change over the day (`system.state_model: diurnal`); third pilot running (`configs/r5_life.yaml`) |
+| 2.8 | built after the user's remark: devices that change over the day (`system.state_model: diurnal`); third pilot done (6.6): the end-point ceiling stays close; a first hint for ARL-v4; 20-seed screen prepared (`configs/rl2_arl_screen_life.yaml`) |
 
 ## 6. Results of the checks
 
@@ -460,6 +460,52 @@ than 5 updates, scaled in proportion). For the control also 10 (the plain
   some remain. Three seeds: a direction, not a result.
 - If adopted, it must be a shared setting for every method (it is a server
   rule, not part of any scheduler).
+
+### 6.6 Third pilot -- the life setting (`results/r5_life`)
+
+24 runs, FEMNIST, seeds 400-402, evidence complete. Devices change over the
+day (2.8). Differences to the tuned always-Light control, paired by seed:
+
+| arm | eq5 | w10b | area | weak-client accuracy |
+|---|---|---|---|---|
+| tuned always-Light (reference) | 0.785 | 0.505 | 0.653 | 0.767 |
+| oracle: Light, no wasted job | +0.009 | +0.013 | +0.022 | 0.772 |
+| oracle: heaviest job that finishes | -0.003 | -0.002 | +0.027 | 0.789 |
+| oracle: contribution-aware picks | +0.006 | -0.005 | +0.025 | 0.791 |
+| our method, plain failure count | -0.013 | +0.007 | +0.001 | 0.767 |
+| our method, ARL-v3 | -0.008 | -0.009 | +0.006 | 0.781 |
+| our method, ARL-v4 | -0.002 | +0.002 | +0.006 | 0.788 |
+| fairness queues (tuned) | -0.009 | -0.004 | +0.023 | 0.774 |
+
+1. **The ceiling at the end points is close here too** (+0.009 eq5, +0.013
+   w10b for the best oracle). The task itself tops out near 0.79-0.80 with
+   this model and data, and the budget of the end points is large enough for
+   every sensible scheduler to get there. A more realistic simulator does
+   not change that. The room is in how fast a method gets there (area
+   +0.02 to +0.03).
+2. **A first hint for ARL-v4 against plain:** +0.011 eq5 (seeds +0.024,
+   +0.003, +0.007), +0.020 weak-client accuracy (+0.002, +0.040, +0.018),
+   +0.004 area, -0.005 w10b. In the current world ARL-v4 was the weakest
+   option in tuning; here it is the best of the three. Three seeds, runs
+   trained from scratch: a hint, not a result. The proper test is
+   `configs/rl2_arl_screen_life.yaml` (20 seeds, both datasets, the same
+   rule as the first ARL screen; written before any run).
+3. No real method beats the tuned always-Light control at the end points.
+
+### 6.7 What the three pilots say together
+
+- **The end points cannot show much, in any of the three worlds.** With this
+  model, data and budget, the best possible scheduler is 0.01-0.02 above a
+  tuned simple control in equal-spend accuracy.
+- **Methods differ in speed, not in where they end.** Measures of the whole
+  curve (area, spend to reach an accuracy) or a tighter budget would show
+  differences; the current end points mostly cannot.
+- **Two things are worth carrying forward:** the smaller step in few-update
+  rounds (6.5), as a shared setting, and the lower eligibility line (6.4).
+- **Two guesses are closed:** the workload-aware predictor and step-scaled
+  MimiC.
+- **ARL:** no effect in the current world, for reasons that are now
+  measured; a first hint in the life setting that needs the 20-seed screen.
 
 ## 7. How the numbers in this review were made
 

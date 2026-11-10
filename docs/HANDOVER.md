@@ -1,4 +1,4 @@
-# Handover: where the project stands (2026-10-30)
+# Handover: where the project stands (2026-11-10)
 
 For the next assistant (GPT) taking over or reviewing. Read this first, then
 `memory.md` (the living project notes), then the documents named below.
@@ -6,6 +6,10 @@ Everything here is on branch `claude/sleepy-faraday-8nd6j9` of
 `shizen-57/agentic_federated_learning` (open PR:
 https://github.com/shizen-57/agentic_federated_learning/pull/1), last commit
 `fd68c8d`. Simulator code hash: `a1be0f1e34704d16`.
+
+> **Update 2026-11-10 -- read `docs/REVIEW_5.md` first.** A line-by-line
+> review found why the method does not win, with measurements, and added
+> opt-in fixes and three small pilots. Short version in section 11 below.
 
 ## 1. The project in a few lines
 
@@ -303,3 +307,52 @@ Do not choose for the user.
   before giving the user new GPU steps. It caught a crash once.
 - **Dry runs:** each runner's `plan` command shows what would run;
   `rl2lib.smoke` runs 2 rounds per group.
+
+## 11. Review 5 in short (2026-11-09/10)
+
+Full text, numbers and status table: `docs/REVIEW_5.md`. Everything is
+development evidence; confirmation seeds and data are untouched.
+
+**What was found**
+- In the current simulator the job size is hardly a decision: Priority only
+  works on fast devices, weak and slow clients can only do Light, and the
+  cost-best job rule is 98% Light. Even an oracle that gives every client
+  the heaviest job it will finish loses at equal spend.
+- A quarter of the clients (slow devices) can hardly ever contribute.
+- About one job in three fails by a link drop that no job choice avoids.
+- The 0.5 eligibility line sits above the weak clients (true success 0.41),
+  so the safety layer rules out 22-28 online clients per round.
+- An oracle that never wastes a job gains only about +0.02 equal-spend
+  accuracy and +0.05 worst-10% accuracy over the tuned always-Light
+  control. No real method can win clearly at the end points; methods
+  differ in how fast they learn, not where they end.
+- Training is unstable: rounds with few updates often wreck the model.
+- ARL is not working, and the review did not make it work. The reasons are
+  measured. A first hint in ARL-v4's favour exists only in the new "life"
+  setting (3 seeds) and needs a proper screen.
+
+**What was built (all off by default; defaults reproduce old runs exactly)**
+- Simulator: `system.drop_model: exposure`, `system.job_overhead`
+  (+ `_time`), `system.energy_by_work`, `system.cap_latency`,
+  `system.state_model: diurnal` (devices change over the day).
+- Server: `fl.min_full_step` (smaller step in few-update rounds).
+- Others: `policy.predictor: v3`, `fl.aggregator: mimic_nova` (both checked
+  and not pursued), `reward.damage_metric: waste`, oracle policies
+  (`o_*_mimic`, analysis only).
+- Tools: `scripts/sim_truth.py` (ground truth of the simulator),
+  `scripts/predictor_check.py`, whole-curve and stability measures in the
+  reports, `describe` rule in `scripts/screen_rl2.py`, development seeds
+  400-599.
+- Results: `results/r5_pilot`, `results/r5_stability`, `results/r5_life`,
+  `results/r5_predictor`.
+
+**What is waiting for the user's decision**
+1. Run `configs/rl2_arl_screen_life.yaml` on the server (120 runs): does ARL
+   add value when devices change over the day?
+2. Whether to adopt the smaller step and the lower eligibility line as
+   shared settings before screen C.
+3. Whether to report whole-curve measures next to the end points.
+4. Whether the life setting becomes the main setting or a second world.
+
+The first ARL screen (section 6, session 2) is still open and still valid.
+Do not choose for the user.

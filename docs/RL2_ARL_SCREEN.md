@@ -93,6 +93,32 @@ Cost check first (`docs/RL2_COST_AND_CIFAR_CHECKS.md`), then this screen,
 then `python scripts/finalize_tuned.py arl --spec configs/rl2_arl_screen.yaml
 --out <run folder>`, then the sensitivity screen and screen C.
 
+## A second screen: the life setting (added 2026-11-10, before any run of it)
+
+`configs/rl2_arl_screen_life.yaml`. Review 5 (docs/REVIEW_5.md 2.1-2.8) found
+that the current simulator leaves ARL almost nothing to prevent: a weak
+client can only ever finish a Light job, most failures are coin flips, and
+the safety rule already forbids the too-heavy jobs ARL is meant to punish.
+The user's view is that ARL would matter in a simulator closer to real
+life. This screen tests that.
+
+- Setting: a device changes between a good and a poor state over the day
+  (`system.state_model: diurnal`), link drops grow with job time, every job
+  pays for the model download, energy follows the work, the server stops
+  waiting at the deadline. Values and ground truth: docs/SIMULATOR_MODEL.md.
+- Design and rule: exactly those of the first screen (plain / ARL-v3 /
+  ARL-v4, the tuned method with only the damage term changed, 20 seeds,
+  both datasets, two-sided sign-flip, Holm over 8 tests). Fresh seeds
+  410-429. Equal-spend budget 3,267 (the same number of Light rounds as
+  1,400 in the current world).
+- It does not feed `configs/rl2_tuned_final.json`; the first screen does.
+- Limits, stated now: the method's settings were tuned in the current world,
+  and the scheduler learns from scratch in each run, so only a clear effect
+  can show.
+- A pilot here on 3 seeds (docs/REVIEW_5.md 6.6) is a hint at most: ARL-v4
+  minus plain was +0.011 in equal-spend accuracy and +0.020 in weak-client
+  accuracy (3 of 3 seeds each), -0.005 in worst-10% accuracy.
+
 ## Outcome
 
 Not run yet. To run on the department GPU (after the cost check's file is

@@ -353,13 +353,14 @@ def main() -> int:
         return 2
     ok = set(valid)
     # A setting with another cost scale names its own equal-spend budget
-    # (spec `budgets: {setting: value}`); otherwise the standard 1,400.
+    # (spec `budgets: {setting: value}`, or `budget` for the whole spec);
+    # otherwise the standard 1,400.
     budgets = spec.get("budgets") or {}
     world = {gname(d, s, arm): s for d in spec["datasets"] for s in (spec.get("settings") or {None: {}})
              for arm in spec["arms"]}
     mg = rl2lib.measures_by_group(
         [j for j in jobs if os.path.join(j["raw"]["out"], j["raw"]["tag"] + ".csv") in ok],
-        (lambda g: budgets.get(world[g])) if budgets else None)
+        (lambda g: budgets.get(world[g], spec.get("budget"))) if budgets or spec.get("budget") else None)
     R = runs(spec, mg)
     L = [f"# {spec['title']}", "", f"Evidence complete: {n} runs, one code version.", "",
          "| dataset | setting | arm | eq5 | w10b | w10 (whole run) | acc10 | spend | starved |",
