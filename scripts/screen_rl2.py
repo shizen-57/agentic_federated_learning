@@ -281,8 +281,8 @@ def rule_describe(spec: dict, R: dict) -> tuple[list[str], dict]:
                   "cost-to-target: median over the seeds that reach it)", "",
                   "| arm | eq5 | diff | w10b | diff | auc | diff | "
                   + " | ".join(f"cost to {t:.2f}" for t in targets)
-                  + " | failed jobs | to weak clients | Light/Std/Prio % | spend |",
-                  "|---|---|---|---|---|---|---|" + "---|" * (len(targets) + 4)]
+                  + " | failed jobs | to weak clients | Light/Std/Prio % | spend | dips per run | lowest late |",
+                  "|---|---|---|---|---|---|---|" + "---|" * (len(targets) + 6)]
             for arm in spec["arms"]:
                 r = R[(d, s, arm)]
                 v = list(r.values())
@@ -297,12 +297,14 @@ def rule_describe(spec: dict, R: dict) -> tuple[list[str], dict]:
                          + " | ".join(("-" if c is None else f"{c:.0f}") + f" ({n}/{len(v)})"
                                       for c, n in zip(ct, reach))
                          + f" | {st.mean(m['fail'] for m in v):.0%} | {st.mean(m['weak_share'] for m in v):.0%} | "
-                         f"{modes[0]:.0f}/{modes[1]:.0f}/{modes[2]:.0f} | {st.mean(m['spend'] for m in v):.0f} |")
+                         f"{modes[0]:.0f}/{modes[1]:.0f}/{modes[2]:.0f} | {st.mean(m['spend'] for m in v):.0f} | "
+                         f"{st.mean(m['dips'] for m in v):.1f} | {st.mean(m['low_late'] for m in v):.3f} |")
                 out[f"{d}/{s or '-'}/{arm}"] = {
                     "eq5": st.mean(m["eq5"] for m in v), "w10b": st.mean(m["w10b"] for m in v),
                     "auc": st.mean(m["auc"] for m in v), "diff": diff, "per_seed": {
                         k: paired(r, base, k) for k in ("eq5", "w10b", "auc")} if arm != ref else {},
-                    "cost_to": dict(zip(map(str, targets), ct)), "spend": st.mean(m["spend"] for m in v)}
+                    "cost_to": dict(zip(map(str, targets), ct)), "spend": st.mean(m["spend"] for m in v),
+                    "dips": st.mean(m["dips"] for m in v), "low_late": st.mean(m["low_late"] for m in v)}
             L.append("")
     L.append("Exploratory: a few seeds, no test, no decision.")
     return L, {"kind": "describe", "reference": ref, "bounds": sorted(bounds), "arms": out}

@@ -38,6 +38,7 @@ BUDGET = 1400.0      # simulated cost units, fixed before the runs
 CHECKPOINTS = (500, 800, 1100, 1400, 1700, 2000)   # common budgets for the cost curves
 NAN = float("nan")
 TARGETS = (0.35, 0.40, 0.45, 0.50, 0.60, 0.70, 0.75)   # accuracy targets of efficiency()
+DIP = 0.08           # a one-round loss of fixed-set accuracy counted as a dip (efficiency())
 
 
 def _longest(flags: list[bool | None]) -> int:
@@ -84,8 +85,14 @@ def efficiency(rows: list[dict], budget: float, deadline: float = 1.0) -> dict:
                 hit[t] = (cum_c, k + 1, cum_t)
     for t, v in hit.items():
         cost_to[t], rounds_to[t], time_to[t] = v if v else (None, None, None)
+    # Stability (review 5, 3.7): sudden losses of accuracy from one round to
+    # the next after the early phase, and the lowest point of the last quarter.
+    late = len(acc) // 5
+    dips = sum(1 for k in range(max(late, 1), len(acc)) if acc[k] - acc[k - 1] < -DIP)
+    tail = acc[-max(len(acc) // 4, 1):]
     return {"auc": area / budget if budget > 0 else NAN, "cost_to": cost_to,
-            "rounds_to": rounds_to, "time_to": time_to}
+            "rounds_to": rounds_to, "time_to": time_to, "dips": dips,
+            "low_late": min(tail) if tail else NAN}
 
 
 def measures(path: str, budget: float | None = None) -> dict:

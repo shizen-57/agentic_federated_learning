@@ -176,6 +176,14 @@ class FLCfg:
     absence_counter: bool = False       # protocol fix: rounds_since_success counts every
                                         # round without a contribution, not only rounds
                                         # in which the client was invited and failed
+    min_full_step: int = 0              # review 5 (docs/REVIEW_5.md 3.7): when fewer than this
+                                        # many updates arrive in a round, the server's step is
+                                        # scaled by (updates received / this number). The mean of
+                                        # one or two clients' updates is a noisy direction on
+                                        # non-IID data; applied at full size it often wrecks the
+                                        # model for some rounds. 0 = off (original: full step
+                                        # whatever arrived). Not applied to DELTA's own weights
+                                        # or MIFA, which already scale by the whole population
     compress_upload: bool = False       # simulator fix: a mode's upload_frac is what the
                                         # client really sends -- its update is top-k
                                         # sparsified to that fraction (with error

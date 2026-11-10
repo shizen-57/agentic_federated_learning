@@ -857,6 +857,11 @@ class Experiment:
             delta = aggregate(agg, updates, weights, steps, success_probs=probs,
                               p_floor=self.cfg.fl.reweight_floor)
         if delta is not None:
+            m = self.cfg.fl.min_full_step
+            if m > 0 and len(updates) < m and agg_w is None and agg != "mifa":
+                # Few updates: a noisy direction, so a proportionally smaller
+                # step (MimiC's corrections above keep the unscaled mean).
+                delta = delta * (len(updates) / m)
             self.global_flat = self.global_flat + delta
         if self.hist_sketch is not None:
             for i, u in zip(recv_ids, updates):

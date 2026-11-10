@@ -299,7 +299,7 @@ def test_measures_accept_a_world_budget(tmp_path):
 def test_describe_rule_reports_arms_against_the_reference():
     import screen_rl2 as sc
     m = lambda e, w, a, c: {"eq5": e, "w10b": w, "auc": a, "cost_to": {0.7: c}, "fail": 0.4,  # noqa: E731
-                            "weak_share": 0.3, "modes": "80/15/5", "spend": 1500.0}
+                            "weak_share": 0.3, "modes": "80/15/5", "spend": 1500.0, "dips": 2, "low_late": 0.6}
     R = {("femnist", None, "light"): {s: m(0.78, 0.50, 0.60, 500.0) for s in (400, 401)},
          ("femnist", None, "o_work"): {s: m(0.80, 0.53, 0.66, 300.0 if s == 400 else None) for s in (400, 401)}}
     spec = {"datasets": {"femnist": "g"}, "arms": {"light": {}, "o_work": {}},
@@ -343,3 +343,38 @@ def test_sim_truth_and_predictor_check_reports_render():
     out = pc.render({"dataset": "femnist", "seeds": [403], "set": [], "rounds": 5,
                      "how": {h: {v: ver for v in pc.VERSIONS} for h in ("random", "rule")}})
     assert "| v3 | 0.200 | 0.050 | 0.50 / 0.40 |" in out and "| always Light | 33% / 33% / 33% | 50% | 0.70 | 0.60 |" in out
+
+
+# ------------------------------------------------- 3.7 few-update rounds
+
+def test_small_rounds_take_a_proportionally_smaller_step(tmp_path):
+    """fl.min_full_step: with fewer updates than the threshold the server
+    moves by (received / threshold) of the usual step; with enough updates,
+    or with the switch off, nothing changes."""
+    import torch
+    from afl.engine import Experiment
+
+    def one_round(m, k, agg="mimic"):
+        cfg = _cfg({"name": "oracle_light"}, rounds=1, aggregator=agg, clients_per_round=k,
+                   min_full_step=m, system={"norm_clip": 1e9})
+        cfg.out = str(tmp_path)
+        exp = Experiment(cfg)
+        start = exp.global_flat.clone()
+        row = exp.run(verbose=False)[0]
+        return exp.global_flat - start, row["n_success"]
+
+    for agg in ("mimic", "mimic_nova", "fedprox"):
+        full, n = one_round(0, 2, agg)
+        assert n == 2
+        half, _ = one_round(4, 2, agg)                     # 2 of the 4 needed: half a step
+        assert torch.allclose(half, full * 0.5, atol=1e-6)
+        same, _ = one_round(2, 2, agg)                     # enough updates: the full step
+        assert torch.equal(same, full)
+
+
+def test_dips_are_counted_after_the_early_phase():
+    import report_dev_screen as rep
+    acc = [0.5, 0.3, 0.5, 0.6, 0.7, 0.7, 0.55, 0.7, 0.72, 0.6]     # the first dip is in the early phase
+    rows = [{"accuracy_fixed": a, "cost": 1.0, "latency": 0.5} for a in acc]
+    e = rep.efficiency(rows, budget=100.0)
+    assert e["dips"] == 2 and e["low_late"] == pytest.approx(0.6)
