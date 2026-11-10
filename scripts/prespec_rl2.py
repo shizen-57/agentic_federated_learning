@@ -112,6 +112,10 @@ def _med(v):
     return st.median(v) if v else float("nan")
 
 
+# accuracy targets of the "spend to reach" columns (report_dev_screen.TARGETS)
+CURVE_TARGETS = {"femnist": (0.70, 0.75), "cifar": (0.40, 0.45), "cifar10": (0.40, 0.45)}
+
+
 def disclosures(frozen: dict, runs: dict) -> tuple[list[str], dict]:
     """What the endpoints alone do not show (gap review A5, B6, B10, B3-B5):
     actual spend and accuracy at common budgets, starvation, participation
@@ -147,6 +151,22 @@ def disclosures(frozen: dict, runs: dict) -> tuple[list[str], dict]:
                 cells.append(f"{_med([h[0] for h in hits]):.3f} ({_med([h[1] for h in hits]):.0f}) [{len(hits)}]"
                              if hits else "-")
             L.append(f"| {c} | " + " | ".join(cells) + " |")
+        # The whole learning curve and its stability (review 5, 2.7 and 3.7):
+        # the end points sit on the flat part of the curve.
+        targets = CURVE_TARGETS.get(d, (0.60, 0.70))
+        L += ["", "Whole learning curve and stability: area under the accuracy-spend curve up to the budget; "
+              "spend to first reach an accuracy (5-round mean) [seeds that reach it]; one-round losses of more "
+              f"than {rep.DIP} accuracy after the first fifth of the run; lowest accuracy in the last quarter:", "",
+              "| condition | area | " + " | ".join(f"spend to {t:.2f}" for t in targets)
+              + " | dips per run | lowest late |", "|---|---|" + "---|" * (len(targets) + 2)]
+        for c, r in sorted(main.items()):
+            v = list(r.values())
+            cells = []
+            for t in targets:
+                hits = [m["cost_to"][t] for m in v if m["cost_to"].get(t) is not None]
+                cells.append(f"{_med(hits):.0f} [{len(hits)}/{len(v)}]" if hits else f"- [0/{len(v)}]")
+            L.append(f"| {c} | {_med([m['auc'] for m in v]):.3f} | " + " | ".join(cells)
+                     + f" | {sum(m['dips'] for m in v) / len(v):.1f} | {_med([m['low_late'] for m in v]):.3f} |")
         L.append("")
     tuned = tuned_of(frozen)
     L += ["Pre-training cost per checkpoint (practice episodes only; not inside the 1,400 budget):", ""]

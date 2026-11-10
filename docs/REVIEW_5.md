@@ -22,6 +22,12 @@ win**, and three parts of the method work against its own goal:
    wants to protect (3.1).
 5. The success predictor does not know how much work a client has (3.2).
 6. The scheduler learns very little during one run (3.3).
+7. Training is unstable: a round in which only a few updates arrive often
+   wrecks the model (3.7). This hurts every method and blurs the end points.
+
+The pilot (6.3) puts a number on the first point: a scheduler that never
+wastes a job would gain at most about +0.02 in equal-spend accuracy over the
+tuned control. No real method can win clearly on that end point here.
 
 ## 2. Simulator weaknesses
 
@@ -130,6 +136,10 @@ is flat. They have little power to tell methods apart.
 
 ### 3.2 The success predictor is missing its most useful input
 
+*Checked (6.1): adding the input does not help on FEMNIST and helps only a
+little on CIFAR-10. The gap is real, but it is not what holds the method
+back.*
+
 The predictor sees device speed, bandwidth, battery and history, plus which
 mode. It does not see the client's amount of data, and it has no "this mode
 on this device" term. But run time = epochs x data / speed. So the shared
@@ -155,6 +165,9 @@ steady penalty. A hard cap at the target held on every seed.
 
 ### 3.5 MimiC mixes updates of different length
 
+*Checked (6.4): scaling the updates by their length does not help; it is
+slightly worse. Not pursued.*
+
 MimiC averages the received updates and keeps one correction per client.
 With mixed modes an update is 1, 2 or 4 epochs long (and clients differ in
 data), so updates of very different size are averaged without scaling, and a
@@ -167,6 +180,36 @@ ARL', v2, v3 and v4 all failed their tests or were not selected. Given 2.1
 to 2.5, this is expected: the reward term cannot help where the mode is not a
 real choice, weak clients are gated out before the reward matters, and the
 endpoints sit on the flat part of the curve.
+
+### 3.7 Training is unstable: a round with few updates often wrecks the model
+
+Found while reading the pilot runs, then checked on the saved tuning runs.
+In every method and with every aggregation, accuracy often falls sharply
+from one round to the next. Rounds 41-200, share of rounds that lose more
+than 0.05 accuracy, by how many updates arrived in that round:
+
+| runs | 1 update | 2 | 3 | 4 | 5 | 6 or more |
+|---|---|---|---|---|---|---|
+| tuned always-Light + MimiC (15 seeds) | 42% | 19% | 17% | 9% | 5% | 2% |
+| always-Light + FedProx (M7 reference, 15 seeds) | 12% | 25% | 3% | 11% | 7% | 2% |
+| tuned REFL (15 seeds; 0 fresh updates: 34%) | 12% | 9% | 4% | 3% | 3% | 2% |
+| our method c34 (cost check, 5 seeds) | - | 18% | 19% | 7% | 1% | 2% |
+
+- For the tuned control the mean change of accuracy in a round is -0.050
+  with one update, -0.039 with two, -0.022 with three, -0.010 with four,
+  0.000 with five and +0.008 with six or more. **Rounds with four or fewer
+  updates (19% of all rounds) make the model worse on average.**
+- A run has about 3 drops of more than 0.08 after round 40. One pilot run
+  lost 0.66 in a single round (accuracy 0.05) and needed 30 rounds to
+  recover.
+- Cause: the server moves by the *mean* of whatever arrived, at full size.
+  With one or two clients' updates on non-IID data, that mean is one
+  writer's direction.
+- Why it matters twice: it costs accuracy, and it makes the end points
+  noisy (a dip inside the last rounds within the budget costs a seed 0.1 or
+  more). Averaging the last 5 or 10 rounds (done since M7) only hides it.
+- Fix (opt-in): `fl.min_full_step = m` -- with fewer than m updates the step
+  is scaled by updates / m. Tested in the second pilot (6.5).
 
 ## 4. Plan
 
@@ -210,7 +253,9 @@ decision; the old world stays as a reported setting either way.
 | F1-F7 | done (commit 7d637a8; 23 new tests; default runs row-identical on 7 conditions) |
 | P1 | done (2.1) |
 | P3 | done (6.1, 6.2): predictor v3 does not matter; the job-rule table confirms 2.5 |
-| P2, P4 | running (`configs/r5_pilot.yaml`, 60 runs) |
+| P2 | done (6.3): the ceiling is close; heavier jobs lose even with perfect knowledge in the current world |
+| P4 | done (6.4): step-scaled MimiC does not help; the lower eligibility line helps a little |
+| 3.7 | found during the pilot: few-update rounds wreck the model; fix built (`fl.min_full_step`); second pilot running (`configs/r5_stability.yaml`) |
 
 ## 6. Results of the checks
 
@@ -268,6 +313,80 @@ the round's true outcome is looked up. FEMNIST, predictor v2:
   cost-best rule is 98% Light in the current world (0.67 against 0.68 for
   always Light), and delivers 30% more training per cost than always Light
   in the more realistic one (0.43 against 0.33).
+
+### 6.3 P2 -- head-room: how much could any scheduler gain? (`results/r5_pilot`)
+
+60 runs, FEMNIST, seeds 400-402, evidence complete. The reference is the
+tuned always-Light control. Oracles see each job's true outcome; they are
+upper bounds, not methods. Differences are paired by seed.
+
+Current world (budget 1,400):
+
+| arm | eq5 | w10b | area under accuracy-spend curve | cost to reach 0.75 | failed jobs |
+|---|---|---|---|---|---|
+| tuned always-Light (reference) | 0.774 | 0.490 | 0.648 | 893 | 43% |
+| oracle: Light, no wasted job | +0.022 | +0.049 | +0.030 | 781 | 0% |
+| oracle: + contribution-aware picks | +0.025 | +0.047 | +0.031 | 695 | 0% |
+| oracle: + most equal contributions | +0.011 | +0.041 | +0.029 | 701 | 0% |
+| oracle: heaviest job that finishes | -0.017 | -0.009 | +0.001 | 1,006 | 0% |
+
+More realistic world (budget 3,267):
+
+| arm | eq5 | w10b | area | cost to reach 0.75 | failed jobs |
+|---|---|---|---|---|---|
+| tuned always-Light (reference) | 0.782 | 0.502 | 0.636 | 2,242 | 34% |
+| oracle: Light, no wasted job | +0.008 | +0.015 | +0.039 | 1,531 | 0% |
+| oracle: + contribution-aware picks | +0.015 | +0.011 | +0.045 | 1,554 | 0% |
+| oracle: + most equal contributions | +0.006 | +0.021 | +0.038 | 1,635 | 0% |
+| oracle: heaviest job that finishes | -0.005 | +0.001 | +0.043 | 1,869 | 0% |
+
+What this says:
+
+1. **The ceiling is close.** A scheduler that never wastes a single job
+   gains at most about +0.02 in equal-spend accuracy (eq5) and +0.05 in
+   worst-10% accuracy (w10b) over the tuned control. A real scheduler cannot
+   see the future, so it can only get part of that. The spread between seeds
+   is about 0.02. So on eq5 a clear win is close to impossible in this test
+   bed, whatever the method. w10b has more room.
+2. **Heavier jobs lose at equal spend even with perfect knowledge** in the
+   current world (-0.017 eq5 for 2 times the spend). This is the strongest
+   evidence for 2.5: the mode half of the thesis's decision cannot pay off
+   here.
+3. **Heavier jobs help early and hurt late.** In the more realistic world
+   the heavy-job oracle reaches 0.70 sooner (1,052 against 1,136 for the
+   Light oracle) but 0.75 later (1,869 against 1,531). More local epochs
+   mean faster early progress and more drift near the end. The best job size
+   changes during training -- something a fixed rule cannot use and a
+   learned scheduler could.
+4. **The whole curve has room.** Area +0.03 to +0.045, cost to reach 0.75
+   down by 13-31%. A measure of the whole curve can tell methods apart; the
+   end points hardly can.
+5. Contribution-aware picking (coverage) is the best oracle in both worlds,
+   but only by a little over random picking among clients that succeed.
+
+### 6.4 P4 and the method variants (same pilot)
+
+Differences to the tuned always-Light control (eq5 / w10b / area):
+
+| arm | current world | more realistic world |
+|---|---|---|
+| our method c34 (as tuned in M7) | -0.010 / -0.004 / -0.011 | -0.017 / -0.020 / +0.012 |
+| c34 + predictor v3 | -0.022 / -0.011 / -0.011 | -0.084 / -0.074 / +0.018 (one run collapsed, see 3.7) |
+| c34 + v3 + eligibility line 0.4 | -0.008 / +0.002 / -0.013 | 0.000 / +0.016 / +0.022 |
+| always-Light with step-scaled MimiC | -0.014 / -0.001 / -0.011 | -0.021 / -0.013 / -0.014 |
+| c34 with step-scaled MimiC | -0.015 / -0.001 / -0.029 | -0.011 / +0.004 / +0.004 |
+
+- **Step-scaled MimiC (3.5) does not help.** It is worse for the control in
+  both worlds. The concern was real on paper and does not matter in
+  practice. Not pursued.
+- **Predictor v3 alone does not help** (agrees with 6.1).
+- **The lower eligibility line helps a little** (c34 + v3 + line 0.4 against
+  c34 + v3: +0.014 eq5 and +0.013 w10b in the current world). It brings the
+  method level with the control, not above it.
+- Our method as tuned stays slightly below the tuned control on fresh
+  seeds, as the tuning results suggested.
+
+Three seeds: these are directions, not results.
 
 ## 7. How the numbers in this review were made
 
