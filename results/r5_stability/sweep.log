@@ -1,0 +1,35 @@
+33 runs selected, 0 already done, 33 to run with 4 job(s)
+[1/33] femnist_c34/ppo_full_mimic_s401 347s
+[2/33] femnist_c34/ppo_full_mimic_s402 353s
+[3/33] femnist_c34_d5/ppo_full_mimic_s400 379s
+[4/33] femnist_c34/ppo_full_mimic_s400 386s
+[5/33] femnist_c34_d5/ppo_full_mimic_s401 248s
+[6/33] femnist_c34_d5/ppo_full_mimic_s402 250s
+[7/33] femnist_c34_x/ppo_full_mimic_s400 271s
+[8/33] femnist_c34_x/ppo_full_mimic_s401 266s
+[9/33] femnist_c34_x/ppo_full_mimic_s402 261s
+[10/33] femnist_c34_x_d5/ppo_full_mimic_s400 269s
+[11/33] femnist_c34_x_d5/ppo_full_mimic_s402 253s
+[12/33] femnist_c34_x_d5/ppo_full_mimic_s401 263s
+[13/33] femnist_fairq/b_fairq_ew_mimic_s401 252s
+[14/33] femnist_fairq/b_fairq_ew_mimic_s400 275s
+[15/33] femnist_fairq/b_fairq_ew_mimic_s402 256s
+[16/33] femnist_fairq_d5/b_fairq_ew_mimic_s400 272s
+[17/33] femnist_fairq_d5/b_fairq_ew_mimic_s401 255s
+[18/33] femnist_fairq_d5/b_fairq_ew_mimic_s402 252s
+[19/33] femnist_light/rl_light_mimic_s400 243s
+[20/33] femnist_light/rl_light_mimic_s401 227s
+[21/33] femnist_light/rl_light_mimic_s402 356s
+[22/33] femnist_light_d10/rl_light_mimic_s401 378s
+[23/33] femnist_light_d10/rl_light_mimic_s400 399s
+[24/33] femnist_light_d10/rl_light_mimic_s402 380s
+[25/33] femnist_light_d5/rl_light_mimic_s400 317s
+[26/33] femnist_light_d5/rl_light_mimic_s401 282s
+[27/33] femnist_light_d5/rl_light_mimic_s402 285s
+[28/33] femnist_refl/b_refl_ew_s400 326s
+[29/33] femnist_refl/b_refl_ew_s401 254s
+[30/33] femnist_refl/b_refl_ew_s402 255s
+[31/33] femnist_refl_d5/b_refl_ew_s400 279s
+[32/33] femnist_refl_d5/b_refl_ew_s401 253s
+[33/33] femnist_refl_d5/b_refl_ew_s402 252s
+finished 33, failed 0, wall 2560s

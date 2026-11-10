@@ -299,7 +299,8 @@ decision; the old world stays as a reported setting either way.
 | P3 | done (6.1, 6.2): predictor v3 does not matter; the job-rule table confirms 2.5 |
 | P2 | done (6.3): the ceiling is close; heavier jobs lose even with perfect knowledge in the current world |
 | P4 | done (6.4): step-scaled MimiC does not help; the lower eligibility line helps a little |
-| 3.7 | found during the pilot: few-update rounds wreck the model; fix built (`fl.min_full_step`); second pilot running (`configs/r5_stability.yaml`) |
+| 3.7 | found during the pilot; fix built (`fl.min_full_step`); second pilot done (6.5): with 5, a third to a half fewer dips and no loss at the end points -- a partial fix |
+| 2.8 | built after the user's remark: devices that change over the day (`system.state_model: diurnal`); third pilot running (`configs/r5_life.yaml`) |
 
 ## 6. Results of the checks
 
@@ -431,6 +432,34 @@ Differences to the tuned always-Light control (eq5 / w10b / area):
   seeds, as the tuning results suggested.
 
 Three seeds: these are directions, not results.
+
+### 6.5 Second pilot -- a smaller step when few updates arrive (`results/r5_stability`)
+
+33 runs, FEMNIST, current world, seeds 400-402, evidence complete. Each
+method as tuned, and with `fl.min_full_step = 5` (half a step with fewer
+than 5 updates, scaled in proportion). For the control also 10 (the plain
+"a missing update counts as zero" rule).
+
+| method | dips per run: as tuned -> with 5 | eq5 change | w10b change | area change |
+|---|---|---|---|---|
+| tuned always-Light | 6.3 -> 4.0 | +0.002 | +0.020 | -0.005 |
+| our method c34 | 5.7 -> 3.0 | +0.011 | 0.000 | -0.004 |
+| c34 + v3 + line 0.4 | 6.0 -> 4.7 | -0.001 | +0.001 | -0.002 |
+| REFL | 2.3 -> 1.0 | +0.001 | -0.006 | -0.007 |
+| fairness queues | 4.7 -> 3.0 | +0.003 | -0.002 | +0.002 |
+| always-Light with 10 | 6.3 -> 0.7 | -0.026 | -0.021 | -0.055 |
+
+(A dip = a one-round loss of more than 0.08 accuracy after round 40.)
+
+- **With 5: about a third to a half fewer dips for every method, and no
+  loss at the end points.** Learning is a little slower early (area -0.002
+  to -0.007).
+- **With 10: almost no dips, but learning is clearly slower** (-0.026 eq5).
+  Too strong.
+- It is a partial fix. Dips also happen in rounds with many updates, so
+  some remain. Three seeds: a direction, not a result.
+- If adopted, it must be a shared setting for every method (it is a server
+  rule, not part of any scheduler).
 
 ## 7. How the numbers in this review were made
 

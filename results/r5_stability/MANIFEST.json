@@ -1,0 +1,31 @@
+{
+  "created": "2026-11-10 02:59:20 UTC",
+  "code_hash": "a711e8f9b5fd996a",
+  "git_commit": "b1a8f4dde1a3668c055441691eca6018d718edba",
+  "git_dirty": false,
+  "inputs": {
+    "spec": "933d1dbe34c7671add838ab165fe341cd5f62283fb753432e25941c05a93c1c3",
+    "source": "f6620458a6d390998d3de29eee969f13d0bdba3a7fcf72dc624c84fe1a89dfd8",
+    "tuned": "b8fe36d207e5ee4a8c5855d3352f2222dca590ddb6833fa3d2b6f64a09bb348a",
+    "tuned settings of light": "687c55dc4af022201b4091c124a434633c5eaeead6ca821ec6720fc5d93f8975",
+    "tuned settings of light_d5": "687c55dc4af022201b4091c124a434633c5eaeead6ca821ec6720fc5d93f8975",
+    "tuned settings of light_d10": "687c55dc4af022201b4091c124a434633c5eaeead6ca821ec6720fc5d93f8975",
+    "tuned settings of refl": "9f731a35a42e7c191c4207ac96335c58d533a24e3e964687cb2c98979b47e783",
+    "tuned settings of refl_d5": "9f731a35a42e7c191c4207ac96335c58d533a24e3e964687cb2c98979b47e783",
+    "tuned settings of fairq": "c19e5dd7e6cc183b5a0d5ed69904989f40366d8ac1c8aba3369ce679efc44764",
+    "tuned settings of fairq_d5": "c19e5dd7e6cc183b5a0d5ed69904989f40366d8ac1c8aba3369ce679efc44764"
+  },
+  "generated": "0611528c6bb10876a6d4dd9b7f3dd538af7392da0febac8a4ac55ed2fa3e3ebf",
+  "overrides_vs_source": [
+    "fl.rounds",
+    "diag.enabled",
+    "out",
+    "data.split"
+  ],
+  "python": "3.13.17",
+  "torch": "2.14.1+cpu",
+  "numpy": "2.5.3",
+  "cuda": null,
+  "device": "cpu",
+  "title": "Review 5 stability pilot (smaller server step in few-update rounds; exploratory)"
+}
